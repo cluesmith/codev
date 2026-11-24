@@ -10,7 +10,8 @@
  * - **welcome content**: every `viewsWelcome` entry of the source views.
  *
  * A fourth kind records the Cockpit's own rows that no source view has (the Decisions entry): what
- * a click runs, and that no menu entry attaches to them.
+ * a click runs, and that no menu entry attaches to them. A fifth records the Cockpit's own menu
+ * entries that no source view has (*Arrange Cockpit*), each with what it is for.
  *
  * Each record says where the affordance went: `same` (the same command, group and `when` at the
  * Cockpit's own view, matching the given `viewItem` clause), `relocated` (to named Cockpit menu
@@ -258,4 +259,20 @@ export const COCKPIT_ROW_RECORDS: readonly CockpitRowRecord[] = [
   { row: "this window's Decisions entry", contextValue: 'cockpit-decisions', command: 'codev.openDecisions' },
   // Navigate-only, like another workspace's architects and builders: it opens that workspace's window.
   { row: "another workspace's Decisions entry", contextValue: 'cockpit-remote-decisions', command: 'codev.tower.openWorkspace' },
+];
+
+// ── The Cockpit's own menu entries (no source-view counterpart) ─────────────
+
+/** A Cockpit menu entry that no source view has, and what it is for. */
+export interface CockpitOwnEntryRecord {
+  entry: MenuEntry;
+  purpose: string;
+}
+
+export const COCKPIT_OWN_ENTRY_RECORDS: readonly CockpitOwnEntryRecord[] = [
+  {
+    entry: title('codev.cockpit.arrange', `${VIEW} && !codev.isBuilderWorktree && codev.hasWorkspace`, 'navigation@0'),
+    purpose: 'Arrange Cockpit: the main architect | (Work over Decisions). Hidden where the split is not offered '
+      + '(a builder-worktree or no-workspace window); its palette command says why there.',
+  },
 ];

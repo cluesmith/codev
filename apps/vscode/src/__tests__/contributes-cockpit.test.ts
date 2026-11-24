@@ -143,3 +143,45 @@ describe('the Work panel (Phase 8)', () => {
     expect(wiring).not.toMatch(/getWorkspacePath\(\)/);
   });
 });
+
+describe('Arrange Cockpit (Phase 9)', () => {
+  const commands = PKG.contributes.commands as Array<{ command: string; title: string; icon?: string }>;
+  const configuration = PKG.contributes.configuration as { properties: Record<string, { type: string; default: unknown; description: string }> };
+
+  it('declares Codev: Arrange Cockpit, and keeps it in the command palette everywhere', () => {
+    expect(commands.find(c => c.command === 'codev.cockpit.arrange')).toEqual({
+      command: 'codev.cockpit.arrange', title: 'Codev: Arrange Cockpit', icon: '$(editor-layout)',
+    });
+    expect((menus.commandPalette ?? []).some(m => m.command === 'codev.cockpit.arrange')).toBe(false);
+  });
+
+  it("puts it first on the Cockpit's title bar, hidden in builder-worktree and no-workspace windows", () => {
+    expect(menus['view/title'].find(m => m.command === 'codev.cockpit.arrange')).toEqual({
+      command: 'codev.cockpit.arrange',
+      when: 'view == codev.cockpit && !codev.isBuilderWorktree && codev.hasWorkspace',
+      group: 'navigation@0',
+    });
+  });
+
+  it('declares codev.cockpit.autoArrange, a boolean that defaults on', () => {
+    expect(configuration.properties['codev.cockpit.autoArrange']).toMatchObject({ type: 'boolean', default: true });
+  });
+
+  it('registers the command straight onto the arranger, so a manual arrange never shows the first-auto-arrange notice', () => {
+    expect(EXT_SRC).toMatch(/regCli\('codev\.cockpit\.arrange', \(\) => cockpitArranger\.arrange\(\)\)/);
+  });
+
+  it("opens the architect with the editor-area override, and offers arranging where Work and Decisions are", () => {
+    const wiring = EXT_SRC.slice(EXT_SRC.indexOf('const arrangeUnavailableReason'), EXT_SRC.indexOf('context.subscriptions.push(cockpitAutoArrange)'));
+    expect(wiring).toMatch(/workspaceViewUnavailableReason\('Arrange Cockpit', \{/);
+    expect(wiring).toMatch(/workspacePath: detectWorkspacePath\(\),/);
+    expect(wiring).toMatch(/terminalManager\?\.openArchitect\(terminalId, name, true, 'editor'\)/);
+    expect(wiring).toMatch(/\.update\('cockpit\.autoArrange', false, vscode\.ConfigurationTarget\.Global\)/);
+  });
+
+  it("releases the first-show arrange once the window's first connection attempt has finished", () => {
+    const tail = EXT_SRC.slice(EXT_SRC.indexOf('if (policy.initializeConnection) {\n\t\ttry {'));
+    expect(tail).toMatch(/await connectionManager\.initialize\(\);\n\t\t\} finally \{[\s\S]*?cockpitAutoArrange\.ready\(\);/);
+    expect(tail).toMatch(/\} else \{\n\t\tcockpitAutoArrange\.ready\(\);/);
+  });
+});

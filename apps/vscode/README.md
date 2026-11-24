@@ -60,7 +60,7 @@ Dormant (2)
 - **This window's workspace acts here.** Its builder rows carry the Agents view's full right-click menu and the inline Approve Gate. A sibling architect carries *Remove Architect*; `main` never does. The workspace row carries inline *Spawn Builder*, *New Shell* and *Add Architect*. Its right-click menu adds *Open Web Interface*, *Start Dev* or *Stop Dev*, and *Open Dev URL…* when `worktree.devUrls` is set.
 - **Other workspaces navigate.** Clicking another workspace's architect or builder opens that workspace's window. Their rows carry no actions that would act from this window. Their workspace rows keep the Tower view's inline *Open* and *Deactivate*.
 - **In a builder-worktree window**, the parent workspace's row carries only *Open Web Interface*, the worktree's *Start Dev* / *Stop Dev* and *Open Dev URL…*. It has no spawn, shell or architect actions.
-- **Title bar:** Refresh, plus the same accordion and tree-vs-list toggles as Agents.
+- **Title bar:** *Arrange Cockpit* (below), Refresh, plus the same accordion and tree-vs-list toggles as Agents.
 - **Following the active file:** a builder diff in the editor reveals its file row in the Cockpit, expanding the workspace, architect and builder rows above it.
 - **Agent cycling** (`ctrl+alt+n` / `ctrl+alt+p`) follows the Cockpit's order while the Cockpit is visible, Agents is not, and the Cockpit shows this window's agents. Otherwise it keeps the Agents order, as before (for example in a builder-worktree window).
 - **Before the first load** the Tower row holds a state row: *Connecting to Tower…*, then *Not connected to Tower* (click to reconnect) if the attempt fails. Once loaded, the tree keeps its last content through a Tower drop and refreshes when Tower returns.
@@ -77,6 +77,27 @@ The dashboard's **Work** and **Decisions** views open in the editor area, for th
 - While Tower is not connected, each panel keeps what it last showed, under a notice, and recovers when Tower returns.
 - Neither is offered in a builder-worktree window or a window with no Codev workspace. There, the commands say why.
 - Left out from the dashboard: *Open Files & Shells* (VS Code's editor tabs and terminal list do this), the *Files* panel (the Explorer does) and the tip of the day.
+
+## Arrange Cockpit
+
+**Codev: Arrange Cockpit** (the Command Palette, or the layout button on the Cockpit's title bar) arranges the editor area around the workspace's `main` architect:
+
+```
++------------------+------------------+
+| main architect   | Work             |
+| (terminal)       |                  |
+|                  +------------------+
+|                  | Decisions        |
+|                  |                  |
++------------------+------------------+
+```
+
+- Each of the three is the active tab in its group, and the architect has focus.
+- **Nothing you have open is closed.** Your editors stay open, unsaved and untitled ones included, though some may move to another group: editors from groups beyond the three end up behind Decisions. An architect terminal, Work or Decisions panel that is already open is the same one, moved, never reopened, so a Decisions draft survives.
+- **The architect is always `main`.** If `main` is not running you get the usual warning, no other architect is opened, and Work and Decisions are still arranged. The architect goes to the left editor group even when `codev.terminalPosition` is `panel`. Every other way of opening a terminal keeps honouring that setting.
+- **It arranges by itself once per window.** The first time the Cockpit is shown in a window, including a window reopened with the Cockpit already showing, the editor area is arranged. Showing the Cockpit again leaves your layout alone, and a window reload starts over. The first time this happens for you, a notice says so and offers *Don't arrange automatically*, which turns `codev.cockpit.autoArrange` off. The command arranges at any time and is safe to repeat: an arranged window does not change.
+- **Not in a builder-worktree window or a window with no Codev workspace.** There it never arranges by itself and the title-bar button is hidden. The command says why it does nothing.
+- **Builder terminals and issue previews** that open in the second editor group land in the Work group while the split is in place. Where they should go instead is #1671's to settle.
 
 ## Builder actions (right-click)
 
@@ -216,6 +237,7 @@ All actions are also reachable via the Command Palette (`Cmd/Ctrl+Shift+P`):
 | Codev: Connect / Disconnect Tunnel | Cloud tunnel for remote access |
 | Codev: Cron Tasks | List, run, enable, or disable cron tasks |
 | Codev: Add Review Comment | Insert a `REVIEW(@architect):` comment at cursor |
+| Codev: Arrange Cockpit | The `main` architect on the left, Work over Decisions on the right (see **Arrange Cockpit**) |
 
 Right-click actions on builders and workspace rows are listed in the **Builder actions (right-click)** section above.
 
@@ -245,7 +267,8 @@ When a builder reaches a human-approval gate, a toast surfaces it with the issue
 | `codev.towerHost` | `localhost` | Tower server host |
 | `codev.towerPort` | `4100` | Tower server port |
 | `codev.workspacePath` | auto-detect | Override workspace path for Tower matching |
-| `codev.terminalPosition` | `editor` | Terminal placement (`editor` or `panel`) |
+| `codev.terminalPosition` | `editor` | Terminal placement (`editor` or `panel`). *Arrange Cockpit* puts the `main` architect in the left editor group either way |
+| `codev.cockpit.autoArrange` | `true` | Arrange the editor area the first time the Codev Cockpit is shown in a window. When off, only *Codev: Arrange Cockpit* arranges it |
 | `codev.autoConnect` | `true` | Connect to Tower on activation |
 | `codev.autoStartTower` | `true` | Auto-start Tower if not running |
 | `codev.autoOpenBuilderTerminal` | `notify` | Behavior on builder-spawn events (`off` / `notify` / `auto`) |

@@ -16,6 +16,9 @@ import { issueRef, roleShortId } from './issue-id.js';
  */
 const DEFAULT_MAX_TERMINALS = 25;
 
+/** Where a terminal opens: the values of `codev.terminalPosition`. */
+export type TerminalPosition = 'editor' | 'panel';
+
 interface ManagedTerminal {
   terminal: vscode.Terminal;
   pty: CodevPseudoterminal;
@@ -119,8 +122,13 @@ export class TerminalManager {
    * scenarios where Tower issues a fresh session id for the same architect
    * name. Without this check, the VSCode sidebar click would refocus a dead
    * terminal instead of attaching to the live one.
+   *
+   * `position` overrides `codev.terminalPosition` for a terminal this call
+   * opens. Only *Arrange Cockpit* (Spec 1963) passes it, to open the architect
+   * in the editor area; every other path honours the setting. A terminal that
+   * is already open stays where it is.
    */
-  async openArchitect(terminalId: string, architectName: string = 'main', focus = false): Promise<void> {
+  async openArchitect(terminalId: string, architectName: string = 'main', focus = false, position?: TerminalPosition): Promise<void> {
     // Invariant (#1497): `architectName` MUST be the terminal's true occupant.
     // It is an address twice over here — the cache `key` below and the
     // `injectArchitectText` lookup — so a caller passing a name that differs
@@ -140,7 +148,15 @@ export class TerminalManager {
       this.terminals.delete(key);
     }
     const label = architectName === 'main' ? 'Codev: Architect' : `Codev: Architect (${architectName})`;
-    await this.openTerminal(terminalId, 'architect', label, key, focus);
+    await this.openTerminal(terminalId, 'architect', label, key, focus, position);
+  }
+
+  /**
+   * The terminal this window has open for the named architect, if any: the one `openArchitect`
+   * cached under `architect:<name>`. *Arrange Cockpit* (Spec 1963) moves it to the left editor group.
+   */
+  getArchitectTerminal(architectName: string): vscode.Terminal | undefined {
+    return this.terminals.get(`architect:${architectName}`)?.terminal;
   }
 
   /**
@@ -512,6 +528,7 @@ export class TerminalManager {
     name: string,
     key?: string,
     focus = false,
+    positionOverride?: TerminalPosition,
   ): Promise<void> {
     const maxTerminals = vscode.workspace
       .getConfiguration('codev')
@@ -531,7 +548,8 @@ export class TerminalManager {
 
     const authKey = await this.getAuthKey();
     const pty = new CodevPseudoterminal(wsUrl, authKey, this.outputChannel, () => this.probeTowerHealth());
-    const position = vscode.workspace.getConfiguration('codev').get<string>('terminalPosition', 'editor');
+    const position = positionOverride
+      ?? vscode.workspace.getConfiguration('codev').get<TerminalPosition>('terminalPosition', 'editor');
 
     // Dev processes are long-running background logs — always the bottom panel,
     // regardless of the `codev.terminalPosition` setting (which governs the

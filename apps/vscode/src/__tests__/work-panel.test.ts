@@ -32,6 +32,7 @@ class FakeEmitter<T> {
 class FakePanel {
   visible = true;
   disposed = false;
+  viewColumn: number | undefined = undefined;
   readonly posted: unknown[] = [];
   readonly received = new FakeEmitter<unknown>();
   readonly viewState = new FakeEmitter<void>();
@@ -75,12 +76,20 @@ const createWebviewPanel = vi.fn((_viewType: string, _title: string, _column: nu
 });
 const showInformationMessage = vi.fn();
 const openExternal = vi.fn(async (_uri: unknown) => true);
+class TabInputWebview { constructor(readonly viewType: string) {} }
+class TabInputText { constructor(readonly uri: string) {} }
+/** The editor area's tabs, by group; empty unless a test puts a restored tab there. */
+const tabGroups = {
+  all: [] as Array<{ viewColumn: number; tabs: unknown[] }>,
+  close: vi.fn(async (_tab: unknown) => true),
+};
 
 vi.mock('vscode', () => ({
   EventEmitter: class extends FakeEmitter<void> { dispose() {} },
-  window: { createWebviewPanel, showInformationMessage },
+  window: { createWebviewPanel, showInformationMessage, tabGroups },
   env: { openExternal },
   ViewColumn: { Active: -1 },
+  TabInputWebview,
   Uri: {
     parse: (value: string) => ({ toString: () => value }),
     joinPath: (base: { path: string }, ...parts: string[]) => ({ path: [base.path, ...parts].join('/') }),
@@ -160,6 +169,8 @@ function setup(opts: { reason?: string | null; data?: OverviewData | null; state
 
 beforeEach(() => {
   panels.length = 0;
+  tabGroups.all = [];
+  tabGroups.close.mockClear();
   createWebviewPanel.mockClear();
   showInformationMessage.mockClear();
   openExternal.mockClear();
@@ -188,6 +199,19 @@ describe('opening the panel', () => {
     manager.show();
     expect(createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(panels[0].reveal).toHaveBeenCalledTimes(1);
+    expect(panels[0].webview.html).toBe(html);
+  });
+
+  it('with a placement (Arrange Cockpit), opens the panel in that group, or moves the open one there, without taking focus', () => {
+    const { manager } = setup();
+    manager.show({ viewColumn: 2, preserveFocus: true });
+    expect(createWebviewPanel).toHaveBeenCalledWith('codev.work', 'Work', { viewColumn: 2, preserveFocus: true }, expect.anything());
+    const html = panels[0].webview.html;
+
+    manager.show({ viewColumn: 3, preserveFocus: true });
+
+    expect(createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(panels[0].reveal).toHaveBeenCalledWith(3, true);
     expect(panels[0].webview.html).toBe(html);
   });
 
@@ -459,6 +483,58 @@ describe('restore after a window reload', () => {
     const third = new FakePanel();
     await manager.deserializeWebviewPanel(third as never);
     expect(third.disposed).toBe(true);
+  });
+});
+
+describe('a tab restored by a reload that VS Code has not revived yet', () => {
+  /** Put tabs in editor groups, each tab knowing its group, as `vscode.window.tabGroups` does. */
+  function seedTabs(...groups: Array<{ viewColumn: number; inputs: unknown[] }>) {
+    tabGroups.all = groups.map(({ viewColumn, inputs }) => {
+      const group = { viewColumn, tabs: [] as unknown[] };
+      group.tabs = inputs.map(input => ({ input, group }));
+      return group;
+    });
+    return tabGroups.all.map(group => group.tabs);
+  }
+
+  it('opening Work puts the live panel in that tab\'s group, then closes the restored tab: never two, nothing else closed', () => {
+    const [[text, decisions], [restored]] = seedTabs(
+      { viewColumn: 1, inputs: [new TabInputText('a.ts'), new TabInputWebview('mainThreadWebview-codev.decisions')] },
+      { viewColumn: 2, inputs: [new TabInputWebview('mainThreadWebview-codev.work')] },
+    );
+    const { manager } = setup();
+
+    manager.show();
+
+    expect(createWebviewPanel).toHaveBeenCalledWith('codev.work', 'Work', 2, expect.anything());
+    expect(tabGroups.close).toHaveBeenCalledTimes(1);
+    expect(tabGroups.close).toHaveBeenCalledWith(restored);
+    expect(tabGroups.close).not.toHaveBeenCalledWith(text);
+    expect(tabGroups.close).not.toHaveBeenCalledWith(decisions);
+    // Closed after the new panel opened in its group, so the group is never left empty and closed.
+    expect(createWebviewPanel.mock.invocationCallOrder[0]).toBeLessThan(tabGroups.close.mock.invocationCallOrder[0]);
+  });
+
+  it('with a placement (Arrange Cockpit) the live panel opens at the placement, and the restored tab is closed', () => {
+    const [[restored]] = seedTabs({ viewColumn: 1, inputs: [new TabInputWebview('codev.work')] });
+    const { manager } = setup();
+
+    manager.show({ viewColumn: 2, preserveFocus: true });
+
+    expect(createWebviewPanel).toHaveBeenCalledWith('codev.work', 'Work', { viewColumn: 2, preserveFocus: true }, expect.anything());
+    expect(tabGroups.close).toHaveBeenCalledWith(restored);
+  });
+
+  it('`tab` is the open panel\'s own tab, in its group', () => {
+    const { manager } = setup();
+    expect(manager.tab).toBeUndefined();
+    manager.show();
+    panels[0].viewColumn = 2;
+    const [, [own]] = seedTabs(
+      { viewColumn: 1, inputs: [new TabInputWebview('mainThreadWebview-codev.decisions')] },
+      { viewColumn: 2, inputs: [new TabInputWebview('mainThreadWebview-codev.work')] },
+    );
+    expect(manager.tab).toBe(own);
   });
 });
 

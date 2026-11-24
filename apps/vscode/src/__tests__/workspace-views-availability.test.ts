@@ -13,7 +13,7 @@ describe('workspaceViewUnavailableReason', () => {
 
   it("explains a builder-worktree window, pointing to the parent's window", () => {
     const reason = workspaceViewUnavailableReason('Decisions', { builderWorktreeWindow: true, workspacePath: '/work/codev' });
-    expect(reason).toBe("Codev: Decisions is not offered in a builder-worktree window. Open it from the parent workspace's window.");
+    expect(reason).toBe("Codev: Decisions is not offered in a builder-worktree window. Use it from the parent workspace's window.");
   });
 
   it('explains a window with no Codev workspace', () => {

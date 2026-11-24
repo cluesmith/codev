@@ -50,7 +50,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { MENU_RECORDS, ROW_CLICK_RECORDS, WELCOME_RECORDS, COCKPIT_ENTRIES, COCKPIT_ROW_RECORDS } = await import('../views/cockpit-menu-map.js');
+const { MENU_RECORDS, ROW_CLICK_RECORDS, WELCOME_RECORDS, COCKPIT_ENTRIES, COCKPIT_ROW_RECORDS, COCKPIT_OWN_ENTRY_RECORDS } = await import('../views/cockpit-menu-map.js');
 const { CockpitProvider, cockpitWorkspaceContext, DEV_SLOT_KINDS, COCKPIT_DECISIONS_CONTEXT, COCKPIT_IDS } = await import('../views/cockpit.js');
 const { WorkspaceProvider } = await import('../views/workspace.js');
 const { REMOTE_CONTEXT } = await import('../views/architect-tree.js');
@@ -165,7 +165,16 @@ describe("every record's Cockpit placement is in package.json", () => {
     for (const { cockpit } of ROW_CLICK_RECORDS) {
       if ('relocated' in cockpit) { cockpit.relocated.forEach(e => mapped.add(key(e))); }
     }
+    for (const { entry } of COCKPIT_OWN_ENTRY_RECORDS) { mapped.add(key(entry)); }
     expect(COCKPIT_MENU.filter(e => !mapped.has(key(e)))).toEqual([]);
+  });
+
+  it("each of the Cockpit's own entries (no source-view counterpart) is in package.json, with its purpose", () => {
+    expect(COCKPIT_OWN_ENTRY_RECORDS.map(r => r.entry.command)).toEqual(['codev.cockpit.arrange']);
+    for (const { entry, purpose } of COCKPIT_OWN_ENTRY_RECORDS) {
+      expect(COCKPIT_KEYS.has(key(entry)), `missing ${JSON.stringify(entry)}`).toBe(true);
+      expect(purpose.length).toBeGreaterThan(20);
+    }
   });
 });
 

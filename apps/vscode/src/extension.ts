@@ -4,7 +4,7 @@ import { wireCommandProvider } from './command-relay.js';
 import { fireActivity, setActivityHooks, setActivityHooksSuppressed } from './activity-hooks.js';
 import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
-import { openResolvedArchitect } from './open-architect.js';
+import { openResolvedArchitect, type ResolvableArchitect } from './open-architect.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
@@ -72,6 +72,8 @@ import { DecisionsBridge } from './workspace-views/decisions-bridge.js';
 import { WorkPanels } from './workspace-views/work-panel.js';
 import { DECISIONS_VIEW_TYPE, WORK_VIEW_TYPE } from './workspace-views/messages.js';
 import { workspaceViewUnavailableReason } from './workspace-views/availability.js';
+import { CockpitArranger } from './cockpit/arrange.js';
+import { CockpitAutoArrange } from './cockpit/auto-arrange.js';
 import { OverviewRefreshGate } from './views/overview-refresh-gate.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
@@ -640,6 +642,57 @@ export async function activate(context: vscode.ExtensionContext) {
 		workPanels,
 		vscode.window.registerWebviewPanelSerializer(WORK_VIEW_TYPE, workPanels),
 	);
+	// The live architect roster of this window's workspace, read from Tower as `codev.openArchitectTerminal`
+	// and *Arrange Cockpit* resolve it. Undefined when it cannot be read; the user is told why.
+	const readArchitectRoster = async (): Promise<ResolvableArchitect[] | undefined> => {
+		const client = connectionManager?.getClient();
+		const workspacePath = connectionManager?.getWorkspacePath();
+		if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
+			vscode.window.showErrorMessage('Codev: Not connected to Tower');
+			return undefined;
+		}
+		try {
+			const state = await client.getWorkspaceState(workspacePath);
+			// Resolve the architect list. Prefer the new `architects`
+			// collection (Spec 786 Phase 5); fall back to the scalar
+			// `architect` for older Tower versions.
+			const architects = state?.architects ?? (state?.architect ? [state.architect] : []);
+			return architects;
+		} catch {
+			vscode.window.showErrorMessage('Codev: Failed to get workspace state');
+			return undefined;
+		}
+	};
+	// *Arrange Cockpit* (Spec 1963): the `main` architect | (Work over Decisions). Offered where Work and
+	// Decisions are: not in a builder-worktree or no-workspace window, where the command says why.
+	const arrangeUnavailableReason = () => workspaceViewUnavailableReason('Arrange Cockpit', {
+		builderWorktreeWindow: isBuilderWorktreeWindow,
+		workspacePath: detectWorkspacePath(),
+	});
+	const cockpitArranger = new CockpitArranger({
+		unavailableReason: arrangeUnavailableReason,
+		readArchitects: readArchitectRoster,
+		// The editor-area override: this action puts the architect in the left editor group even with
+		// `codev.terminalPosition: panel`.
+		openArchitect: async (terminalId, name) => terminalManager?.openArchitect(terminalId, name, true, 'editor'),
+		architectTerminal: (name) => terminalManager?.getArchitectTerminal(name),
+		work: workPanels,
+		decisions: decisionsPanels,
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	// The first show of the Cockpit in a window session arranges it, once the first connection attempt
+	// has finished (`ready()`, at the end of activation), unless `codev.cockpit.autoArrange` is off.
+	const cockpitAutoArrange = new CockpitAutoArrange({
+		view: cockpitView,
+		offered: () => arrangeUnavailableReason() === null,
+		enabled: () => vscode.workspace.getConfiguration('codev').get<boolean>('cockpit.autoArrange', true),
+		arrange: () => cockpitArranger.arrange(),
+		globalState: context.globalState,
+		disable: () => vscode.workspace.getConfiguration('codev')
+			.update('cockpit.autoArrange', false, vscode.ConfigurationTarget.Global),
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	context.subscriptions.push(cockpitAutoArrange);
 	// Builders accordion (#913), row-click expand, follow-reveals, the
 	// builder-active hook and the badge act on whichever of the two views a row
 	// belongs to. The accordion is toggled via the header button /
@@ -1089,19 +1142,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			// like `codev.referenceIssueInArchitect` can inject into the same
 			// terminal the user picked. Every failure path (not connected,
 			// picker dismissed, architect not found) returns undefined.
-			const client = connectionManager?.getClient();
-			const workspacePath = connectionManager?.getWorkspacePath();
-			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
-				vscode.window.showErrorMessage('Codev: Not connected to Tower');
-				return undefined;
-			}
+			const architects = await readArchitectRoster();
+			if (!architects) { return undefined; }
 			try {
-				const state = await client.getWorkspaceState(workspacePath);
-				// Resolve the architect list. Prefer the new `architects`
-				// collection (Spec 786 Phase 5); fall back to the scalar
-				// `architect` for older Tower versions.
-				const architects = state?.architects ?? (state?.architect ? [state.architect] : []);
-
 				// Issue 841 Gap 2: when invoked with no name (keybinding Cmd/Ctrl+K A
 				// or the Command Palette) and the workspace has more than one
 				// architect, prompt for which to open. Single-architect workspaces
@@ -1340,6 +1383,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		regCli('codev.openDecisions', () => decisionsPanels.show()),
 		// The Work panel (Spec 1963): the palette. Where it is not offered it says why.
 		regCli('codev.openWork', () => workPanels.show()),
+		// *Arrange Cockpit* (Spec 1963): the palette and the Cockpit's title bar. Where it is not offered
+		// it says why. A manual arrange never shows the first-auto-arrange notice.
+		regCli('codev.cockpit.arrange', () => cockpitArranger.arrange()),
 		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
 		reg('codev.openIssueById', () => openIssueById(connectionManager!, () => overviewCache.getData())),
 		reg('codev.openPRById', () => openPRById(connectionManager!)),
@@ -1848,7 +1894,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Tower and auto-starts it even when no codev workspace is detected, so a
 	// dormant window must never reach it.
 	if (policy.initializeConnection) {
-		await connectionManager.initialize();
+		try {
+			await connectionManager.initialize();
+		} finally {
+			// The Cockpit's first-show arrange waits for this attempt, so it can resolve the architect.
+			cockpitAutoArrange.ready();
+		}
+	} else {
+		cockpitAutoArrange.ready();
 	}
 }
 

@@ -6,6 +6,7 @@
 
 - **Codev Cockpit: the whole fleet in one tree.** A new button below Codev opens Tower → workspaces → architects → builders → changed files. This window's workspace keeps every action of the Workspace and Agents views, and another workspace's rows open that workspace's window (#1963).
 - **Work and Decisions in VS Code.** `Codev: Open Work` and `Codev: Open Decisions` (or the Cockpit's Decisions entry) open the dashboard's Work and Decisions views in the editor area, in your color theme. Rule on decisions, open a builder's terminal, start a shell, and follow issue, PR and spec links without leaving the editor (#1963).
+- **Arrange Cockpit: architect | Work over Decisions.** `Codev: Arrange Cockpit`, or the layout button on the Cockpit's title bar, puts the `main` architect on the left with Work above Decisions on the right. It also runs by itself the first time the Cockpit is shown in a window, and once a notice offers to turn that off (`codev.cockpit.autoArrange`). It never closes an editor, unsaved or untitled ones included (#1963).
 
 ### Fixes
 

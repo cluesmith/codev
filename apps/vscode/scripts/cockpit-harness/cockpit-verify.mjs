@@ -22,6 +22,14 @@
 //              Open / + Shell / Refresh / a spec link / issue and PR links, themes and contrast,
 //              both panels beside the Cockpit's Decisions entries, reload restore, network audit,
 //              Tower down and back, the unavailable windows
+//   arrange    Arrange Cockpit (Phase 9): the first show arranges main | (Work over Decisions) over
+//              four groups of editors (dirty and untitled ones survive), the one-time notice, an
+//              idempotent re-run keeping a Decisions draft, both themes, later shows leave the
+//              layout alone, a panel terminal brought back, a reload, main not live, Don't arrange
+//              automatically (a second fresh profile), the unavailable windows
+//   profile-seed      with the installed package.json stripped of the codev-cockpit container (as
+//                     origin/main's), a new browser profile uses Codev: the "existing profile"
+//   profile-existing  the branch's install on that profile: where VS Code puts the Cockpit button
 //
 // Every result is recorded in --out as { script, results: [{ name, ok, detail, shots }] }. Any
 // browser request to the owner's port fails the run.
@@ -159,9 +167,10 @@ class Run {
 
 const TRUST_BUTTON = /Yes, I trust the authors|Trust Folder & Continue|Trust Folder/i;
 
-async function newContext(R) {
+/** A browser on `dir` (the run's profile unless another is named), its requests audited. */
+async function newContext(R, dir = R.opts.profile) {
   const chromium = await loadChromium();
-  const context = await chromium.launchPersistentContext(R.opts.profile, {
+  const context = await chromium.launchPersistentContext(dir, {
     headless: true,
     viewport: { width: 1600, height: 1000 },
   });
@@ -2271,62 +2280,9 @@ SCRIPTS.work = async (R, context, page) => {
     const groups = await page.locator('.editor-group-container').evaluateAll((els) => els.map((g) => g.querySelector('.tabs-container .tab.active')?.getAttribute('aria-label') ?? null));
     if (groups.length !== 2 || !/^Decisions/.test(groups[0] ?? '') || !/^Work/.test(groups[1] ?? '')) throw new Error(`active tabs by group ${JSON.stringify(groups)}`);
     frame = await workFrame(page);
-    // In a half-width group the view fits: nothing scrolls sideways, each Open is whole, and no
-    // backlog or recently-closed label runs into the links after it.
-    const fit = await frame.evaluate(() => {
-      const content = document.querySelector('.work-content');
-      const right = content.getBoundingClientRect().right;
-      const opens = [...document.querySelectorAll('.builder-row-open')].map((b) => Math.round(b.getBoundingClientRect().right));
-      const overlaps = [...document.querySelectorAll('.backlog-row, .recently-closed-row')].flatMap((row) => {
-        const main = row.querySelector('.backlog-row-main, .recently-closed-row-main');
-        const links = row.querySelector('.backlog-artifacts');
-        if (!main || !links) return [];
-        const drawn = [...main.children].filter((c) => c.getClientRects().length).map((c) => c.getBoundingClientRect().right);
-        const last = Math.min(Math.max(...drawn), main.getBoundingClientRect().right);
-        return last > links.getBoundingClientRect().left + 0.5 ? [row.textContent.trim().slice(0, 30)] : [];
-      });
-      // Lines each state's text is drawn on: one rect per line box.
-      const stateLines = [...document.querySelectorAll('.builder-col-state')].map((cell) => {
-        const range = document.createRange();
-        range.selectNodeContents(cell);
-        return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
-      });
-      // How much of a typical title shows: a copy of the first row (not React's) carrying a
-      // 44-character title, measured character by character against the cell's text box.
-      const TYPICAL = 'VS Code alternative layout: a second Cockpit';
-      const row = document.querySelector('.builder-table tbody .builder-row');
-      const probe = row.cloneNode(true);
-      const cell = probe.querySelector('.builder-col-title');
-      cell.textContent = TYPICAL;
-      row.parentElement.appendChild(probe);
-      const text = cell.firstChild;
-      const style = getComputedStyle(cell);
-      const edge = cell.getBoundingClientRect().right - parseFloat(style.paddingRight);
-      const range = document.createRange();
-      let fits = 0;
-      for (let i = 0; i < TYPICAL.length; i++) {
-        range.setStart(text, i);
-        range.setEnd(text, i + 1);
-        if (range.getBoundingClientRect().right > edge + 0.5) break;
-        fits++;
-      }
-      probe.remove();
-      // When the title is cut, the ellipsis takes the place of about one character.
-      const titleShown = fits === TYPICAL.length ? fits : Math.max(0, fits - 1);
-      return {
-        titleShown,
-        stateLines,
-        width: Math.round(content.clientWidth),
-        sideways: content.scrollWidth - content.clientWidth,
-        opens, right: Math.round(right),
-        hidden: ['.builder-col-elapsed', '.builder-col-progress', '.backlog-row-author'].filter((sel) => {
-          const el = document.querySelector(sel);
-          return el && getComputedStyle(el).display === 'none';
-        }),
-        overlaps,
-      };
-    });
-    if (fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length || fit.stateLines.some((n) => n !== 1) || fit.titleShown < 20) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
+    // In a half-width group the view fits.
+    const fit = await workFit(frame);
+    if (workFitProblems(fit)) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
     const shots = [await R.shot(page, 'both-panels-dark')];
     await setTheme(page, 'Light Modern');
     shots.push(await R.shot(page, 'both-panels-light'));
@@ -2425,6 +2381,569 @@ SCRIPTS.work = async (R, context, page) => {
     await runCommand(page, 'Codev: Open Work');
     const note = await waitForNotification(page, /Work needs a Codev workspace/);
     return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
+  });
+};
+
+/**
+ * How the Work view fits its group: nothing scrolls sideways, each Open is whole, no backlog or
+ * recently-closed label runs into the links after it, each state on one line, and how many
+ * characters of a typical 44-character title show. `workFitProblems` names what does not fit.
+ */
+async function workFit(frame) {
+  return frame.evaluate(() => {
+    const content = document.querySelector('.work-content');
+    const right = content.getBoundingClientRect().right;
+    const opens = [...document.querySelectorAll('.builder-row-open')].map((b) => Math.round(b.getBoundingClientRect().right));
+    const overlaps = [...document.querySelectorAll('.backlog-row, .recently-closed-row')].flatMap((row) => {
+      const main = row.querySelector('.backlog-row-main, .recently-closed-row-main');
+      const links = row.querySelector('.backlog-artifacts');
+      if (!main || !links) return [];
+      const drawn = [...main.children].filter((c) => c.getClientRects().length).map((c) => c.getBoundingClientRect().right);
+      const last = Math.min(Math.max(...drawn), main.getBoundingClientRect().right);
+      return last > links.getBoundingClientRect().left + 0.5 ? [row.textContent.trim().slice(0, 30)] : [];
+    });
+    // Lines each state's text is drawn on: one rect per line box.
+    const stateLines = [...document.querySelectorAll('.builder-col-state')].map((cell) => {
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    });
+    // How much of a typical title shows: a copy of the first row (not React's) carrying a
+    // 44-character title, measured character by character against the cell's text box.
+    const TYPICAL = 'VS Code alternative layout: a second Cockpit';
+    const row = document.querySelector('.builder-table tbody .builder-row');
+    const probe = row.cloneNode(true);
+    const cell = probe.querySelector('.builder-col-title');
+    cell.textContent = TYPICAL;
+    row.parentElement.appendChild(probe);
+    const text = cell.firstChild;
+    const style = getComputedStyle(cell);
+    const edge = cell.getBoundingClientRect().right - parseFloat(style.paddingRight);
+    const range = document.createRange();
+    let fits = 0;
+    for (let i = 0; i < TYPICAL.length; i++) {
+      range.setStart(text, i);
+      range.setEnd(text, i + 1);
+      if (range.getBoundingClientRect().right > edge + 0.5) break;
+      fits++;
+    }
+    probe.remove();
+    // When the title is cut, the ellipsis takes the place of about one character.
+    const titleShown = fits === TYPICAL.length ? fits : Math.max(0, fits - 1);
+    return {
+      titleShown,
+      stateLines,
+      width: Math.round(content.clientWidth),
+      sideways: content.scrollWidth - content.clientWidth,
+      opens, right: Math.round(right),
+      hidden: ['.builder-col-elapsed', '.builder-col-progress', '.backlog-row-author'].filter((sel) => {
+        const el = document.querySelector(sel);
+        return el && getComputedStyle(el).display === 'none';
+      }),
+      overlaps,
+    };
+  });
+}
+
+const workFitProblems = (fit) => fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length || fit.stateLines.some((n) => n !== 1) || fit.titleShown < 20;
+
+// ── arrange ──────────────────────────────────────────────────────────────────────────────────
+
+const ARCHITECT_TAB = /^Codev: Architect(?! \()/;
+const NOTICE = /The editor area was arranged for the Cockpit/;
+const ARRANGE_TITLE = 'Codev: Arrange Cockpit';
+
+/**
+ * Each editor group in grid order (the grid's DOM order): its tabs, its active tab, its dirty tabs,
+ * its preview tabs, and where it is drawn. A preview tab is read from its italic label: VS Code
+ * keeps ", preview" in a tab's aria-label after the tab is kept, so the label is read without it.
+ */
+async function editorGroups(page) {
+  return page.locator('.editor-group-container').evaluateAll((els) => els.map((g) => {
+    const label = (t) => (t.getAttribute('aria-label') ?? t.textContent).trim().replace(/, preview(?=,|$)/, '');
+    const italic = (t) => { const name = t.querySelector('.label-name'); return !!name && getComputedStyle(name).fontStyle === 'italic'; };
+    const tabs = [...g.querySelectorAll('.tabs-container .tab')];
+    const active = g.querySelector('.tabs-container .tab.active');
+    const r = g.getBoundingClientRect();
+    return {
+      tabs: tabs.map(label),
+      active: active ? label(active) : null,
+      dirty: tabs.filter((t) => t.classList.contains('dirty')).map(label),
+      preview: tabs.filter(italic).map(label),
+      box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+    };
+  }));
+}
+
+/**
+ * What is wrong with `groups` as the Cockpit layout: three groups, one column on the left and two
+ * stacked on the right, the architect, Work and Decisions active in them (`architect: false` when
+ * no architect is expected on the left). An empty list when it is the layout.
+ */
+function cockpitProblems(groups, { architect = true } = {}) {
+  if (groups.length !== 3) return [`${groups.length} editor groups`];
+  const [left, top, bottom] = groups;
+  const problems = [];
+  if (!(left.box.x + left.box.w <= top.box.x + 2)) problems.push('the left group is not left of the right column');
+  if (Math.abs(top.box.x - bottom.box.x) > 2 || Math.abs(top.box.w - bottom.box.w) > 2) problems.push('the right groups are not one column');
+  if (!(top.box.y + top.box.h <= bottom.box.y + 2)) problems.push('Work\'s group is not above Decisions\'');
+  if (left.box.h < top.box.h + bottom.box.h - 8) problems.push('the left group is not full height');
+  if (architect && !ARCHITECT_TAB.test(left.active ?? '')) problems.push(`left active "${left.active}"`);
+  if (!/^Work/.test(top.active ?? '')) problems.push(`top-right active "${top.active}"`);
+  if (!/^Decisions/.test(bottom.active ?? '')) problems.push(`bottom-right active "${bottom.active}"`);
+  // One tab each (a restored tab not yet revived is replaced, never left beside the live panel), and
+  // neither a preview tab, which the next file opened in its group would replace.
+  const all = groups.flatMap((g) => g.tabs);
+  for (const name of ['Work', 'Decisions']) {
+    const tabs = all.filter((t) => new RegExp(`^${name},`).test(t));
+    if (tabs.length !== 1) problems.push(`${tabs.length} ${name} tabs`);
+    if (groups.some((g) => g.preview.some((t) => new RegExp(`^${name},`).test(t)))) problems.push(`${name} is a preview tab`);
+  }
+  return problems;
+}
+
+const groupsText = (groups) => groups.map((g, i) => `${i + 1}: [${g.tabs.join(', ')}] active "${g.active}"${g.dirty.length ? ` dirty [${g.dirty.join(', ')}]` : ''}${g.preview.length ? ` preview [${g.preview.join(', ')}]` : ''}`).join('; ');
+
+async function waitForCockpitLayout(page, opts, timeout = 60_000) {
+  let last = [];
+  try {
+    return await waitFor('the Cockpit layout', async () => {
+      last = await editorGroups(page);
+      return cockpitProblems(last, opts).length ? null : last;
+    }, timeout);
+  } catch {
+    throw new Error(`no Cockpit layout: ${cockpitProblems(last, opts).join('; ')} — ${groupsText(last)}`);
+  }
+}
+
+const activityLabels = (page) => page.locator('.activitybar .action-item a').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+
+/** The activity bar's item labels, and whether the Cockpit sits directly below Codev. */
+async function cockpitButtonOrder(page) {
+  const labels = await activityLabels(page);
+  const codev = labels.findIndex((l) => /^Codev( \(|$| -)/.test(l));
+  const cockpit = labels.findIndex((l) => /^Codev Cockpit( \(|$| -)/.test(l));
+  return { labels, below: codev >= 0 && cockpit === codev + 1, codev, cockpit };
+}
+
+/** The active tab of the focused editor group (`activeEditorTab` reads the first group's). */
+async function focusedGroupTab(page) {
+  const tab = page.locator('.editor-group-container.active .tabs-container .tab.active');
+  return (await tab.count()) ? tab.first().getAttribute('aria-label') : null;
+}
+
+/** Open a file of the workspace in the active group, through Quick Open. */
+async function quickOpenFile(page, name) {
+  await page.keyboard.press('F1');
+  const widget = await quickInput(page);
+  await widget.locator('input').fill(name);
+  await waitFor(`Quick Open to offer ${name}`, async () => (await widget.locator('.quick-input-list .monaco-list-row .label-name').allTextContents()).some((t) => t.trim() === name), 20_000);
+  await widget.locator('.quick-input-list .monaco-list-row', { has: page.locator('.label-name', { hasText: new RegExp(`^${escapeRe(name)}$`) }) }).first().click();
+  await waitFor(`${name} to be the active tab`, async () => (await focusedGroupTab(page) ?? '').startsWith(name), 10_000);
+}
+
+/** The first line of the active text editor. */
+async function activeFirstLine(page) {
+  return page.locator('.editor-group-container.active .monaco-editor .view-lines .view-line').first().textContent();
+}
+
+/** Click the tab whose label starts with `label` and read its first line. */
+async function tabFirstLine(page, label) {
+  await page.locator(`.tabs-container .tab[aria-label^="${label}"]`).first().click();
+  await waitFor(`${label} in front`, async () => (await focusedGroupTab(page) ?? '').startsWith(label), 10_000);
+  await page.waitForTimeout(300);
+  return (await activeFirstLine(page))?.replace(/\u00a0/g, ' ');
+}
+
+/**
+ * Close VS Code 1.147.0's modal editor (settings.json, and some first-run pages open in one), which
+ * takes clicks and keys while it is up: Escape, then its own close action. Returns its title, or null
+ * when none was open.
+ */
+async function dismissModalEditor(page) {
+  const block = page.locator('.monaco-modal-editor-block');
+  if (!(await block.count())) return null;
+  const title = ((await block.first().textContent()) ?? '').trim().slice(0, 80);
+  await page.keyboard.press('Escape');
+  if (await block.waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)) return title;
+  await block.locator('.action-label[aria-label^="Close"]').first().click();
+  await block.waitFor({ state: 'detached', timeout: 5000 });
+  return title;
+}
+
+/**
+ * Click the architect's tab. A terminal takes focus a moment after its tab is clicked, and would
+ * take the palette's typing if the palette opened first.
+ */
+async function clickArchitectTab(page) {
+  await page.locator('.tabs-container .tab[aria-label^="Codev: Architect,"]').first().click();
+  await page.waitForTimeout(1500);
+}
+
+/** The Cockpit title bar's Arrange Cockpit action, if it is shown. */
+const arrangeAction = (page) => page.locator(`.part.sidebar .title-actions .action-label[aria-label="${ARRANGE_TITLE}"]`);
+
+/**
+ * The pre-existing editors: four groups, two dirty files, a clean one, two untitled buffers. VS Code
+ * labels an untitled buffer by its first line, so those two are found by what was typed in them.
+ */
+const NOTE_FILES = { 'arrange-a.txt': 'alpha note a\n', 'arrange-b.txt': 'alpha note b\n', 'arrange-c.txt': 'alpha note c\n' };
+const UNTITLED_ONE = 'UNTITLED-ONE kept';
+const UNTITLED_TWO = 'UNTITLED-TWO kept';
+const TYPED = { 'arrange-a.txt': 'DIRTY-A ', 'arrange-b.txt': 'DIRTY-B ' };
+
+SCRIPTS.arrange = async (R, context, page) => {
+  for (const [name, text] of Object.entries(NOTE_FILES)) fs.writeFileSync(path.join(R.opts.fixtures, 'alpha', name), text);
+  const alphaWs = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+  let frame;
+  let dframe;
+  const DRAFT = 'A draft typed before the re-run.';
+
+  /** Every pre-existing editor's tab, dirty state and first line. */
+  const userEditors = async () => {
+    const out = {};
+    for (const label of ['arrange-a.txt', 'arrange-b.txt', 'arrange-c.txt', UNTITLED_ONE, UNTITLED_TWO]) {
+      const groups = await editorGroups(page);
+      const group = groups.findIndex((g) => g.tabs.some((t) => t.startsWith(label)));
+      if (group < 0) { out[label] = 'MISSING'; continue; }
+      out[label] = { group: group + 1, dirty: groups[group].dirty.some((t) => t.startsWith(label)), line: await tabFirstLine(page, label) };
+    }
+    return out;
+  };
+
+  await R.check('fresh profile: the Cockpit button sits directly below Codev', async () => {
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    const order = await cockpitButtonOrder(page);
+    if (!order.below) throw new Error(`activity bar order: ${JSON.stringify(order.labels)}`);
+    if ((await partState(page)).sidebar.title === 'Codev Cockpit') throw new Error('the Cockpit is already showing before it is clicked');
+    return `items ${order.codev}: "${order.labels[order.codev]}", ${order.cockpit}: "${order.labels[order.cockpit]}"`;
+  });
+
+  let before;
+  await R.check('scenario 13 setup: editors across four groups, two dirty files, a clean file and two untitled buffers', async () => {
+    await quickOpenFile(page, 'arrange-a.txt');
+    await page.keyboard.type(TYPED['arrange-a.txt']);
+    await runCommand(page, 'File: New Untitled Text File');
+    await page.keyboard.type(UNTITLED_ONE);
+    await runCommand(page, 'View: New Editor Group to the Right');
+    await quickOpenFile(page, 'arrange-b.txt');
+    await page.keyboard.type(TYPED['arrange-b.txt']);
+    await runCommand(page, 'View: New Editor Group to the Right');
+    await quickOpenFile(page, 'arrange-c.txt');
+    await runCommand(page, 'View: New Editor Group to the Right');
+    await runCommand(page, 'File: New Untitled Text File');
+    await page.keyboard.type(UNTITLED_TWO);
+    await page.waitForTimeout(800);
+    before = await userEditors();
+    const groups = await editorGroups(page);
+    const want = { 'arrange-a.txt': [1, true], [UNTITLED_ONE]: [1, true], 'arrange-b.txt': [2, true], 'arrange-c.txt': [3, false], [UNTITLED_TWO]: [4, true] };
+    const problems = Object.entries(want).filter(([label, [group, dirty]]) => before[label]?.group !== group || before[label]?.dirty !== dirty).map(([label]) => `${label}: ${JSON.stringify(before[label])}`);
+    if (groups.length !== 4 || problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    return { detail: groupsText(groups), shots: [await R.shot(page, 'before')] };
+  });
+
+  let terminalsAtFirstShow;
+  await R.check('scenario 7 / 9: the first show of the Cockpit arranges main | (Work over Decisions), each active in its group', async () => {
+    terminalsAtFirstShow = await terminalIds(R);
+    await openCockpit(page);
+    const groups = await waitForCockpitLayout(page);
+    return { detail: groupsText(groups), shots: [await R.shot(page, 'arranged-dark')] };
+  });
+
+  await R.check("scenario 7: the one-time notice offers Don't arrange automatically; dismissing it changes nothing", async () => {
+    const text = await waitForNotification(page, NOTICE, 10_000);
+    const toast = page.locator('.notifications-toasts .notification-toast', { hasText: NOTICE });
+    const buttons = (await toast.locator('.monaco-button').allTextContents()).map((t) => t.trim());
+    if (!buttons.includes("Don't arrange automatically")) throw new Error(`the notice offers ${JSON.stringify(buttons)}`);
+    const shot = await R.shot(page, 'notice');
+    await closeNotifications(page);
+    return { detail: `"${text}" with ${JSON.stringify(buttons)}; dismissed`, shots: [shot] };
+  });
+
+  await R.check('scenario 13: every pre-existing editor survives the arrange with its unsaved content; the architect is the live session; both panels render', async () => {
+    frame = await workFrame(page);
+    dframe = await decisionsFrame(page);
+    await waitFor('a pending decision card', async () => (await dframe.locator('.decisions-card input[type="radio"]').count()) > 0, 30_000);
+    await waitFor('the Work view\'s builder rows', async () => (await frame.locator('.builder-table tbody tr').count()) === 3, 30_000);
+    const after = await userEditors();
+    const problems = [];
+    for (const [label, b] of Object.entries(before)) {
+      const a = after[label];
+      if (a === 'MISSING') { problems.push(`${label} was closed`); continue; }
+      if (a.dirty !== b.dirty || a.line !== b.line) problems.push(`${label}: ${JSON.stringify(b)} → ${JSON.stringify(a)}`);
+    }
+    const opened = await newTerminals(R, terminalsAtFirstShow);
+    if (opened.length !== 0) problems.push(`Tower terminals opened: ${JSON.stringify(opened.map((t) => t.label ?? t.id))} (the architect's session exists already)`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(await editorGroups(page))}`);
+    // Reading each editor made it the active tab of its group: arrange again.
+    await runCommand(page, ARRANGE_TITLE);
+    const groups = await waitForCockpitLayout(page);
+    return { detail: `editors after: ${JSON.stringify(after)}; ${groupsText(groups)}`, shots: [await R.shot(page, 'editors-kept')] };
+  });
+
+  await R.check('scenario 13: re-running Arrange Cockpit (title bar, then palette) changes nothing; a typed Decisions draft persists; no notice', async () => {
+    const card = dframe.locator('.decisions-card', { has: dframe.locator('input[type="radio"]') }).first();
+    await card.locator('textarea.decisions-comment').fill(DRAFT);
+    await frame.evaluate(() => { window.__codevMarker = 'kept'; });
+    await dframe.evaluate(() => { window.__codevMarker = 'kept'; });
+    const terminalsBefore = await terminalIds(R);
+    const shape = (gs) => JSON.stringify(gs.map((g) => ({ tabs: g.tabs, active: g.active, dirty: g.dirty })));
+    const was = shape(await editorGroups(page));
+    await closeNotifications(page);
+    if (!(await arrangeAction(page).count())) throw new Error('no Arrange Cockpit action on the Cockpit title bar');
+    await arrangeAction(page).click();
+    await page.waitForTimeout(3000);
+    const afterTitle = shape(await editorGroups(page));
+    await runCommand(page, ARRANGE_TITLE);
+    await page.waitForTimeout(3000);
+    const afterPalette = shape(await editorGroups(page));
+    const problems = [];
+    if (afterTitle !== was) problems.push(`the title-bar re-run changed the groups: ${was} → ${afterTitle}`);
+    if (afterPalette !== was) problems.push(`the palette re-run changed the groups: ${was} → ${afterPalette}`);
+    if (await frame.evaluate(() => window.__codevMarker) !== 'kept') problems.push('the Work webview reloaded');
+    if (await dframe.evaluate(() => window.__codevMarker) !== 'kept') problems.push('the Decisions webview reloaded');
+    const draft = await card.locator('textarea.decisions-comment').inputValue();
+    if (draft !== DRAFT) problems.push(`the draft reads ${JSON.stringify(draft)}`);
+    if ((await newTerminals(R, terminalsBefore)).length) problems.push('a Tower terminal was opened');
+    if ((await notifications(page)).some((n) => NOTICE.test(n))) problems.push('a manual arrange showed the first-auto-arrange notice');
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `groups unchanged ${was}; both webviews kept; draft kept`, shots: [await R.shot(page, 'rerun-draft')] };
+  });
+
+  await R.check("the architect's 14:00Z ruling: at the split's Work width the view fits and a typical title stays readable (20+ of 44 characters)", async () => {
+    const fit = await workFit(frame);
+    if (workFitProblems(fit)) throw new Error(`the Work view does not fit the split: ${JSON.stringify(fit)}`);
+    return `Work at ${fit.width} px: no sideways scroll, a typical 44-character title shows ${fit.titleShown} characters, each state on one line, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}`;
+  });
+
+  await R.check('rendered: the split with a pending decision, in Light Modern and Dark Modern', async () => {
+    const shots = [];
+    for (const [theme, cls] of [['Light Modern', 'vs'], ['Dark Modern', 'vs-dark']]) {
+      await setTheme(page, theme);
+      if (!(await page.locator('.monaco-workbench').evaluate((el, c) => el.classList.contains(c), cls))) throw new Error(`the workbench is not ${cls}`);
+      await waitForCockpitLayout(page, {}, 10_000);
+      shots.push(await R.shot(page, `split-${cls}`));
+    }
+    return { detail: 'arranged in both themes', shots };
+  });
+
+  await R.check('scenario 7: showing the Cockpit again leaves the editor area alone; the command arranges on demand', async () => {
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await waitFor('one editor group', async () => (await editorGroups(page)).length === 1, 10_000);
+    await runCommand(page, 'View: Show Explorer');
+    await page.waitForTimeout(1500);
+    await openCockpit(page);
+    await page.waitForTimeout(4000);
+    const groups = await editorGroups(page);
+    if (groups.length !== 1) throw new Error(`showing the Cockpit again rearranged: ${groupsText(groups)}`);
+    await runCommand(page, ARRANGE_TITLE);
+    const arranged = await waitForCockpitLayout(page);
+    return { detail: `still one group after re-showing; the command arranged: ${groupsText(arranged)}`, shots: [await R.shot(page, 'rearranged')] };
+  });
+
+  await R.check('the architect terminal moved into the panel comes back to the left group: the same session', async () => {
+    const terminalsBefore = await terminalIds(R);
+    await clickArchitectTab(page);
+    await runCommand(page, 'Terminal: Move Terminal into Panel');
+    await waitFor('the architect tab to leave the editor area', async () => !(await editorGroups(page)).some((g) => g.tabs.some((t) => ARCHITECT_TAB.test(t))), 10_000);
+    await runCommand(page, ARRANGE_TITLE);
+    const groups = await waitForCockpitLayout(page);
+    const opened = await newTerminals(R, terminalsBefore);
+    const architectTabs = groups.flatMap((g) => g.tabs).filter((t) => ARCHITECT_TAB.test(t));
+    if (opened.length || architectTabs.length !== 1) throw new Error(`new Tower terminals ${JSON.stringify(opened.map((t) => t.id))}; architect tabs ${JSON.stringify(architectTabs)}`);
+    return { detail: `${groupsText(groups)}; no new Tower terminal`, shots: [await R.shot(page, 'from-panel')] };
+  });
+
+  await R.check('existing profile: after a reload the restored Cockpit arranges again, the architect reopened on the left; no notice; the button is still below Codev', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+    const groups = await waitForCockpitLayout(page, {}, 120_000);
+    await page.waitForTimeout(4000);
+    const problems = [];
+    if ((await notifications(page)).some((n) => NOTICE.test(n))) problems.push('the notice appeared again');
+    const order = await cockpitButtonOrder(page);
+    if (!order.below) problems.push(`activity bar order ${JSON.stringify(order.labels)}`);
+    if ((await partState(page)).sidebar.title !== 'Codev Cockpit') problems.push('the Cockpit was not restored as the visible container');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    frame = await workFrame(page);
+    dframe = await decisionsFrame(page);
+    return { detail: groupsText(groups), shots: [await R.shot(page, 'reloaded')] };
+  });
+
+  await R.check('scenario 14: main not live — the existing warning, no other architect opened, Work and Decisions still arranged', async () => {
+    const state = await R.tower('GET', `/workspace/${alphaWs}/api/state`);
+    const main = (state.architects ?? []).find((a) => a.name === 'main');
+    if (!main?.terminalId) throw new Error(`no live main to stop: ${JSON.stringify(state.architects)}`);
+    await R.tower('DELETE', `/api/terminals/${main.terminalId}`);
+    await waitFor('main to leave the roster', async () => !((await R.tower('GET', `/workspace/${alphaWs}/api/state`)).architects ?? []).some((a) => a.name === 'main'), 20_000);
+    // The old architect tab stays (its session is gone): close it, and collapse the groups, so the
+    // arrange has something to do.
+    await clickArchitectTab(page);
+    await runCommand(page, 'View: Close Editor');
+    if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 2000 }).then(() => true, () => false)) await page.locator('.monaco-dialog-box .dialog-buttons .monaco-button').first().click();
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await waitFor('one editor group', async () => (await editorGroups(page)).length === 1, 10_000);
+    await closeNotifications(page);
+    const terminalsBefore = await terminalIds(R);
+    await runCommand(page, ARRANGE_TITLE);
+    const warning = await waitForNotification(page, /No 'main' architect found/);
+    const groups = await waitForCockpitLayout(page, { architect: false }, 20_000);
+    const problems = [];
+    if (groups.flatMap((g) => g.tabs).some((t) => /Codev: Architect/.test(t))) problems.push('an architect tab opened');
+    if ((await newTerminals(R, terminalsBefore)).length) problems.push('a Tower terminal was opened');
+    if (await frame.locator('.builder-table tbody tr').count() !== 3) problems.push('Work does not show its builders');
+    if (!(await dframe.locator('.decisions-card').count())) problems.push('Decisions shows no cards');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    return { detail: `"${warning}"; ${groupsText(groups)}`, shots: [await R.shot(page, 'main-not-live')] };
+  });
+
+  await R.check("scenario 7 (second fresh profile): Don't arrange automatically turns codev.cockpit.autoArrange off at the user level; the command still arranges", async () => {
+    const freshDir = `${R.opts.profile}-arrange-fresh`;
+    fs.rmSync(freshDir, { recursive: true, force: true });
+    const fresh = await newContext(R, freshDir);
+    try {
+      const p = fresh.pages()[0] ?? await fresh.newPage();
+      // gamma: main is live there, and it has no decisions file (the empty state renders).
+      await loadWorkbench(p, R.folderUrl('gamma'));
+      const order = await cockpitButtonOrder(p);
+      await openContainer(p, 'Codev Cockpit', 'codev-cockpit');
+      await waitForCockpitLayout(p);
+      await waitForNotification(p, NOTICE, 20_000);
+      await p.locator('.notifications-toasts .notification-toast', { hasText: NOTICE }).locator('.monaco-button', { hasText: "Don't arrange automatically" }).click();
+      await p.waitForTimeout(1500);
+      await runCommand(p, 'Preferences: Open User Settings (JSON)');
+      // 1.147.0 opens settings.json in a modal editor, not a group: read every editor's lines.
+      const editorTexts = () => p.locator('.monaco-editor .view-lines').evaluateAll((els) => els.map((e) => e.textContent.replace(/\u00a0/g, ' ')));
+      let texts = [];
+      try {
+        await waitFor('the user settings to show codev.cockpit.autoArrange', async () => {
+          texts = await editorTexts();
+          return texts.some((t) => /"codev\.cockpit\.autoArrange":\s*false/.test(t));
+        }, 15_000);
+      } catch {
+        throw new Error(`no editor shows "codev.cockpit.autoArrange": false; editors read ${JSON.stringify(texts)}`);
+      }
+      const settingsShown = async () => (await editorTexts()).some((t) => t.includes('codev.cockpit.autoArrange'));
+      const shot = await R.shot(p, 'dont-arrange');
+      // A new window session with the Cockpit showing: no arrange. The command still arranges.
+      // The palette does not open over the modal: close it directly.
+      await dismissModalEditor(p);
+      await waitFor('the settings editor to close', async () => !(await settingsShown()), 5000);
+      await runCommand(p, 'View: Single Column Editor Layout');
+      // The collapsed layout must be stored before the reload, or the reload restores the arranged one.
+      await waitFor('one editor group', async () => (await editorGroups(p)).length === 1, 10_000);
+      await p.waitForTimeout(3000);
+      await p.reload({ waitUntil: 'domcontentloaded' });
+      await p.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+      await p.locator('[id="cluesmith.codev-vscode"]').waitFor({ timeout: 120_000 });
+      await p.waitForTimeout(8000);
+      const afterReload = await editorGroups(p);
+      if (afterReload.length !== 1) throw new Error(`arranged with the setting off: ${groupsText(afterReload)}`);
+      await runCommand(p, ARRANGE_TITLE);
+      const arranged = await waitForCockpitLayout(p);
+      return {
+        detail: `button below Codev: ${order.below}; settings.json holds "codev.cockpit.autoArrange": false; reload with the Cockpit showing left ${afterReload.length} group; the command arranged ${groupsText(arranged)}`,
+        shots: [shot, await R.shot(p, 'setting-off-command')],
+      };
+    } catch (err) {
+      const p = fresh.pages()[0];
+      if (p) await R.shot(p, 'fresh-profile-failure').catch(() => {});
+      throw err;
+    } finally {
+      await fresh.close().catch(() => {});
+    }
+  });
+
+  await R.check('scenario 19: in a builder-worktree window, no auto-arrange, no title-bar action, and the command explains', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    await openCockpit(page);
+    await page.waitForTimeout(5000);
+    const groups = await editorGroups(page);
+    const problems = [];
+    if (groups.length !== 1 || groups[0].tabs.some((t) => /^(Work|Decisions)/.test(t) || ARCHITECT_TAB.test(t))) problems.push(`arranged: ${groupsText(groups)}`);
+    if (await arrangeAction(page).count()) problems.push('the title bar offers Arrange Cockpit');
+    await runCommand(page, ARRANGE_TITLE);
+    const note = await waitForNotification(page, /Arrange Cockpit is not offered in a builder-worktree window/);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'worktree-explains')] };
+  });
+
+  await R.check('scenario 19: in a no-workspace window, no auto-arrange, no title-bar action, and the command explains', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    await openCockpit(page);
+    await page.waitForTimeout(4000);
+    const problems = [];
+    const groups = await editorGroups(page);
+    if (groups.length !== 1 || groups[0].tabs.some((t) => /^(Work|Decisions|Codev: Architect),/.test(t))) problems.push(`arranged: ${groupsText(groups)}`);
+    if (await arrangeAction(page).count()) problems.push('the title bar offers Arrange Cockpit');
+    await runCommand(page, ARRANGE_TITLE);
+    const note = await waitForNotification(page, /Arrange Cockpit needs a Codev workspace/);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
+  });
+};
+
+// ── profile-seed / profile-existing ──────────────────────────────────────────────────────────
+
+/**
+ * A browser profile that used Codev before the Cockpit existed (the spec's risk: VS Code persists
+ * activity-bar order). `profile-seed` runs against an install whose package.json lacks the
+ * `codev-cockpit` container, as origin/main's does; `profile-existing` runs against the branch's
+ * install on the same profile, and records where VS Code puts the new button.
+ */
+const existingProfile = (R) => `${R.opts.profile}-existing`;
+
+SCRIPTS['profile-seed'] = async (R) => {
+  await R.check("existing profile, seeded: a new browser profile uses Codev on a build without the Cockpit container (origin/main's activity bar)", async () => {
+    const dir = existingProfile(R);
+    fs.rmSync(dir, { recursive: true, force: true });
+    const context = await newContext(R, dir);
+    try {
+      const p = context.pages()[0] ?? await context.newPage();
+      await p.goto(R.folderUrl('alpha'), { timeout: 240_000, waitUntil: 'domcontentloaded' });
+      await p.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+      await waitFor('the Codev activity-bar item', async () => {
+        const trust = p.getByRole('button', { name: TRUST_BUTTON });
+        if (await trust.count()) await trust.first().click();
+        return (await activityItem(p, 'Codev').count()) > 0;
+      }, 120_000);
+      await ensureTrusted(p);
+      const modal = await dismissModalEditor(p);
+      const labels = await activityLabels(p);
+      if (labels.some((l) => /^Codev Cockpit/.test(l))) throw new Error(`this install offers the Cockpit: ${JSON.stringify(labels)}`);
+      await openCodev(p);
+      // VS Code writes UI state to the profile's storage shortly after it changes.
+      await p.waitForTimeout(5000);
+      const shot = path.join(R.opts.shots, 'profile-seed-activity-bar.png');
+      await p.locator('.part.activitybar').screenshot({ path: shot });
+      return { detail: `activity bar ${JSON.stringify(labels)}; Codev opened${modal ? `; a modal editor was open on load and was closed: "${modal}"` : ''}`, shots: [shot, await R.shot(p, 'seeded')] };
+    } catch (err) {
+      const p = context.pages()[0];
+      if (p) await R.shot(p, 'seed-failure').catch(() => {});
+      throw err;
+    } finally {
+      await context.close().catch(() => {});
+    }
+  });
+};
+
+SCRIPTS['profile-existing'] = async (R) => {
+  await R.check('existing profile: where VS Code places the Cockpit button for a profile that used Codev before the Cockpit existed', async () => {
+    const dir = existingProfile(R);
+    if (!fs.existsSync(dir)) throw new Error(`no seeded profile at ${dir}: run verify profile-seed first`);
+    const context = await newContext(R, dir);
+    try {
+      const p = context.pages()[0] ?? await context.newPage();
+      await loadWorkbench(p, R.folderUrl('alpha'));
+      const order = await cockpitButtonOrder(p);
+      if (order.cockpit < 0) throw new Error(`no Cockpit button: ${JSON.stringify(order.labels)}`);
+      const shot = path.join(R.opts.shots, 'profile-existing-activity-bar.png');
+      await p.locator('.part.activitybar').screenshot({ path: shot });
+      return { detail: `${order.below ? 'directly below Codev' : 'NOT directly below Codev'}: ${JSON.stringify(order.labels)}`, shots: [shot] };
+    } finally {
+      await context.close().catch(() => {});
+    }
   });
 };
 

@@ -99,6 +99,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "codev.cockpit.arrange",
+        "title": "Codev: Arrange Cockpit",
+        "icon": "$(editor-layout)"
+      },
+      {
         "command": "codev.cockpit.openWebInterface",
         "title": "Codev: Open Web Interface",
         "icon": "$(globe)"
@@ -1026,6 +1031,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "codev.cockpit.arrange",
+          "when": "view == codev.cockpit && !codev.isBuilderWorktree && codev.hasWorkspace",
+          "group": "navigation@0"
+        },
+        {
           "command": "codev.cockpit.refresh",
           "when": "view == codev.cockpit",
           "group": "navigation@1"
@@ -1397,7 +1407,12 @@
           "type": "string",
           "enum": ["editor", "panel"],
           "default": "editor",
-          "description": "Where to open Codev terminals (editor area or bottom panel)"
+          "description": "Where to open Codev terminals (editor area or bottom panel). Codev: Arrange Cockpit puts the main architect in the left editor group either way."
+        },
+        "codev.cockpit.autoArrange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Arrange the editor area for the Codev Cockpit (the main architect on the left, Work over Decisions on the right) the first time the Cockpit is shown in a window. When off, only Codev: Arrange Cockpit arranges it."
         },
         "codev.terminalLinks.issueTarget": {
           "type": "string",

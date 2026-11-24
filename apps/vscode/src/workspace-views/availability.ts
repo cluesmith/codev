@@ -15,7 +15,7 @@ export interface WorkspaceViewsWindow {
 /** Why `surface` is not offered in this window, or null when it is. */
 export function workspaceViewUnavailableReason(surface: string, window: WorkspaceViewsWindow): string | null {
   if (window.builderWorktreeWindow) {
-    return `Codev: ${surface} is not offered in a builder-worktree window. Open it from the parent workspace's window.`;
+    return `Codev: ${surface} is not offered in a builder-worktree window. Use it from the parent workspace's window.`;
   }
   if (window.workspacePath === null) {
     return `Codev: ${surface} needs a Codev workspace, and this window has none. Open a folder containing a Codev project.`;

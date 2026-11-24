@@ -10,14 +10,16 @@
 //   node harness.mjs check              re-run gates 3-5 and prove the extension runs against the Tower
 //   node harness.mjs stop               kill only the harness's own PIDs; remove the runtime dirs
 //   node harness.mjs tower-down|tower-up  stop / restart the isolated Tower only (reconnect check)
-//   node harness.mjs vscode-restart     restart the isolated VS Code only (no lingering extension hosts)
+//   node harness.mjs vscode-restart     restart the isolated VS Code only (no lingering extension hosts);
+//                                       with COCKPIT_PRE_COCKPIT=1 the install has no Cockpit container
 //   node harness.mjs verify <script>    run a scripted Cockpit verification (cockpit-verify.mjs)
 //   node harness.mjs selftest           prove every refusal and the tripwire
 //
 // Inputs (environment): COCKPIT_SCRATCH (the session scratchpad), COCKPIT_TOWER_PORT,
 // COCKPIT_WEB_PORT; optional CODEV_AGENT_FARM_DIR / SHELLPER_SOCKET_DIR overrides (still gated);
 // COCKPIT_VSCODE=serve-web (default) | ide-server, the latter with COCKPIT_IDE_SERVER_BIN;
-// COCKPIT_BASELINE, a snapshot file `verify dashboard` compares against.
+// COCKPIT_BASELINE, a snapshot file `verify dashboard` compares against; COCKPIT_PRE_COCKPIT=1 on
+// vscode-restart, for `verify profile-seed` only.
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -425,6 +427,25 @@ async function bringUpTower(runCfg) {
   return st;
 }
 
+/**
+ * Make the installed extension's activity bar origin/main's: drop the `codev-cockpit` container and
+ * its views from its package.json. A profile that uses this install is one that used Codev before
+ * the Cockpit existed (`verify profile-seed`); `verify` runs nothing else against it.
+ */
+function stripCockpitContainer(dest) {
+  const file = path.join(dest, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  const c = pkg.contributes;
+  c.viewsContainers.activitybar = c.viewsContainers.activitybar.filter((v) => v.id !== 'codev-cockpit');
+  delete c.views['codev-cockpit'];
+  const shown = spawnSync('git', ['show', 'origin/main:apps/vscode/package.json'], { cwd: REPO, encoding: 'utf-8' });
+  if (shown.status !== 0) throw new Error(`git show origin/main:apps/vscode/package.json failed: ${shown.stderr}`);
+  const main = JSON.parse(shown.stdout).contributes;
+  if (JSON.stringify(c.viewsContainers) !== JSON.stringify(main.viewsContainers)) throw new Error('the stripped viewsContainers differ from origin/main\'s');
+  if (JSON.stringify(Object.keys(c.views).sort()) !== JSON.stringify(Object.keys(main.views).sort())) throw new Error('the stripped view containers differ from origin/main\'s');
+  fs.writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
 /** Unpack the vsix as an installed extension (as the spike installed its extension). */
 function installVsix(L) {
   const pkg = JSON.parse(fs.readFileSync(path.join(VSCODE_APP, 'package.json'), 'utf-8'));
@@ -473,6 +494,10 @@ async function bringUpVscode(runCfg, st) {
   const { L } = runCfg;
   st.vscodeMode = runCfg.vscodeMode;
   st.extension = installVsix(L);
+  if (runCfg.preCockpit) {
+    stripCockpitContainer(st.extension.dest);
+    st.extension.preCockpit = true;
+  }
   st.settingsPath = writeMachineSettings(L, runCfg.towerPort);
   const env = webEnv(L, runCfg);
   gateVscodeProfile({ settingsPath: st.settingsPath, port: runCfg.towerPort, env, stubsDir: STUBS });
@@ -829,7 +854,7 @@ async function cmdVscodeRestart() {
   const L = layout(scratchFromEnv());
   const st = loadState(L);
   assertTripwireClean(L, st);
-  const runCfg = { ...runCfgFromState(L, st), ideServerBin: process.env.COCKPIT_IDE_SERVER_BIN };
+  const runCfg = { ...runCfgFromState(L, st), ideServerBin: process.env.COCKPIT_IDE_SERVER_BIN, preCockpit: process.env.COCKPIT_PRE_COCKPIT === '1' };
   const markers = st.vscodeMode === 'serve-web' ? ['serve-web', `--port ${st.webPort}`] : [`--port ${st.webPort}`, `--connection-token-file ${L.vscodeToken}`];
   const cmd = processTable().get(st.webPid)?.command ?? '';
   if (!markers.every((m) => cmd.includes(m))) throw new Error(`pid ${st.webPid} is not the harness's ${st.vscodeMode} (it runs '${cmd}')`);
@@ -859,6 +884,11 @@ async function cmdVerify(script) {
   assertTripwireClean(L, st);
   const stale = vsixIsCurrent(L) ?? (st.extension.vsixSha256 === sha256(L.vsix) ? null : 'the vsix was rebuilt after start installed it; stop and start again');
   if (stale) throw new Error(`the installed vsix is not the branch's: ${stale}`);
+  if (Boolean(st.extension.preCockpit) !== (script === 'profile-seed')) {
+    throw new Error(st.extension.preCockpit
+      ? 'the install has no Cockpit container (COCKPIT_PRE_COCKPIT): only profile-seed runs against it; vscode-restart without it first'
+      : 'profile-seed needs the install without the Cockpit container: COCKPIT_PRE_COCKPIT=1 vscode-restart first');
+  }
   const out = path.join(L.logs, `verify-${script}.json`);
   const r = spawnSync(process.execPath, [
     path.join(HERE, 'cockpit-verify.mjs'), script, '--url-template', workbenchUrlFor(L, st, '__QUERY__'), '--fixtures', fixturesDir(st),

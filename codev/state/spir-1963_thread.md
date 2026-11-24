@@ -1068,3 +1068,50 @@ run.
 - **Process note:** porch's `arrange_cockpit` refresh boundary was recorded as acknowledged when I
   called `porch next` a second time, before I had refreshed. I am running the builder-refresh
   procedure now, at that boundary, before starting Phase 9.
+
+## Phase 9: arrange_cockpit (2026-11-24)
+
+- **What it is.** *Codev: Arrange Cockpit* (`codev.cockpit.arrange`, palette and the Cockpit's
+  title bar) arranges the editor area as `main` | (Work over Decisions). The first Cockpit show in a
+  window does it automatically (`codev.cockpit.autoArrange`, default on). The first automatic one
+  shows a one-time notice whose *Don't arrange automatically* turns the setting off at the user
+  level. Not offered in builder-worktree or no-workspace windows (the command says why, and the
+  title-bar entry is hidden).
+- **How (`cockpit/arrange.ts`).** On the layout spike: place the architect in group 1, Work in 2,
+  Decisions in 3 *before* `vscode.setEditorLayout`. Moving a group's only editor closes the group
+  and renumbers the rest, so this order matters. With no architect and only the panels in group 1,
+  an empty left group is opened first. Every move is awaited against the tab model with a 5 s bound;
+  a move that does not happen stops the arrange with an error naming it. The architect resolves
+  through `openResolvedArchitect` (main only, #1497 warning). `terminalPosition: panel` is
+  overridden for this path only (a `position` argument to `openArchitect`).
+- **Auto-arrange (`cockpit/auto-arrange.ts`)** waits for the window's first connection attempt
+  (`ready()` in `initialize()`'s `finally`), so a reload with the Cockpit showing can resolve the
+  architect.
+- **What rendering found, fixed here:**
+  1. *Preview tabs.* `WebviewPanel.reveal(column)` into another group lands the panel there as a
+     **preview** tab (1.147.0's `revealWebview` does not pin; `createWebviewPanel` does). The next
+     file opened in that group would replace it, closing the panel and its draft. Arrange now keeps
+     a panel left as a preview (`workbench.action.keepEditor`, the panel focused and confirmed
+     first), before the architect takes focus.
+  2. *A second Work panel after a reload.* VS Code revives a restored webview only when its tab is
+     shown, so `show()` with no live panel created a second one beside the restored tab. That was
+     Phase 7/8 code; arrange made it routine. `show()` now opens the live panel in the restored
+     tab's group (or the placement) and closes the restored tab after it.
+     `TabInputWebview.viewType` carries the internal `mainThreadWebview-` prefix.
+- **Adjacent changes:** the availability text says "Use it from the parent workspace's window"
+  (it read wrong for a command); `readArchitectRoster` is shared by *Open Architect* and arrange;
+  the menu-parity oracle has a fifth record kind for the Cockpit's own entries.
+- **Harness:** `verify arrange` (scenarios 7, 9, 13, 14, 19). `profile-seed` / `profile-existing`
+  cover the spec's existing-profile risk: `COCKPIT_PRE_COCKPIT=1 vscode-restart` strips the Cockpit
+  container from the install (checked against origin/main's package.json), a new browser profile
+  uses Codev on it, then the branch's install loads that profile.
+- **Rendered (isolated harness, VS Code 1.147.0 serve-web):** `verify arrange` 15/15,
+  `profile-seed` 1/1, `profile-existing` 1/1; evidence in `verification-phase9/`. Work at the
+  split's width is 473 px; a typical 44-character title shows 42 characters (architect's 14:00Z
+  ruling: 20+). On a profile that used Codev before the Cockpit existed, VS Code places the Cockpit
+  button directly below Codev, as on a fresh profile, so the PR needs no activity-bar caveat.
+- **Harness findings on 1.147.0** (verify script only, not product): `settings.json` opens in a
+  modal editor that takes clicks and F1; a tab's aria-label keeps ", preview" after the tab is
+  kept, so preview is read from the italic label; a terminal takes focus a moment after its tab is
+  clicked and would swallow the palette's typing; a reload right after a layout command can
+  restore the previous layout.

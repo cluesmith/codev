@@ -5,7 +5,9 @@
  * - **One per window.** Opening it again reveals it where it is, and never creates a second one or
  *   reloads the first. Where it is not offered (`availability.ts`) its command says why instead.
  * - **Restored after a reload** through its serializer. A second restored panel, or one restored
- *   where the panel is not offered, is closed.
+ *   where the panel is not offered, is closed. VS Code revives a restored panel only when its tab is
+ *   shown, so until then the tab has no panel behind it: opening the panel then puts the live one in
+ *   that tab's group and closes the restored tab, rather than leaving two.
  * - **Retained.** `retainContextWhenHidden` keeps the webview's state (a Decisions draft) while the
  *   panel is hidden or moved between groups.
  * - **Its visibility is observable** (`visible`, `onDidChangeVisibility`), so a panel can count
@@ -27,11 +29,26 @@ export interface SinglePanelOptions {
   log: (line: string) => void;
 }
 
+/** Where *Arrange Cockpit* puts a panel: its editor group, and whether focus stays where it is. */
+export interface PanelPlacement {
+  viewColumn: vscode.ViewColumn;
+  preserveFocus: boolean;
+}
+
 /** Which panel: its restore type, its title, and its bundle `dist/webview/<bundle>.{js,css}`. */
 export interface PanelKind {
   viewType: string;
   title: string;
   bundle: string;
+}
+
+/**
+ * Whether an editor tab is a panel of this view type. VS Code's tab model reports an extension's
+ * webview panel type with its internal `mainThreadWebview-` prefix (1.147.0), so both forms match.
+ */
+export function isPanelTab(tab: vscode.Tab, viewType: string): boolean {
+  return tab.input instanceof vscode.TabInputWebview
+    && (tab.input.viewType === viewType || tab.input.viewType === `mainThreadWebview-${viewType}`);
 }
 
 /** What the webview may load: the bundle under `dist`, and nothing else from the extension. */
@@ -48,29 +65,49 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
 
   protected constructor(private readonly kind: PanelKind, private readonly base: SinglePanelOptions) {}
 
-  /** Reveal the panel where it is, or open it in the active editor group. Where it is not offered, say why. */
-  show(): void {
+  /**
+   * Reveal the panel where it is, or open it in the active editor group. Where it is not offered, say
+   * why. With a `placement` (*Arrange Cockpit*) it is moved to, or opened in, that group instead; the
+   * same panel is moved, never closed and reopened, so its webview keeps its state.
+   *
+   * A tab restored by a reload and not yet revived has no state to keep: the new panel opens in its
+   * group (or at the placement), and the restored tab is closed after it, so the window never shows
+   * two. It is closed after the new panel opens, so its group is never left empty and closed.
+   */
+  show(placement?: PanelPlacement): void {
     const reason = this.base.unavailableReason();
     if (reason) {
       void vscode.window.showInformationMessage(reason);
       return;
     }
     if (this.current) {
-      this.current.reveal();
+      if (placement) {
+        this.current.reveal(placement.viewColumn, placement.preserveFocus);
+      } else {
+        this.current.reveal();
+      }
       return;
     }
+    const restored = this.kindTabs();
     const panel = vscode.window.createWebviewPanel(
       this.kind.viewType,
       this.kind.title,
-      vscode.ViewColumn.Active,
+      placement ?? restored[0]?.group.viewColumn ?? vscode.ViewColumn.Active,
       { ...webviewOptions(this.base.extensionUri), retainContextWhenHidden: true },
     );
     this.adopt(panel);
+    for (const tab of restored) { void vscode.window.tabGroups.close(tab); }
   }
 
   /** The panel, if one is open. */
   get panel(): vscode.WebviewPanel | undefined {
     return this.current;
+  }
+
+  /** The open panel's editor tab: whether it is a preview tab, and whether it is active. */
+  get tab(): vscode.Tab | undefined {
+    const column = this.current?.viewColumn;
+    return column === undefined ? undefined : this.kindTabs().find(tab => tab.group.viewColumn === column);
   }
 
   /** Whether the panel is open and on screen. */
@@ -94,6 +131,11 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
 
   dispose(): void {
     this.visibilityEmitter.dispose();
+  }
+
+  /** Every editor tab of this kind: the open panel's, and any restored one not yet revived. */
+  private kindTabs(): vscode.Tab[] {
+    return vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => isPanelTab(tab, this.kind.viewType));
   }
 
   /** Start the session that answers a new or restored panel's webview. */

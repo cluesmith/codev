@@ -70,12 +70,19 @@ const createWebviewPanel = vi.fn((_viewType: string, _title: string, _column: nu
 });
 const showInformationMessage = vi.fn();
 const openExternal = vi.fn(async (_uri: unknown) => true);
+class TabInputWebview { constructor(readonly viewType: string) {} }
+/** The editor area's tabs, by group; empty unless a test puts a restored tab there. */
+const tabGroups = {
+  all: [] as Array<{ viewColumn: number; tabs: unknown[] }>,
+  close: vi.fn(async (_tab: unknown) => true),
+};
 
 vi.mock('vscode', () => ({
   EventEmitter: class extends FakeEmitter<void> { dispose() {} },
-  window: { createWebviewPanel, showInformationMessage },
+  window: { createWebviewPanel, showInformationMessage, tabGroups },
   env: { openExternal },
   ViewColumn: { Active: -1 },
+  TabInputWebview,
   Uri: {
     parse: (value: string) => ({ toString: () => value }),
     joinPath: (base: { path: string }, ...parts: string[]) => ({ path: [base.path, ...parts].join('/') }),
@@ -107,6 +114,8 @@ function setup(opts: { reason?: string | null; bridge?: ReturnType<typeof fakeBr
 
 beforeEach(() => {
   panels.length = 0;
+  tabGroups.all = [];
+  tabGroups.close.mockClear();
   createWebviewPanel.mockClear();
   showInformationMessage.mockClear();
   openExternal.mockClear();
