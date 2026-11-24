@@ -269,6 +269,17 @@ describe('Spec 1940 phase 4 — the reply footer', () => {
       // An architect is still given the sender's address: it is the right one once codev runs.
       expect(replyOf('architect:main', TUNNEL)).toBe('codev:architect:main');
     });
+
+    it('is resolved only when the sender\'s own address is refused', () => {
+      // The name table is read once to name the sender's workspace, and once more only if
+      // the front door has to be looked up.
+      expect(replyOf('architect:main', TUNNEL)).toBe('codev:architect:main');
+      expect(mockGetRegisteredWorkspaces).toHaveBeenCalledTimes(1);
+
+      mockGetRegisteredWorkspaces.mockClear();
+      expect(replyOf('architect:main', CLOUD_BUILDER)).toBe('codev:architect');
+      expect(mockGetRegisteredWorkspaces).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('the sender\'s workspace by its address name', () => {

@@ -703,18 +703,23 @@ export function crossWorkspaceOrigin(sender: MessageSender, recipient: MessageRe
     id: recipient.isArchitect ? `architect:${recipient.agent}` : recipient.agent,
     workspace: recipient.workspacePath,
   };
-  const candidates: AgentAddress[] = [senderAddress];
-  if (agent.kind === 'architect' && agent.name !== undefined) {
+  const mayAddress = (address: AgentAddress): boolean =>
+    refusalToAddress(address, sender.workspace, replier) === null;
+  // The front door is resolved only when the sender's own address is refused: an architect
+  // recipient, which is never refused, costs no resolution here.
+  const frontDoorToSender = (): AgentAddress | null => {
+    if (agent.kind !== 'architect' || agent.name === undefined) return null;
     const frontDoor: AgentAddress = { kind: 'architect', workspace: named.name };
+    if (!mayAddress(frontDoor)) return null;
     const reached = reachedByFrontDoor(frontDoor, replier);
-    if (reached !== null && reached.architect === agent.name && isSameWorkspace(reached.workspacePath, sender.workspace)) {
-      candidates.push(frontDoor);
-    }
-  }
-  const allowed = candidates.find((address) => refusalToAddress(address, sender.workspace, replier) === null);
+    const reachesSender =
+      reached !== null && reached.architect === agent.name && isSameWorkspace(reached.workspacePath, sender.workspace);
+    return reachesSender ? frontDoor : null;
+  };
+  const allowed = mayAddress(senderAddress) ? senderAddress : frontDoorToSender();
 
   let reply: ReplyRoute;
-  if (allowed !== undefined) reply = { how: 'address', address: allowed };
+  if (allowed !== null) reply = { how: 'address', address: allowed };
   else reply = recipient.isArchitect ? { how: 'none' } : { how: 'through-architect' };
   return { sender: senderAddress, reply };
 }
