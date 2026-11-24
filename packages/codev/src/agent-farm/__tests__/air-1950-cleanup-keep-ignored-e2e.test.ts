@@ -30,7 +30,14 @@ vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
     ...actual, // execFileSync stays real: the keep module asks git which files to keep
-    execFile: vi.fn((_c: string, _a: string[], cb: (e: Error | null, out: string) => void) => { cb(null, ''); return {}; }),
+    // `ps` (cmd, args, cb) is faked; the dirty notice's `git status` (cmd, args, options, cb) runs for real.
+    execFile: vi.fn((c: string, a: string[], optionsOrCb: unknown, maybeCb?: unknown) => {
+      if (typeof optionsOrCb !== 'function') {
+        return (actual.execFile as unknown as (...args: unknown[]) => unknown)(c, a, optionsOrCb, maybeCb);
+      }
+      (optionsOrCb as (e: Error | null, out: string) => void)(null, '');
+      return {};
+    }),
   };
 });
 
@@ -132,6 +139,7 @@ describe('afx cleanup --keep-ignored, end to end (#1950)', () => {
     }
     expect(logged).toContain(`Kept 3 file(s) in ${keptDir}`);
     expect(logged).toContain('Not kept (dependency or build output): 1 file(s)');
+    expect(logged).toContain('Worktree has uncommitted changes: 1 uncommitted file(s)'); // notes.md, read by real git status
     expect(steps).toContain(`git worktree remove "${worktree}" --force`);
     expect(mockRemoveBuilder).toHaveBeenCalledWith('bugfix-7', workspaceRoot);
   });

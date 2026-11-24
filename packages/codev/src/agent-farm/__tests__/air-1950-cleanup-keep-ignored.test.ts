@@ -17,11 +17,18 @@ vi.mock('../db/index.js', () => {
   return { getDb: () => db, getGlobalDb: () => db, closeDb: () => {}, closeGlobalDb: () => {} };
 });
 vi.mock('../db/mailbox.js', () => ({ dismissHeldForAgent: () => 0 }));
+// execFile has two callers: `ps` (cmd, args, cb) and the dirty notice's `git status`
+// (cmd, args, options, cb). `gitStatusOut` is what that status reports.
+let gitStatusOut = '';
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
     ...actual,
-    execFile: vi.fn((_c: string, _a: string[], cb: (e: Error | null, out: string) => void) => { cb(null, ''); return {}; }),
+    execFile: vi.fn((c: string, a: string[], optionsOrCb: unknown, maybeCb?: unknown) => {
+      const cb = (typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb) as (e: Error | null, out: string) => void;
+      cb(null, c === 'git' && a[0] === 'status' ? gitStatusOut : '');
+      return {};
+    }),
   };
 });
 
@@ -69,6 +76,7 @@ vi.mock('../lib/keep-files.js', async (importOriginal) => ({
 }));
 
 const { cleanup } = await import('../commands/cleanup.js');
+const { logger } = await import('../utils/logger.js');
 
 const workspaceRoot = join(root, 'ws');
 const worktree = join(workspaceRoot, '.builders', 'bugfix-7');
@@ -101,6 +109,7 @@ describe('afx cleanup --keep-ignored (#1950)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     steps.length = 0;
+    gitStatusOut = '';
     rmSync(keptDir, { recursive: true, force: true });
     mkdirSync(worktree, { recursive: true });
     mockGetConfig.mockReturnValue(config());
@@ -134,6 +143,14 @@ describe('afx cleanup --keep-ignored (#1950)', () => {
     expect(steps).toEqual([]);
     expect(mockKeepFiles).not.toHaveBeenCalled();
     expect(removed()).toEqual({ worktree: false, branch: false, row: false });
+  });
+
+  it('the dirty notice reads git status, not the "Unable to check status" fallback', async () => {
+    gitStatusOut = ' M notes.md\0';
+    await cleanup({ issue: 7 });
+    const notices = vi.mocked(logger.info).mock.calls.map(([msg]) => String(msg));
+    expect(notices).toContain('Worktree has uncommitted changes: 1 uncommitted file(s)');
+    expect(notices).not.toContain('Worktree has uncommitted changes: Unable to check status');
   });
 
   it('keeps nothing without the flag', async () => {

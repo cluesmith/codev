@@ -293,10 +293,11 @@ describe.skipIf(isWindows)('Spec 1951 — check deploy (stub git)', { timeout: 3
       runs.hang();
       const started = Date.now();
 
-      const { report } = await runReadOnly(['8'], { timeoutMs: 1_000 });
+      // The limit bounds every call of the run: 1 s let an earlier call time out first under load.
+      const { report } = await runReadOnly(['8'], { timeoutMs: 5_000 });
 
-      expect(byId(report, 8, 'deploy-run')).toMatchObject({ status: 'not-run', reason: 'workflow-runs timed out after 1s' });
-      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(byId(report, 8, 'deploy-run')).toMatchObject({ status: 'not-run', reason: 'workflow-runs timed out after 5s' });
+      expect(Date.now() - started).toBeLessThan(20_000); // the stub sleeps 60 s
     });
 
     it('a deploy branch origin does not have: on-branch not run', async () => {

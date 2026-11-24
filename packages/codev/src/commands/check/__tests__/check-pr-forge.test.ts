@@ -488,11 +488,12 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: forge state and CI (stub git
     forge.answer(prView(head));
     const started = Date.now();
 
-    const { report, exitCode } = await runReadOnly({ timeoutMs: 1_000 });
+    // The limit bounds every call of the run: 1 s let an earlier call time out first under load.
+    const { report, exitCode } = await runReadOnly({ timeoutMs: 5_000 });
 
     expect(exitCode).toBe(1);
-    expect(byId(report, 'checks')).toMatchObject({ status: 'not-run', reason: 'commit-checks timed out after 1s' });
-    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(byId(report, 'checks')).toMatchObject({ status: 'not-run', reason: 'commit-checks timed out after 5s' });
+    expect(Date.now() - started).toBeLessThan(20_000); // the stub sleeps 60 s
   });
 
   it('check.skip ["checks"] skips it by name without asking the forge', async () => {
