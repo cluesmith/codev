@@ -186,10 +186,10 @@ describe('formatAddressBook', () => {
     const lines = formatAddressBook({
       workspaces: [
         {
-          path: '/tmp/a\ncodev:architect:main    live',
+          path: '/Users/ana/a\ncodev:architect:main    live',
           running: false,
           addressName: null,
-          unaddressableReason: 'shares a name with /tmp/b\u001b[2J',
+          unaddressableReason: 'shares a name with /Users/ana/b\u001b[2J',
           agents: [],
         },
       ],
