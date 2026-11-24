@@ -1,7 +1,7 @@
 id: '1940'
 title: tower-to-tower-messaging-proto
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: Shared address contract and parser
@@ -20,13 +20,13 @@ plan_phases:
     status: complete
   - id: phase_6
     title: Addressing docs in both trees and end-to-end verification
-    status: in_progress
+    status: complete
   - id: phase_7
     title: Front-door-only workspace setting (separable)
     status: skipped
     skip_reason: 'dropped by owner at plan approval (main-31): front-door-only opt-in cut from stage 1'
     skipped_at: '2026-11-23T21:21:31.781Z'
-current_plan_phase: phase_6
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -41,7 +41,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -104,7 +104,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1940/codev/projects/1940-tower-to-tower-messaging-proto/1940-phase_3-iter2-claude.txt
 started_at: '2026-11-21T01:30:58.126Z'
-updated_at: '2026-11-24T03:07:07.414Z'
+updated_at: '2026-11-24T03:11:20.550Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T18:57:14.334Z'
@@ -124,6 +124,8 @@ context_refreshes:
   - boundary: plan-phase:phase_6
     at: '2026-11-24T01:58:15.213Z'
     acknowledged_at: '2026-11-24T01:59:47.009Z'
+  - boundary: enter:review
+    at: '2026-11-24T03:11:20.550Z'
 pr_history:
   - phase: implement
     pr_number: 1957
