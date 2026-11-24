@@ -1,12 +1,13 @@
 /**
- * Per-lane model configuration reaching the SDKs (spec 1286, Phase 2).
+ * Per-lane model configuration reaching the providers (spec 1286, Phase 2): the Codex SDK, and, since
+ * #1912, the installed `claude` CLI (a stub here, recording its argv).
  *
- * Covers spec scenarios 1, 2, 3 and 12: a configured id reaches each SDK, `--model-id` outranks
+ * Covers spec scenarios 1, 2, 3 and 12: a configured id reaches each lane, `--model-id` outranks
  * config, and a provider rejection fails loudly naming the config key *and* the layer that supplied
  * it.
  *
  * Default-model assertions are deliberately two-layer (see the plan):
- *   - Layer A (most tests): assert the SDK receives the module's DEFAULT_* constant. Rebase-proof —
+ *   - Layer A (most tests): assert the lane receives the module's DEFAULT_* constant. Rebase-proof —
  *     stays correct when a shipped default changes (issue #1288) with no edit here.
  *   - Layer B (one test): pin the constants to the literal ids shipped at this commit. This is the
  *     single intended edit point when defaults change, and it fails loudly on accidental drift.
@@ -18,8 +19,9 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { assertLaneAcceptsModelOverride } from '../../../lib/consult-lanes.js';
+import { createStubClaude, type StubClaude, type StubClaudeOptions } from '../../../__tests__/helpers/stub-claude.js';
 
-// --- SDK mocks: capture exactly what each provider was asked to run -------------------
+// --- capture exactly what each provider was asked to run --------------------------------
 
 let mockStartThreadArgs: Record<string, unknown> | undefined;
 let mockCodexEvents: unknown[] = [];
@@ -38,19 +40,20 @@ vi.mock('@openai/codex-sdk', () => {
   return { Codex: MockCodex };
 });
 
-let mockClaudeOptions: Record<string, unknown> | undefined;
-let mockClaudeMessages: unknown[] = [];
-let mockClaudeThrow: Error | null = null;
+let claude: StubClaude;
+const harnessClaudeBin = process.env.CODEV_CLAUDE_BIN;
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: (args: { options: Record<string, unknown> }) => {
-    mockClaudeOptions = args.options;
-    return (async function* () {
-      if (mockClaudeThrow) throw mockClaudeThrow;
-      for (const m of mockClaudeMessages) yield m;
-    })();
-  },
-}));
+function pinClaude(options: StubClaudeOptions = {}): void {
+  claude?.cleanup();
+  claude = createStubClaude(options);
+  process.env.CODEV_CLAUDE_BIN = claude.bin;
+}
+
+/** The `--model` the claude CLI was run with. */
+function claudeModelArg(): string {
+  const { argv } = claude.invocations('print')[0];
+  return argv[argv.indexOf('--model') + 1];
+}
 
 const {
   runCodexConsultation,
@@ -69,11 +72,6 @@ const CODEX_OK = [
   { type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } },
 ];
 
-const CLAUDE_OK = [
-  { type: 'assistant', message: { content: [{ text: 'ok' }] } },
-  { type: 'result', subtype: 'success' },
-];
-
 let tmpDir: string;
 let origHome: string | undefined;
 
@@ -89,23 +87,24 @@ beforeEach(() => {
   origHome = process.env.HOME;
   process.env.HOME = join(tmpDir, 'fake-home');
   mockStartThreadArgs = undefined;
-  mockClaudeOptions = undefined;
-  mockClaudeThrow = null;
   mockCodexEvents = CODEX_OK;
-  mockClaudeMessages = CLAUDE_OK;
+  pinClaude();
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
+  claude.cleanup();
+  if (harnessClaudeBin === undefined) delete process.env.CODEV_CLAUDE_BIN;
+  else process.env.CODEV_CLAUDE_BIN = harnessClaudeBin;
   process.env.HOME = origHome;
   vi.restoreAllMocks();
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// --- Scenario 1 & 2 — configured ids reach the SDKs ---------------------------------
+// --- Scenario 1 & 2 — configured ids reach the providers ----------------------------
 
-describe('configured lane models reach the SDK (scenarios 1, 2)', () => {
+describe('configured lane models reach the SDK and the CLI (scenarios 1, 2)', () => {
   it('codex runs the configured model id', async () => {
     writeConfig({ consult: { models: { codex: 'gpt-5.6-sol' } } });
     await runCodexConsultation('q', 'role', tmpDir);
@@ -115,7 +114,7 @@ describe('configured lane models reach the SDK (scenarios 1, 2)', () => {
   it('claude runs the configured model id', async () => {
     writeConfig({ consult: { models: { claude: 'claude-opus-5' } } });
     await runClaudeConsultation('q', 'role', tmpDir);
-    expect(mockClaudeOptions?.model).toBe('claude-opus-5');
+    expect(claudeModelArg()).toBe('claude-opus-5');
   });
 
   it('codex runs the configured reasoning effort', async () => {
@@ -127,7 +126,7 @@ describe('configured lane models reach the SDK (scenarios 1, 2)', () => {
   it('configuring one lane leaves the other on its default', async () => {
     writeConfig({ consult: { models: { codex: 'gpt-5.6-sol' } } });
     await runClaudeConsultation('q', 'role', tmpDir);
-    expect(mockClaudeOptions?.model).toBe(DEFAULT_CLAUDE_MODEL);
+    expect(claudeModelArg()).toBe(DEFAULT_CLAUDE_MODEL);
   });
 });
 
@@ -142,7 +141,7 @@ describe('unset config preserves pre-change behavior (Layer A)', () => {
 
   it('claude falls back to the default constant', async () => {
     await runClaudeConsultation('q', 'role', tmpDir);
-    expect(mockClaudeOptions?.model).toBe(DEFAULT_CLAUDE_MODEL);
+    expect(claudeModelArg()).toBe(DEFAULT_CLAUDE_MODEL);
   });
 
   it('a config with no consult block is the same as no config', async () => {
@@ -179,7 +178,7 @@ describe('--model-id overrides config (scenario 12)', () => {
     writeConfig({ consult: { models: { claude: 'claude-from-config' } } });
     const choice = resolveLaneModelChoice(tmpDir, 'claude', DEFAULT_CLAUDE_MODEL, 'claude-from-flag');
     await runClaudeConsultation('q', 'role', tmpDir, undefined, undefined, choice);
-    expect(mockClaudeOptions?.model).toBe('claude-from-flag');
+    expect(claudeModelArg()).toBe('claude-from-flag');
   });
 
   it('applies where no config exists at all', () => {
@@ -331,7 +330,16 @@ describe('provider rejection fails loudly with no fallback (scenario 3)', () => 
 
   it('claude: error keeps the provider text and names the key and layer', async () => {
     writeConfig({ consult: { models: { claude: 'claude-nonexistent' } } });
-    mockClaudeThrow = new Error('model not found: claude-nonexistent');
+    // How the CLI reports a model the API rejected: an error result.
+    pinClaude({
+      print: {
+        stdout: [
+          { type: 'system', subtype: 'init', tools: ['Glob', 'Grep', 'Read'] },
+          { type: 'result', subtype: 'success', is_error: true, result: 'model not found: claude-nonexistent' },
+        ].map((e) => JSON.stringify(e)).join('\n') + '\n',
+        exitCode: 1,
+      },
+    });
 
     const err = await runClaudeConsultation('q', 'role', tmpDir).catch((e: unknown) => e as Error);
 

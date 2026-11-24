@@ -476,6 +476,60 @@ describe('attach command', () => {
       const result = findShellperSocket(builder);
       expect(result).toBeNull();
     });
+
+    // Spec 1658: a Windows row names a pipe (no file to check) and carries the
+    // secret and WELCOME identity the attach must present and verify.
+    it('returns a pipe endpoint with its credentials from the row', async () => {
+      const { findShellperAttachTarget } = await import('../commands/attach.js');
+      const pipe = '\\\\.\\pipe\\codev-shellper-user-0000';
+
+      mockDbGet.mockReturnValue({
+        shellper_socket: pipe,
+        shellper_pid: 4242,
+        shellper_session_id: 'sess-1',
+        shellper_secret: 'f'.repeat(64),
+      });
+      mockExistsSync.mockReturnValue(false);
+
+      const builder: Builder = {
+        id: '1658',
+        name: 'test',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/1658',
+        branch: 'builder/1658',
+        type: 'spec',
+      };
+
+      expect(findShellperAttachTarget(builder)).toEqual({
+        endpoint: pipe,
+        auth: { secret: 'f'.repeat(64), expectedSessionId: 'sess-1', expectedShellperPid: 4242 },
+      });
+    });
+
+    it('returns null for a pipe row without a secret', async () => {
+      const { findShellperAttachTarget } = await import('../commands/attach.js');
+
+      mockDbGet.mockReturnValue({
+        shellper_socket: '\\\\.\\pipe\\codev-shellper-user-0001',
+        shellper_pid: 4242,
+        shellper_session_id: 'sess-1',
+        shellper_secret: null,
+      });
+      mockExistsSync.mockReturnValue(false);
+
+      const builder: Builder = {
+        id: '1658',
+        name: 'test',
+        status: 'implementing',
+        phase: 'init',
+        worktree: '/workspace/.builders/1658',
+        branch: 'builder/1658',
+        type: 'spec',
+      };
+
+      expect(findShellperAttachTarget(builder)).toBeNull();
+    });
   });
 
   describe('attachTerminal', () => {

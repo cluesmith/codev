@@ -14,6 +14,7 @@
  */
 
 import { defineConfig } from 'vitest/config';
+import { MAX_WORKERS } from './vitest-workers';
 
 export default defineConfig({
   test: {
@@ -26,7 +27,8 @@ export default defineConfig({
     testTimeout: 1200000, // 20 minutes per test
     hookTimeout: 300000,  // 5 minutes for setup/teardown
     pool: 'forks',        // Isolate tests
-    maxConcurrency: 1,    // Run sequentially (expensive)
+    maxWorkers: MAX_WORKERS,  // Files at once (#1956); see vitest-workers.ts
+    maxConcurrency: 1,    // `test.concurrent` tests within one file run one at a time
     globals: true,
   },
 });

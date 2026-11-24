@@ -114,12 +114,16 @@ If Tower is running during an upgrade, restart it afterwards so it picks up the 
 
 | Dependency | Install | Purpose |
 |------------|---------|---------|
-| Node.js 18+ | `brew install node` | Runtime |
+| Node.js 22+ | `brew install node` | Runtime |
 | git 2.5+ | (pre-installed) | Version control |
 | AI CLIs | See below | All three recommended |
 
+On Linux and WSL, also install `build-essential` and `python3` (node-pty compiles from source).
+
+**Windows:** two paths. **Native**: Node.js 22 (x64 or ARM64), [Git for Windows](https://git-scm.com/download/win) and `jq`, no admin rights or Developer Mode needed. **WSL 2**: follow the Linux instructions inside your distribution. See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md#windows) for setup and limitations.
+
 **AI CLIs** (install all three for multi-model consultation):
-- Claude Code: `npm install -g @anthropic-ai/claude-code`
+- Claude Code: `curl -fsSL https://claude.ai/install.sh | bash`, or `npm install -g @anthropic-ai/claude-code`. The `claude` consult lane runs this CLI and needs version 2.1.141 or newer.
 - Antigravity CLI (`agy`, the `gemini` consult lane): `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then run `agy` once to sign in (OAuth — replaces the retired Gemini CLI)
 - Codex CLI: `npm install -g @openai/codex`
 
@@ -382,7 +386,7 @@ Templates in `codev/protocols/spir/templates/` can be modified to fit your team'
 
 ## Agent Farm (Optional)
 
-Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, TICK, etc.) work perfectly in any AI coding assistant.
+Agent Farm is an optional companion tool for Codev that provides a web-based dashboard for managing multiple AI agents working in parallel. **You can use Codev without Agent Farm** - all protocols (SPIR, BUGFIX, etc.) work perfectly in any AI coding assistant.
 
 **Why use Agent Farm?**
 - **Web dashboard** for monitoring multiple builders at once

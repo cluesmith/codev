@@ -1,7 +1,8 @@
 /**
  * ShellperClient: Tower's connection to a single shellper process.
  *
- * Connects to a shellper via Unix socket, performs HELLO/WELCOME handshake,
+ * Connects to a shellper via Unix socket (POSIX) or named pipe (Windows),
+ * performs HELLO/WELCOME handshake,
  * and provides a typed API for sending/receiving frames. Emits events for
  * data, exit, replay, and errors.
  *
@@ -46,6 +47,44 @@ export const DEFAULT_REPLAY_TIMEOUT_MS = 500;
 // frame arriving on a later socket read (same-process reads are normally
 // sub-millisecond) — see waitForReplay() for the full rationale.
 export const LEGACY_REPLAY_TIMEOUT_MS = 50;
+
+/**
+ * Credentials and expected identity for a secret-gated (Windows) shellper
+ * (Spec 1658). The secret goes in HELLO; the expectations are checked against
+ * WELCOME's `sessionId` and `shellperPid`, so a client never adopts a shellper
+ * other than the one its DB row names.
+ */
+export interface ShellperClientAuth {
+  secret: string;
+  expectedSessionId?: string;
+  expectedShellperPid?: number;
+}
+
+/**
+ * The shellper answered, but it is not the one the caller expected: WELCOME
+ * named a different session or shellper PID. Unlike a transient connect
+ * failure, this is proof that the endpoint does not belong to the recorded
+ * session (Spec 1658).
+ */
+export class ShellperIdentityError extends Error {
+  readonly code = 'SHELLPER_IDENTITY_REFUSED';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShellperIdentityError';
+  }
+}
+
+/** Why a WELCOME fails the caller's identity expectations, or null when it passes. */
+export function welcomeIdentityMismatch(welcome: WelcomeMessage, auth: ShellperClientAuth): string | null {
+  if (auth.expectedSessionId !== undefined && welcome.sessionId !== auth.expectedSessionId) {
+    return `WELCOME sessionId ${String(welcome.sessionId)} does not match expected ${auth.expectedSessionId}`;
+  }
+  if (auth.expectedShellperPid !== undefined && welcome.shellperPid !== auth.expectedShellperPid) {
+    return `WELCOME shellperPid ${String(welcome.shellperPid)} does not match expected ${auth.expectedShellperPid}`;
+  }
+  return null;
+}
 
 export interface IShellperClient extends EventEmitter {
   connect(): Promise<WelcomeMessage>;
@@ -172,6 +211,7 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
   constructor(
     private readonly socketPath: string,
     private readonly clientType: 'tower' | 'terminal' = 'tower',
+    private readonly auth: ShellperClientAuth | null = null,
   ) {
     super();
   }
@@ -360,8 +400,13 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
 
       socket.on('connect', () => {
         socket.pipe(parser);
-        // Send HELLO to initiate handshake
-        socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType }));
+        // Send HELLO to initiate handshake. The secret is added only for a
+        // secret-gated (Windows) shellper, so POSIX HELLO bytes are unchanged.
+        if (this.auth) {
+          socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType, secret: this.auth.secret }));
+        } else {
+          socket.write(encodeHello({ version: PROTOCOL_VERSION, clientType: this.clientType }));
+        }
       });
 
       socket.on('close', () => {
@@ -403,6 +448,18 @@ export class ShellperClient extends EventEmitter implements IShellperClient {
               if (shellperVersion > PROTOCOL_VERSION) {
                 // Newer shellper — log warning but continue (forward compatible)
                 this.emit('version-warning', shellperVersion, PROTOCOL_VERSION);
+              }
+
+              // Spec 1658: on a secret-gated shellper, WELCOME must name the
+              // session and shellper the caller expects.
+              if (this.auth) {
+                const mismatch = welcomeIdentityMismatch(welcome, this.auth);
+                if (mismatch) {
+                  handshakeResolved = true;
+                  reject(new ShellperIdentityError(mismatch));
+                  this.cleanup();
+                  return;
+                }
               }
 
               handshakeResolved = true;

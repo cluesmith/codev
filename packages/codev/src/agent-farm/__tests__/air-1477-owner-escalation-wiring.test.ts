@@ -45,9 +45,11 @@ const { getMailboxDrainer } = await import('../servers/mailbox-wiring.js');
 const { listHeld, getById, NOTICE_SUPERSEDE_PREFIX } = await import('../db/mailbox.js');
 const mailbox = await import('../db/mailbox.js');
 import type { HeldOwnerNoticeInfo } from '../servers/mailbox-delivery.js';
+// Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
+import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 
 /** A real directory, so `normalizeWorkspacePath`'s realpathSync resolves on both sides. */
-const root = realpathSync(mkdtempSync(join(tmpdir(), 'air-1477-escalate-')));
+const root = normalizeWorkspacePath(mkdtempSync(join(tmpdir(), 'air-1477-escalate-')));
 const WS = root;
 
 afterAll(() => {
@@ -267,7 +269,7 @@ describe('Issue #1477 — escalateHeldToOwner owner-resolution wiring', () => {
   it('resolves the owner within the STARVING agent\'s workspace, not some other one', () => {
     // Issue #1118: one global.db serves every workspace, and the same builder id can live in two.
     // A notice must be raised against `info.workspacePath`'s registry and enqueued there.
-    const other = realpathSync(mkdtempSync(join(tmpdir(), 'air-1477-escalate-other-')));
+    const other = normalizeWorkspacePath(mkdtempSync(join(tmpdir(), 'air-1477-escalate-other-')));
     try {
       setArchitectByName(WS, 'alpha', architect('alpha'));
       setArchitectByName(other, 'beta', architect('beta'));

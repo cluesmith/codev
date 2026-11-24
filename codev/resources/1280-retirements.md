@@ -404,3 +404,98 @@ check forbids).
 
 **Loop kept, not deleted**: with all six PHASE_3 files retired, the pure-addition `describe` keeps a
 documenting test so it re-activates for any future PHASE_3 file and does not error as an empty suite.
+
+---
+
+## R7 — re-baseline the Spec 1280 deletion guard for Bugfix #1902's prompt sweep
+
+**Status: APPROVED by the architect (main), 2026-11-16, for issue #1902 — option (a): re-baseline,
+keep the guard. Applied.** The architect checked the claims against porch source before approving:
+consult commands are emitted as a builder task (`next.ts`), the SPIR review phase enforces
+`pr_exists`, and no signal name (including `AWAITING_INPUT`) is parsed anywhere. The owner still
+sees the change at the `pr` gate.
+
+The 300-line guideline and the fix-in-place rule behind the C3 rows below come from the owner's
+rulings of 2026-11-15, recorded in issue #1902.
+
+| | |
+|---|---|
+| **Assertion** | `spec-1280-prompt-deletion-guard.test.ts` → *"no baseline line has been deleted"* (kept, not retired) |
+| **Files (10)** | `codev/protocols/{spir,aspir,air}/builder-prompt.md`, `codev/protocols/{spir,aspir}/prompts/specify.md`, `codev/protocols/air/prompts/implement.md`, `codev/protocols/air/consult-types/{impl-review,pr-review}.md`, `codev/protocols/aspir/consult-types/{spec-review,plan-review}.md` |
+| **Originating issue** | **#1902 — prompt sweep: commands that fail as written, contradictions, owner rulings** |
+| **Baselines** | `fixtures/spec-1280-baselines/*.md.baseline` for the ten files, re-captured from the swept prompts |
+
+### What was removed, and the #1902 item that required it
+
+| File | Lines removed | #1902 item |
+|---|---|---|
+| spir, aspir builder-prompt | "By default, the PR is opened during/after the final implement phase…" (2) | D: `builder-prompt.md:67` vs `review.md:42` on when the PR opens — now the Review phase, which its `pr_exists` check requires |
+| air builder-prompt | Baked Decisions "in your spec, plan, or implementation … inside the spec/plan/review" (3); "(<300 LOC)", ">300 LOC" (3); "Recommend escalating to ASPIR" (1) | D: AIR Baked Decisions names artifacts AIR lacks; escalation target ("SPIR or ASPIR"); C3: 300 lines is a guideline |
+| spir, aspir specify.md | `## Signals` block with `<signal type=AWAITING_INPUT>` / `<signal>SPEC_DRAFTED</signal>` (13); "Porch runs the 3-way consultation itself … do not run `consult`" (1); aspir only: the "user feedback" / "final approved" commit lines (2) | D: dead signal machinery; porch emits consult commands for the builder to run; ASPIR has no human spec gate |
+| air implement.md | `## Signals` block (`PHASE_COMPLETE`, `TOO_COMPLEX`, `BLOCKED`) (12); "signal `TOO_COMPLEX`" scope bullet (1); "implemented exactly what it describes" bullet reworded for fix-in-place (1) | D: dead signal machinery; C3: fix in place |
+| air impl-review, pr-review | "under ~300 LOC" scope bullet (1 each) | C3: 300 lines is a guideline; small adjacent fixes named in the PR body are in scope |
+| aspir plan-review, spec-review | "the spec is already approved" / "before it goes to human approval" (4) | D: ASPIR's copied prompts keep human-gate wording |
+
+### Class-invariant compliance
+
+1. **Behaviour grep green.** All ten keep `Baked Decisions` and `do not autonomously`; the
+   guard's anti-vacuity checks pass against the new baselines, and mirror parity holds.
+2. **Guard kept, not retired.** Only the baselines move; future silent deletion is still caught.
+3. **Audit trail.** This entry, `bugfix-1902-prompt-sweep.test.ts` (which asserts the removed
+   constructs stay gone), and the bugfix-1902 thread.
+
+## R8 — re-baseline four guarded prompts for the owner's "report, don't skip" flaky-test ruling
+
+**Status: DIRECTED by the owner (decision main-13, 2026-11-16, "report"), relayed by the architect
+(main) to the bugfix-1902 builder as an instruction to change the wording everywhere it appears,
+both trees. Applied in PR #1905.** Builders no longer skip a flaky pre-existing test: they leave it
+running, name it under Flaky Tests, and tell the architect.
+
+| | |
+|---|---|
+| **Assertion** | `spec-1280-prompt-deletion-guard.test.ts` → *"no baseline line has been deleted"* (kept, not retired) |
+| **Files (4)** | `codev/protocols/air/consult-types/pr-review.md`, `codev/protocols/pir/prompts/{implement,review}.md`, `codev/protocols/pir/consult-types/pr-review.md` |
+| **Originating issue** | #1902 (fold-in requested at the `pr` gate) |
+| **Baselines** | the four `fixtures/spec-1280-baselines/*.md.baseline` files, re-captured |
+
+### What was removed
+
+One line per file, each replaced in place by its "left running, not skipped" counterpart:
+the air and pir pr-review "skipped/flaky tests are accounted for / documented" checklist item;
+pir implement.md's "skip it with annotation"; pir review.md's "tests you skipped due to
+pre-existing flakiness".
+
+### Class-invariant compliance
+
+1. **Behaviour grep green.** Every anti-vacuity string (Baked Decisions, `do not autonomously`,
+   the pr-gate approve line, the forge concept tokens) is still present in the new baselines.
+2. **Guard kept, not retired.** Only the baselines move.
+3. **Audit trail.** This entry and `bugfix-1902-prompt-sweep.test.ts`, which asserts no
+   agent-facing file (PIR included) tells a builder to skip a flaky test.
+
+## R9 — re-baseline spir/aspir spec-review.md for Bugfix #1910 (framework path named by location)
+
+**Status: APPROVED by the owner, 2026-11-23, for issue #1910 (relayed by the architect, main). Applied
+in PR #1949.**
+
+| | |
+|---|---|
+| **Assertion** | `spec-1280-prompt-deletion-guard.test.ts` → *"no baseline line has been deleted"* (kept, not retired) |
+| **Files (2)** | `codev/protocols/{spir,aspir}/consult-types/spec-review.md` |
+| **Originating issue** | #1910 (Spec 1658 finding M14) |
+| **Baselines** | `fixtures/spec-1280-baselines/{spir,aspir}-spec-review.md.baseline`, re-captured |
+
+### What was removed
+
+One line per file, the Structure bullet, replaced in place. "the spec follows the delivered
+template (`protocols/spir/templates/spec.md`), which the specify prompt inlines" now reads "the
+spec follows the SPIR spec template that the specify prompt inlines". In an adopter workspace that
+path exists only inside the installed package, so a reviewer that read it literally searched the
+disk for it.
+
+### Class-invariant compliance
+
+1. **Behaviour grep green.** Both keep `Baked Decisions` and `do not autonomously`; mirror parity
+   holds.
+2. **Guard kept, not retired.** Only the baselines move.
+3. **Audit trail.** This entry and `bugfix-1910-framework-paths.test.ts`.

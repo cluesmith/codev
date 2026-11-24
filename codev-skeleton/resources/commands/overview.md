@@ -1,11 +1,12 @@
 # Codev CLI Command Reference
 
-Codev provides three CLI tools for AI-assisted software development:
+Codev provides four core CLI tools for AI-assisted software development:
 
 | Tool | Description |
 |------|-------------|
 | `codev` | Project setup, maintenance, and framework commands |
 | `afx` | Agent Farm - multi-agent orchestration for development |
+| `porch` | Protocol orchestrator - drives each protocol's state machine |
 | `consult` | AI consultation with external models (Gemini, Codex, Claude) |
 
 ## Quick Start
@@ -33,7 +34,7 @@ consult -m gemini --protocol spir --type spec
 npm install -g @cluesmith/codev
 ```
 
-This installs all three commands globally: `codev`, `afx`, and `consult`.
+This installs the commands globally: `codev`, `afx`, `porch` and `consult` (plus `team` and `generate-image`).
 
 ## Command Summaries
 
@@ -56,16 +57,30 @@ See [codev.md](codev.md) for full documentation.
 |---------|-------------|
 | `afx workspace start` | Start the workspace |
 | `afx workspace stop` | Stop all agent farm processes |
-| `afx spawn` | Spawn a new builder |
+| `afx spawn` | Spawn a new builder (`--max-load <n>` refuses with exit 75 while the machine is loaded) |
 | `afx status` | Show status of all agents |
-| `afx cleanup` | Clean up a builder worktree |
-| `afx send` | Send instructions to a builder |
+| `afx cleanup` | Clean up a builder worktree (`--keep-ignored` copies its untracked and kept ignored files out first) |
+| `afx send` | Send instructions to a builder (`--message-file`, opt-in `--exit-code`, safe `--retry`) |
 | `afx inbox` | List/show/dismiss held (undelivered) messages |
 | `afx open` | Open file annotation viewer |
 | `afx shell` | Spawn a utility shell |
 | `afx tower` | Cross-project dashboard |
 
 See [agent-farm.md](agent-farm.md) for full documentation.
+
+### porch - Protocol Orchestrator
+
+| Command | Description |
+|---------|-------------|
+| `porch next [id]` | Emit the next tasks as JSON (the strict-mode loop) |
+| `porch done [id]` | Signal the current phase complete: run its checks and advance |
+| `porch status [id]` | Show project protocol status |
+| `porch approve <id> <gate> --a-human-explicitly-approved-this` | Record a human's gate decision (run by the builder, after the architect relays it) |
+| `porch pending` | List live pending gates across projects (stale records on finished/advanced projects hidden; `--all` shows them) |
+| `porch verify <id> --skip "reason"` | Skip post-merge verification and mark the project verified |
+| `porch -C <dir> <command>` | Run any command as if porch was started in `<dir>`, like `git -C` — no `cd` into a builder worktree. Grants nothing: `approve` still needs its flag. |
+
+Porch drives every protocol's state machine (SPIR, ASPIR, AIR, BUGFIX, PIR, MAINTAIN, RESEARCH, EXPERIMENT). `afx spawn` starts builders in strict mode, where the builder runs the `porch next` / `porch done` loop; soft-mode builders follow the protocol document themselves.
 
 ### consult - AI Consultation
 

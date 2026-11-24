@@ -42,6 +42,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import Database from 'better-sqlite3';
 
+import { ptyCommand } from '../dist/lib/pty-command.js';
 import { submitMessagePaced, writeStrategyForApp } from '../dist/agent-farm/servers/message-write.js';
 import { formatArchitectToBuilderMessage } from '../dist/agent-farm/utils/message-format.js';
 import { SessionScreen } from '../dist/terminal/session-screen.js';
@@ -162,7 +163,9 @@ const WORKING_RE = /esc to interrupt|\((?:\d+m\s+)?\d+s\s+[·•]/i;
  */
 const QUEUED_RE = /Press up to edit queued messages/;
 
-const pty: IPty = spawnPty(CMD, TUI_ARGS, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: CWD, env });
+// Spec 1658: on Windows a bare or `.cmd` agent command becomes one ConPTY can start; POSIX unchanged.
+const launch = ptyCommand(CMD, TUI_ARGS, env);
+const pty: IPty = spawnPty(launch.file, launch.args, { name: 'xterm-256color', cols: COLS, rows: ROWS, cwd: CWD, env });
 const screen = new SessionScreen(COLS, ROWS);
 
 let log = '';

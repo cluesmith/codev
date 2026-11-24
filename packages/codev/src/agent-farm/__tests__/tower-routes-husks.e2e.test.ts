@@ -12,6 +12,9 @@ import Database from 'better-sqlite3';
 import type { TowerHandle } from './helpers/tower-test-utils.js';
 import { startTower, cleanupAllTerminals, cleanupTestDb } from './helpers/tower-test-utils.js';
 
+// POSIX-only assertions: Tower spawns /bin/echo and /bin/sleep sessions and pgrep for the PTY child, with cwd /tmp.
+const skipOnWindows = process.platform === 'win32';
+
 const TEST_TOWER_PORT = 14712;
 // Long enough that the periodic timer never fires during this test file.
 const NO_PERIODIC_INTERFERENCE_MS = '3600000';
@@ -86,7 +89,7 @@ function isAlive(pid: number): boolean {
   }
 }
 
-describe('Issue #1227: on-demand husk routes + /health fleet fields', () => {
+describe.skipIf(skipOnWindows)('Issue #1227: on-demand husk routes + /health fleet fields', () => {
   beforeAll(async () => {
     tower = await startTower(TEST_TOWER_PORT, {
       SHELLPER_HUSK_SWEEP_INTERVAL_MS: NO_PERIODIC_INTERFERENCE_MS,

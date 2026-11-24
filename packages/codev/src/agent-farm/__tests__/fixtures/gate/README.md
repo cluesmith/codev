@@ -59,6 +59,45 @@ encodes the expected verdict: `<app>-<state>.<clean|busy>.txt`.
 - **wrapper-boot.busy.txt** — **synthetic** builder launch-loop screen (a born-dirty
   state with no composer marker). App-agnostic: no marker → busy under any profile.
 
+- **conpty/\*.capture.jsonl.gz** (Spec 1658) — **timed** captures of a real agent TUI under
+  Windows ConPTY: output chunks, keystrokes and resizes stamped in milliseconds, plus probe
+  points. Recorded by `packages/codev/scripts/spec-1658-conpty-capture.mts` on an authenticated
+  Windows machine (recipe: `codev/projects/1658-windows-native-non-wsl-support/audit.md`,
+  "ConPTY → Phase 8"); replayed through the production delivery path by
+  `spec-1658-conpty-gate-replay.test.ts`. Scrubbed of user name, profile path, scratch path and
+  host name with same-length placeholders at record time. The claude set (2.1.326, 120×40, owner
+  machine, 2026-11-17): idle, draft, midturn, resize, and two M15 controls, `prefix` (the
+  suggestion's first character typed) and `prefix-left` (then Left onto it), both held. The
+  controls are the evidence for the ghost exemption's shared residual (an inverse one-character
+  draft with a dim remainder would read as a ghost): claude drew no such screen in any of them.
+
+- **claude-conpty-ghost-idle.replay.bin.gz** (Spec 1658, M15) — **real capture**: the output of
+  an idle claude 2.1.326 under Windows ConPTY at 120×40, taken from the recorder's
+  `.diagnostic` file for a failed idle state (owner machine, 2026-11-17; scrubbed and
+  leak-checked by the recorder; the only path left is claude's own `~\AppData\Local\Temp\…`).
+  Claude draws its software cursor inverse over the first character of a dim suggestion while
+  ConPTY parks the hidden hardware cursor at the end of the last row: the case the ghost
+  exemption's first-input-cell anchor exists for. Expected verdict: clean.
+
+- **conpty/conpty-claude-ascii-\*.capture.jsonl.gz** (Issue #1920) — **real** timed ConPTY
+  captures of claude 2.1.327 at 120×40 (owner machine, 2026-11-18), recorded with the recorder's
+  `--bare-env`: no `TERM` and none of the variables claude's Unicode check reads (`WT_SESSION`,
+  `TERM_PROGRAM`, …). That is the env an architect launched straight into ConPTY had before Tower
+  set `TERM` for every PTY child, and claude answers it with its ASCII fallbacks: the composer
+  marker is `>` followed by U+00A0, the echo of a submitted turn is `> …`, the tick is `√`. States:
+  idle (delivered), draft (held), prefix-left (held), midturn (delivered; its final screen has the
+  `> …` turn echo above the empty composer, so it also pins that the echo never takes the marker).
+  The header carries `"env": "bare"`. The recorder's **default** env sets `TERM=xterm-256color`
+  itself, so every other ConPTY capture is a `❯` screen: before #1920 nothing recorded the screen
+  production architects actually drew.
+
+- **claude-conpty-ghost-idle-ascii.replay.bin.gz** (Issue #1920) — **derived**: the M15 capture
+  above with every `❯` replaced by `>` and no other byte changed. It pins the ghost exemption's
+  first-input-cell anchor on an ASCII-marker screen. It is derived rather than recorded because
+  six bare-env and normal-env idle recordings of claude 2.1.327 on the owner's machine never drew
+  the inverse software cursor (the M15 screen was itself a one-off from a failed 2.1.326 idle run).
+  Expected: clean, and `no-composer-marker` under the pre-#1920 claude marker pattern.
+
 ## Classifier assumption
 
 CLEAN requires a composer marker **and** zero normal-intensity, non-whitespace,

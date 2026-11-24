@@ -10,11 +10,19 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import type http from 'node:http';
 import type { DecisionsDocument } from '@cluesmith/codev-types';
-import { handleDecisionsGet, handleDecisionsRule, MAX_RULE_BODY_BYTES } from '../servers/decisions/routes.js';
+import {
+  handleDecisionsGet,
+  handleDecisionsImage,
+  handleDecisionsRule,
+  MAX_DECISIONS_IMAGE_BYTES,
+  MAX_RULE_BODY_BYTES,
+} from '../servers/decisions/routes.js';
 import { CONFIGURED_PATH_MEMO_MS, decisionsFilePresent, DEFAULT_DECISIONS_FILE } from '../servers/decisions/file.js';
 import { parseDecisions } from '../servers/decisions/parse.js';
 
-const FIXTURE = fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+// The fixture is LF; a CRLF checkout (core.autocrlf on Windows) is normalized back, and
+// the CRLF behaviour is tested in decisions-parse and decisions-splice.
+const FIXTURE = fs.readFileSync(path.resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8').replace(/\r\n/g, '\n');
 const ACCEPT_LINE = '**Your word:** `accept` = merge as is / `rework` = send back / `hold`';
 const COMMENT = "accept but don't add the limit on additional tests. That could easily backfire.";
 
@@ -160,6 +168,165 @@ describe('GET decisions', () => {
     const { status, body } = await get();
     expect(status).toBe(500);
     expect(body).toEqual({ ok: false, code: 'config-error', message: expect.stringContaining('dashboard.decisionsFile') });
+  });
+});
+
+describe('GET decisions/image (#1938)', () => {
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const decisionsDir = () => path.dirname(decisionsFile);
+
+  beforeEach(() => {
+    fs.writeFileSync(decisionsFile, FIXTURE);
+  });
+
+  async function image(requested: string | null) {
+    let status = 0;
+    let headers: Record<string, unknown> = {};
+    const chunks: Buffer[] = [];
+    const res = {
+      writeHead: (code: number, h?: Record<string, unknown>) => { status = code; headers = h ?? {}; },
+      end: (data?: string | Buffer) => { if (data !== undefined) chunks.push(Buffer.from(data)); },
+    } as unknown as http.ServerResponse;
+    await handleDecisionsImage(res, workspace, requested);
+    const body = Buffer.concat(chunks);
+    return { status, headers, body, json: () => JSON.parse(body.toString('utf8')) };
+  }
+
+  function writeImage(rel: string, bytes: Buffer | string = PNG): string {
+    const file = path.join(workspace, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, bytes);
+    return file;
+  }
+
+  it('serves a relative path from beside the decisions file, as an image that is never sniffed', async () => {
+    writeImage('codev/state/decision-assets/compact.png');
+    const r = await image('decision-assets/compact.png');
+    expect(r.status).toBe(200);
+    expect(r.body.equals(PNG)).toBe(true);
+    expect(r.headers).toMatchObject({
+      'Content-Type': 'image/png',
+      'Content-Length': PNG.length,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': expect.stringContaining('sandbox'),
+    });
+    // Tower's global `Cache-Control: no-store` is left to stand.
+    expect(r.headers).not.toHaveProperty('Cache-Control');
+  });
+
+  it('is not-found when the image goes between being located and being read', async () => {
+    writeImage('codev/state/going.png');
+    const enoent = Object.assign(new Error('gone'), { code: 'ENOENT' });
+    vi.spyOn(fs.promises, 'readFile').mockRejectedValueOnce(enoent);
+    const r = await image('going.png');
+    expect(r.status).toBe(404);
+    expect(r.json().code).toBe('not-found');
+  });
+
+  it('resolves a `/`-rooted path against the workspace root', async () => {
+    writeImage('docs/stacked.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    const r = await image('/docs/stacked.svg');
+    expect(r.status).toBe(200);
+    expect(r.headers['Content-Type']).toBe('image/svg+xml');
+  });
+
+  it('resolves a relative path against the configured decisions file, not the default', async () => {
+    writeConfig({ dashboard: { decisionsFile: 'notes/decisions.md' } });
+    fs.mkdirSync(path.join(workspace, 'notes'));
+    fs.writeFileSync(path.join(workspace, 'notes/decisions.md'), FIXTURE);
+    writeImage('notes/shot.JPEG');
+    writeImage('codev/state/shot.JPEG');
+    expect((await image('shot.JPEG')).headers['Content-Type']).toBe('image/jpeg');
+    fs.rmSync(path.join(workspace, 'notes/shot.JPEG'));
+    expect((await image('shot.JPEG')).json().code).toBe('not-found');
+  });
+
+  it.each([
+    ['a relative path through ..', () => '../../../outside.png'],
+    ['a `/`-rooted path through ..', () => '/../outside.png'],
+    ['a sibling directory whose name extends the workspace\'s', () => `../../../${path.basename(workspace)}-sibling/x.png`],
+  ])('refuses %s as outside-workspace', async (_what, requested) => {
+    fs.writeFileSync(path.join(tmpDir, 'outside.png'), PNG);
+    const r = await image(requested());
+    expect(r.status).toBe(400);
+    expect(r.json()).toEqual({ ok: false, code: 'outside-workspace', message: expect.stringContaining(requested()) });
+  });
+
+  it('reaches nothing outside through an absolute filesystem path', async () => {
+    const outside = path.join(tmpDir, 'outside.png');
+    fs.writeFileSync(outside, PNG);
+    // POSIX reads it as `/`-rooted at the workspace, where nothing is; a drive path is plainly outside.
+    expect((await image(outside)).json().code).toBe(process.platform === 'win32' ? 'outside-workspace' : 'not-found');
+  });
+
+  it('refuses a symlink that points outside the workspace', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'outside.png'), PNG);
+    fs.symlinkSync(path.join(tmpDir, 'outside.png'), path.join(decisionsDir(), 'linked.png'));
+    const r = await image('linked.png');
+    expect(r.status).toBe(400);
+    expect(r.json().code).toBe('outside-workspace');
+  });
+
+  it('refuses a path through a symlinked directory outside the workspace', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'elsewhere'));
+    fs.writeFileSync(path.join(tmpDir, 'elsewhere', 'x.png'), PNG);
+    fs.symlinkSync(path.join(tmpDir, 'elsewhere'), path.join(decisionsDir(), 'assets'));
+    expect((await image('assets/x.png')).json().code).toBe('outside-workspace');
+  });
+
+  it('serves a symlink to an image inside the workspace', async () => {
+    writeImage('docs/real.png');
+    fs.symlinkSync(path.join(workspace, 'docs/real.png'), path.join(decisionsDir(), 'linked.png'));
+    expect((await image('linked.png')).status).toBe(200);
+  });
+
+  it.each(['notes.md', '.env', 'image.png.txt', 'noextension', 'shot.bmp'])('refuses %s as not-an-image, even when it exists', async (rel) => {
+    writeImage(`codev/state/${rel}`, 'secret');
+    const r = await image(rel);
+    expect(r.status).toBe(415);
+    expect(r.json().code).toBe('not-an-image');
+  });
+
+  it('refuses an image-named symlink to a file that is not an image', async () => {
+    writeImage('.env', 'TOKEN=secret');
+    fs.symlinkSync(path.join(workspace, '.env'), path.join(decisionsDir(), 'innocent.png'));
+    const r = await image('innocent.png');
+    expect(r.status).toBe(415);
+    expect(r.body.toString()).not.toContain('secret');
+  });
+
+  it('refuses an image over the size limit, and serves one at it', async () => {
+    const big = writeImage('codev/state/big.png', '');
+    fs.truncateSync(big, MAX_DECISIONS_IMAGE_BYTES + 1);
+    const r = await image('big.png');
+    expect(r.status).toBe(413);
+    expect(r.json().code).toBe('image-too-large');
+    fs.truncateSync(big, MAX_DECISIONS_IMAGE_BYTES);
+    expect((await image('big.png')).status).toBe(200);
+  });
+
+  it('is not-found for a missing image, a directory named like one, and a path through a file', async () => {
+    fs.mkdirSync(path.join(decisionsDir(), 'dir.png'));
+    for (const requested of ['missing.png', 'dir.png', 'pending-decisions.md/x.png']) {
+      const r = await image(requested);
+      expect(r.status).toBe(404);
+      expect(r.json().code).toBe('not-found');
+    }
+  });
+
+  it.each([null, '', 'a\0.png'])('refuses the path %j as invalid-request', async (requested) => {
+    const r = await image(requested);
+    expect(r.status).toBe(400);
+    expect(r.json().code).toBe('invalid-request');
+  });
+
+  it('serves nothing when the decisions file is missing or outside the workspace', async () => {
+    writeImage('codev/state/x.png');
+    fs.rmSync(decisionsFile);
+    expect((await image('x.png')).json().code).toBe('not-found');
+    writeConfig({ dashboard: { decisionsFile: '../outside.md' } });
+    fs.writeFileSync(path.join(tmpDir, 'outside.md'), FIXTURE);
+    expect((await image('/codev/state/x.png')).json().code).toBe('outside-workspace');
   });
 });
 
@@ -351,17 +518,21 @@ describe('POST decisions/rule', () => {
     fs.writeFileSync(target, FIXTURE);
     fs.rmSync(decisionsFile);
     fs.symlinkSync('../../docs/decisions.md', decisionsFile);
+    // Read back rather than compared with the literal: Windows stores the link target with
+    // backslash separators, and the assertion is that the write leaves the link as made.
+    const linkTarget = fs.readlinkSync(decisionsFile);
 
     const result = await rule({ id: 'main-11', word: 'accept', fingerprint: fingerprintOf(FIXTURE, 'main-11') });
     expect(result.status).toBe(200);
     expect(result.body.document.path).toBe(DEFAULT_DECISIONS_FILE);
     expect(fs.lstatSync(decisionsFile).isSymbolicLink()).toBe(true);
-    expect(fs.readlinkSync(decisionsFile)).toBe('../../docs/decisions.md');
+    expect(fs.readlinkSync(decisionsFile)).toBe(linkTarget);
     expect(fs.readFileSync(target, 'utf8')).toBe(fixtureRuledWith('accept\n'));
     expect(fs.readdirSync(path.dirname(target))).toEqual(['decisions.md']);
   });
 
-  it('keeps the file permissions', async () => {
+  // POSIX-only assertion: checks the 0640 mode bits, which NTFS does not carry (Node reports 0666).
+  it.skipIf(process.platform === 'win32')('keeps the file permissions', async () => {
     fs.chmodSync(decisionsFile, 0o640);
     await rule({ id: 'main-11', word: 'accept', fingerprint: fingerprintOf(FIXTURE, 'main-11') });
     expect(fs.statSync(decisionsFile).mode & 0o7777).toBe(0o640);

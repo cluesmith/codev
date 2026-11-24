@@ -5,12 +5,13 @@
  */
 
 import { spawn, ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { terminalWsProtocols } from '@cluesmith/codev-types';
+import { socketTempRoot } from './socket-temp-root.js';
 
 const TOWER_START_TIMEOUT = 15_000;
 
@@ -205,9 +206,8 @@ export async function startTower(
   const actualPort = port ?? (await findAvailablePort(14100));
 
   // Spec 0116: Create isolated socket dir so tests don't pollute ~/.codev/run/
-  // Use /tmp/ directly (not os.tmpdir()) because macOS per-user tmpdir paths are
-  // too long for Unix sockets (sun_path max ~104 bytes).
-  const socketDir = mkdtempSync('/tmp/codev-sock-');
+  // (under a root short enough for Unix sockets on POSIX; see socketTempRoot).
+  const socketDir = mkdtempSync(join(socketTempRoot(), 'codev-sock-'));
 
   // #1515: isolate the agent-farm dir too, not just the DB name and sockets.
   const agentFarmDir = createIsolatedAgentFarmDir();

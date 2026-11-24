@@ -72,7 +72,7 @@ describe('bugfix-1502: the Chromium install does not run the stalling apt phase'
       'canvas-browser must have a "playwright install" step',
     ).toBeDefined();
     // `--with-deps` triggers the apt-get update that intermittently stalls (#1502).
-    // Chromium's system libraries are already present on the ubuntu-latest image
+    // Chromium's system libraries are already present on the pinned ubuntu-24.04 image
     // (the dashboard-e2e workflow installs without it and launches Chromium fine).
     // If a future runner image ever drops a library canvas needs, the fix is to
     // restore --with-deps AND update this assertion with the reason — never to let

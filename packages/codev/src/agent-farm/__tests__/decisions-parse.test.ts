@@ -7,8 +7,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { classifyLines } from '../servers/decisions/grammar.js';
 import { parseDecisions, parseOptions, toDecisionsDocument } from '../servers/decisions/parse.js';
+import { spliceRuling } from '../servers/decisions/splice.js';
 
-const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8');
+// The fixture is LF; a CRLF checkout (core.autocrlf on Windows) is normalized back, and
+// the CRLF behaviour is tested by converting it explicitly.
+const FIXTURE = readFileSync(resolve(import.meta.dirname, 'fixtures/decisions/issue-format.md'), 'utf8').replace(/\r\n/g, '\n');
 
 /** A minimal file with one item whose body is `body` and whose tail after the Your-word line is `tail`. */
 function oneItem(body: string, yourWord = '**Your word:** `accept` = merge / `hold`', tail = ''): string {
@@ -319,6 +322,33 @@ describe('parseDecisions — headings', () => {
   it('ignores ### headings outside ## Open', () => {
     const { items } = parseDecisions('### stray\n## Open\n### a-1 · x · y\n**Your word:** `y`\n## Ruled\n### not-an-item\n');
     expect(items.map(i => i.id)).toEqual(['a-1']);
+  });
+});
+
+describe('parseDecisions — images in an item (#1938)', () => {
+  const OPTIONS = '- **Options:** (a) `compact` = one row (b) `stacked` = two rows';
+  const YOUR_WORD = '**Your word:** `compact` / `stacked` / `hold`';
+  const IMAGES = '![Compact layout](decision-assets/web-4-compact.png)\n![Stacked layout](/docs/web-4-stacked.svg)';
+  const plain = oneItem(OPTIONS, YOUR_WORD);
+
+  it.each([
+    ['in the body, after a blank line', oneItem(`${OPTIONS}\n\n${IMAGES}`, YOUR_WORD)],
+    ['on the line right above the Your-word line', oneItem(OPTIONS, `${IMAGES}\n${YOUR_WORD}`)],
+  ])('are body text %s: id, options and writability are as without them', (_where, text) => {
+    const [withImages] = parseDecisions(text).items;
+    const [without] = parseDecisions(plain).items;
+    expect(withImages.id).toBe(without.id);
+    expect(withImages.options).toEqual(without.options);
+    expect(withImages.problems).toEqual([]);
+    expect(withImages.writable).toBe(true);
+    expect(withImages.currentRuling).toBe('');
+    expect(withImages.bodyMarkdown).toContain(IMAGES);
+    // The fingerprint is the item's text, as for any other line: the same text, the same fingerprint.
+    expect(withImages.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(parseDecisions(text).items[0].fingerprint).toBe(withImages.fingerprint);
+    // A ruling splices in under the Your-word line and leaves the images where they were.
+    const spliced = spliceRuling(text, { id: withImages.id, fingerprint: withImages.fingerprint, word: 'stacked' });
+    expect(spliced).toEqual({ ok: true, text: text.replace(`${YOUR_WORD}\n`, `${YOUR_WORD}\nstacked\n`) });
   });
 });
 

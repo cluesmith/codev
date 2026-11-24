@@ -72,7 +72,7 @@ Use the `--type` flag to get focused review prompts for each stage:
 ```bash
 consult -m gemini --protocol spir --type spec           # Specification review
 consult -m codex --protocol spir --type plan            # Plan review
-consult -m claude --type integration                    # PR integration review
+consult -m claude --type integration --issue 42         # PR integration review
 ```
 
 Available types: `spec`, `plan`, `impl`, `pr`, `phase`, `integration`
@@ -159,12 +159,8 @@ afx tower start   # Fresh start
 
 ### Port Conflicts
 
-If you're having port issues across multiple projects:
-
-```bash
-afx ports list     # See all port allocations
-afx ports cleanup  # Remove stale entries
-```
+All workspaces share one Tower on port 4100; there are no per-project port allocations to list or
+clean up. If another process holds 4100, stop it and run `afx tower start`.
 
 ### Database Inspection
 

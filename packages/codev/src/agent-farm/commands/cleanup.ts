@@ -18,6 +18,18 @@ import { dismissHeldForAgent } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
 import { sameIssueId } from '../../lib/issue-id.js';
+import { isWindows } from '../../lib/platform.js';
+import { killSessionTree, type KillSessionTreeOptions } from '../../lib/process-tree.js';
+import { removeWorktreeDirectory } from '../lib/worktree-links.js';
+import { WindowsJobHelper, sessionJobName } from '../../lib/platform/windows/job-objects.js';
+import { listProcessCensus, type ProcessCensusEntry } from '../servers/process-census.js';
+import { SHELLPER_MARKER } from '../../terminal/shellper-cmdline.js';
+import { readJsonStringField } from '../../terminal/shellper-config-field.js';
+import { sameWindowsPath } from '../../lib/platform/windows/host-paths.js';
+import { unquoteWindowsCommandLine } from '../../lib/platform/windows/command-line.js';
+import { loadConfig } from '../../lib/config.js';
+import { AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { keepFiles, keepPatterns, keptDirFor, listKeepCandidates } from '../lib/keep-files.js';
 
 /**
  * Clean porch review artifacts for a project from codev/projects/,
@@ -68,13 +80,16 @@ async function cleanupPorchState(projectId: string, config: Config): Promise<voi
  * orphaned. This function searches `ps` output for shellper-main.js processes
  * whose JSON config contains the worktree path as `cwd`, and kills them directly.
  *
- * Uses process group kill (-pid) to also terminate PTY children (Claude, bash).
+ * Uses process group kill (-pid) to also terminate PTY children (Claude, bash);
+ * on Windows, a snapshot-backed tree kill found through the census (Spec 1658).
  */
 export async function killShellperProcesses(worktreePath: string): Promise<number> {
+  if (isWindows()) return killWindowsShellperProcesses(worktreePath);
   let killed = 0;
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
       // -ww prevents arg truncation on macOS/Linux
+      // windows-console: posix-only (Windows returned above via killWindowsShellperProcesses)
       execFile('ps', ['-ww', '-eo', 'pid,args'], (err, out) => {
         if (err) { reject(err); return; }
         resolve(out);
@@ -92,24 +107,70 @@ export async function killShellperProcesses(worktreePath: string): Promise<numbe
       const pid = parseInt(line.trim(), 10);
       if (isNaN(pid) || pid <= 0 || pid === process.pid) continue;
 
-      try {
-        // Kill process group (shellper + its PTY child) to prevent orphaned
-        // PTY processes. Shellper is spawned with detached:true, so it's a
-        // process group leader.
-        process.kill(-pid, 'SIGTERM');
-        killed++;
-      } catch {
-        // Process group kill failed — try individual PID
-        try {
-          process.kill(pid, 'SIGTERM');
-          killed++;
-        } catch {
-          // Process already dead
-        }
-      }
+      // Kill process group (shellper + its PTY child) to prevent orphaned
+      // PTY processes. Shellper is spawned with detached:true, so it's a
+      // process group leader. If the group kill fails, the individual PID is
+      // tried.
+      const { signaled } = await killSessionTree(pid, { fallbackToPid: true });
+      if (signaled) killed++;
     }
   } catch {
     // ps not available or failed — non-fatal
+  }
+  return killed;
+}
+
+/**
+ * Windows variant of `killShellperProcesses`: the census, matching the decoded
+ * `cwd` of each shellper's JSON config. A census failure is reported, not read
+ * as "no shellpers" (Spec 1658), and cleanup carries on.
+ */
+async function killWindowsShellperProcesses(worktreePath: string): Promise<number> {
+  let census: ProcessCensusEntry[];
+  try {
+    census = await listProcessCensus();
+  } catch (err) {
+    logger.warn(`Could not check for running shellpers in ${worktreePath}: ${(err as Error).message}`);
+    return 0;
+  }
+  let killed = 0;
+  // One helper for the whole pass, started on the first job: its cold start is paid once.
+  const jobs: { helper: WindowsJobHelper | null } = { helper: null };
+  const terminateJob = (name: string, rootPid: number) => {
+    if (!jobs.helper) jobs.helper = new WindowsJobHelper({ log: (message) => logger.warn(message) });
+    return jobs.helper.terminate(name, rootPid);
+  };
+  try {
+    killed = await killMatchingShellpers(census, worktreePath, terminateJob);
+  } finally {
+    jobs.helper?.stop();
+  }
+  return killed;
+}
+
+async function killMatchingShellpers(
+  census: ProcessCensusEntry[],
+  worktreePath: string,
+  terminateJob: KillSessionTreeOptions['terminateJob'],
+): Promise<number> {
+  let killed = 0;
+  for (const entry of census) {
+    if (entry.pid === process.pid || !entry.cmdline.includes(SHELLPER_MARKER)) continue;
+    const config = unquoteWindowsCommandLine(entry.cmdline);
+    const cwd = readJsonStringField(config, 'cwd');
+    if (cwd === null || !sameWindowsPath(cwd, worktreePath)) continue;
+    // The session job (Spec 1658 Phase 3b) also ends descendants with no live
+    // parent; this pass has its own helper, since cleanup runs outside Tower.
+    const opts: KillSessionTreeOptions = { rootStartTime: entry.creationTime, terminateJob };
+    const shellperSessionId = readJsonStringField(config, 'sessionId');
+    if (shellperSessionId) opts.jobName = sessionJobName(shellperSessionId);
+    try {
+      const { signaled, jobError } = await killSessionTree(entry.pid, opts);
+      if (jobError !== undefined) logger.warn(`Shellper pid ${entry.pid}: ${jobError}`);
+      if (signaled) killed++;
+    } catch (err) {
+      logger.warn(`Shellper pid ${entry.pid}: ${(err as Error).message}`);
+    }
   }
   return killed;
 }
@@ -119,6 +180,8 @@ export interface CleanupOptions {
   issue?: number | string;
   task?: string;
   force?: boolean;
+  /** #1950: copy untracked and kept ignored files out before the worktree is removed. */
+  keepIgnored?: boolean;
 }
 
 /**
@@ -172,6 +235,39 @@ async function deleteRemoteBranch(branch: string, config: Config): Promise<void>
   } catch {
     logger.warn('Warning: Failed to delete remote branch (may not exist on remote)');
   }
+}
+
+/**
+ * Remove a builder worktree. POSIX: `git worktree remove --force`. Native
+ * Windows (Spec 1658): the session tree is already killed, so the directory is
+ * removed here without following its junctions and links into the workspace
+ * root, retrying while a closing process still holds a handle; the worktree
+ * entry is then pruned so the branch can be deleted. A removal that still
+ * fails ends cleanup, naming the blocking path, with the branch and builder
+ * state left in place.
+ */
+async function removeWorktree(worktreePath: string, config: Config): Promise<void> {
+  if (!isWindows()) {
+    try {
+      await run(`git worktree remove "${worktreePath}" --force`, { cwd: config.workspaceRoot });
+      logger.info('Worktree removed');
+    } catch {
+      logger.warn('Warning: Failed to remove worktree');
+    }
+    return;
+  }
+  try {
+    await removeWorktreeDirectory(worktreePath);
+  } catch (error) {
+    // Stop before the branch and builder state go: a re-run retries the removal.
+    fatal(`Failed to remove worktree: ${(error as Error).message}. Close what holds it and re-run afx cleanup.`);
+  }
+  try {
+    await run('git worktree prune', { cwd: config.workspaceRoot });
+  } catch {
+    // The final prune below retries; the directory itself is gone.
+  }
+  logger.info('Worktree removed');
 }
 
 /**
@@ -233,7 +329,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
       // Try to find by name pattern
       const byName = state.builders.find((b) => b.name.includes(projectId));
       if (byName) {
-        return cleanupBuilder(byName, options.force, options.issue);
+        return cleanupBuilder(byName, options.force, options.issue, options.keepIgnored);
       }
       fatal(`Builder not found for project: ${projectId}`);
     }
@@ -241,10 +337,15 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
     fatal('Must specify either --project, --issue, or --task');
   }
 
-  await cleanupBuilder(builder, options.force, options.issue);
+  await cleanupBuilder(builder, options.force, options.issue, options.keepIgnored);
 }
 
-async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: number | string): Promise<void> {
+async function cleanupBuilder(
+  builder: Builder,
+  force?: boolean,
+  issueNumber?: number | string,
+  keepIgnored?: boolean,
+): Promise<void> {
   const config = getConfig();
   const isShellMode = builder.type === 'shell';
   const isBugfixMode = builder.type === 'bugfix';
@@ -258,6 +359,27 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
   if (!isShellMode) {
     logger.kv('Worktree', builder.worktree);
     logger.kv('Branch', builder.branch);
+  }
+
+  // #1950 --keep-ignored: settle the kept folder and keep list before anything is touched, so a
+  // refusal leaves the builder exactly as it was. The copy itself runs just before removal.
+  let keep: { dir: string; patterns: readonly string[] } | undefined;
+  if (keepIgnored) {
+    if (!isEphemeral || isShellMode || !existsSync(builder.worktree)) {
+      logger.info('--keep-ignored: this cleanup does not remove a worktree, so there is nothing to keep.');
+    } else {
+      const dir = keptDirFor(AGENT_FARM_DIR, config.workspaceRoot, builder.id);
+      if (existsSync(dir)) {
+        fatal(`--keep-ignored: kept folder already exists: ${dir}. Move or delete it, then re-run. Nothing was removed.`);
+      }
+      let patterns: readonly string[];
+      try {
+        patterns = keepPatterns(loadConfig(config.workspaceRoot).cleanup?.keepIgnored);
+      } catch (error) {
+        fatal(`--keep-ignored: ${(error as Error).message}. Nothing was removed.`);
+      }
+      keep = { dir, patterns };
+    }
   }
 
   // Check for uncommitted changes (informational - worktree is preserved)
@@ -307,15 +429,32 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
 
   // For ephemeral builders (bugfix, task): actually remove worktree and delete branches
   if (isEphemeral && !isShellMode) {
+    // #1950: copy out after the session is killed (the files are quiet) and before removal; a
+    // failed copy or checksum stops here with the worktree, branch and builder row intact.
+    if (keep) {
+      try {
+        const candidates = listKeepCandidates(builder.worktree, keep.patterns);
+        const kept = await keepFiles(builder.worktree, keep.dir, candidates.files);
+        logger.success(`Kept ${kept.copied} file(s) in ${keep.dir}`);
+        if (candidates.excluded > 0) {
+          logger.info(`Not kept (dependency or build output): ${candidates.excluded} file(s)`);
+        }
+        if (kept.skippedSymlinks.length > 0) {
+          logger.info(`Not kept (symlinks): ${kept.skippedSymlinks.join(', ')}`);
+        }
+      } catch (error) {
+        fatal(
+          `--keep-ignored: ${(error as Error).message}. Nothing was removed: the worktree, branch ` +
+            `and builder row are as they were; only its session was already stopped. Fix the cause ` +
+            `and re-run afx cleanup.`,
+        );
+      }
+    }
+
     // Remove worktree
     if (existsSync(builder.worktree)) {
       logger.info('Removing worktree...');
-      try {
-        await run(`git worktree remove "${builder.worktree}" --force`, { cwd: config.workspaceRoot });
-        logger.info('Worktree removed');
-      } catch {
-        logger.warn('Warning: Failed to remove worktree');
-      }
+      await removeWorktree(builder.worktree, config);
     }
 
     // Delete local branch

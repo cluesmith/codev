@@ -24,9 +24,9 @@ need to fetch it.
 
 If the issue body contains a section named "Baked Decisions" (any heading level,
 case-insensitive), treat its contents as fixed architectural decisions baked in by the
-architect. Do not autonomously override them in your spec, plan, or implementation. If you
-discover a serious reason to question a baked decision, surface that concern to the architect
-via `afx send` rather than relitigating it inside the spec/plan/review.
+architect. Do not autonomously override them in your implementation. If you discover a serious
+reason to question a baked decision, surface that concern to the architect via `afx send` rather
+than relitigating it in the code or the PR body.
 
 If the architect's baked-decisions section contains internal contradictions (e.g., two different
 language choices), do not pick one — pause, flag the contradiction to the architect via
@@ -42,18 +42,18 @@ language choices), do not pick one — pause, flag the contradiction to the arch
 
 ## Your Mission
 
-1. Implement the feature from the issue (<300 LOC)
+1. Implement the feature from the issue (~300 LOC is a guideline, not a hard limit)
 2. Write tests for it
 3. Open a PR with the review **in the PR body**, not as a separate file
 4. Notify: `afx send architect "PR #N ready for review (implements #{{issue.number}})"`
 
 **AIR produces no spec, plan, or review files.** That is the whole economy of the protocol.
 
-If the feature turns out larger than AIR fits (>300 LOC, or an architectural decision the issue
-does not make), stop and say so rather than growing it quietly:
+If the feature turns out larger than AIR fits (well past ~300 LOC, or an architectural decision
+the issue does not make), stop and say so rather than growing it quietly:
 
 ```bash
-afx send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to ASPIR."
+afx send architect "Issue #{{issue.number}} is more complex than expected. [Reason]. Recommend escalating to SPIR or ASPIR."
 ```
 
 ## Notifications

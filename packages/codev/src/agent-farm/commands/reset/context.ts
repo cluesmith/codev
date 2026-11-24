@@ -37,7 +37,9 @@ import {
   type CustomHarnessConfig,
   type HarnessProvider,
 } from '../../utils/harness.js';
-import { canonicalIssueId, isIssueKey } from '../../../lib/issue-id.js';
+import { issueNumberFromPorchId } from '../../../lib/issue-id.js';
+import { lastPathSegment } from '../../../lib/host-paths.js';
+import { isWindows } from '../../../lib/platform.js';
 
 // ============================================================================
 // Ports
@@ -412,28 +414,10 @@ export function modeFromBuilderPrompt(fs: ContextFsPort, worktree: string): 'str
 }
 
 /**
- * Recover an issue number from a porch project id.
- *
- * Porch ids are not uniformly numeric. PIR and SPIR use the bare issue number;
- * **BUGFIX deliberately uses `<prefix>-<N>`** (`spawn.ts:817`, "historical, kept
- * untouched"). A strict `/^\d+$/` guard therefore threw away BUGFIX's issue
- * identity whenever the registry row lacked one — and on BUGFIX the issue body
- * IS the spec, so the re-orientation lost the requirements it was meant to carry.
- *
- * Accepts a bare number, `bugfix-<N>`, or a tracker key (`ENG-123`,
- * `bugfix-ENG-123`, #1740), which is the issue id itself, not its trailing
- * digits. Rejects anything else, so an ad-hoc task id (`builder-task-abc`)
- * still cannot masquerade as an issue.
+ * Recover an issue number from a porch project id. Lives in `lib/issue-id.ts` so porch's
+ * prompt renderer shares it (#1903); re-exported here for existing importers.
  */
-export function issueNumberFromPorchId(projectId?: string): string | undefined {
-  if (!projectId) return undefined;
-  if (/^\d+$/.test(projectId)) return projectId;
-  const bugfix = projectId.match(/^bugfix-(\d+)$/i);
-  if (bugfix) return bugfix[1];
-  const id = projectId.replace(/^bugfix-/i, '');
-  if (isIssueKey(id)) return canonicalIssueId(id);
-  return undefined;
-}
+export { issueNumberFromPorchId };
 
 // ============================================================================
 // Harness
@@ -493,9 +477,12 @@ function commandNameOf(line: string): string | null {
   if (!first || first.includes('=')) return null;
 
   // Basename, so `/usr/local/bin/claude` resolves like `claude`, with any
-  // surrounding quotes removed.
-  const base = first.replace(/^['"]|['"]$/g, '').split('/').pop();
-  return base && base !== '' ? base : null;
+  // surrounding quotes removed. On Windows `C:\tools\claude.exe` does too.
+  let base = lastPathSegment(first.replace(/^['"]|['"]$/g, ''));
+  if (isWindows()) {
+    base = base.replace(/\.(exe|cmd|bat)$/i, '');
+  }
+  return base !== '' ? base : null;
 }
 
 /**

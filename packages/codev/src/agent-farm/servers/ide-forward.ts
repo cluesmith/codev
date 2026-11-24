@@ -77,6 +77,9 @@ export interface PublicAuthority {
   prefix: string;
 }
 
+/** Tower names Tower will write into a forwarded header or cookie Path (Issue #1914). */
+const SAFE_TOWER_NAME = /^[A-Za-z0-9._-]+$/;
+
 /** True if this request arrived over the tunnel (stamped by `TunnelClient`, #1588). */
 function isTunnelBorne(headers: http.IncomingHttpHeaders): boolean {
   return headers[TUNNEL_PROXY_HEADER] === '1';
@@ -84,6 +87,9 @@ function isTunnelBorne(headers: http.IncomingHttpHeaders): boolean {
 
 /** The connection-token cookie name the VS Code server reads. */
 const IDE_TOKEN_COOKIE = 'vscode-tkn';
+
+/** A Set-Cookie entry that sets the connection-token cookie (exact name). */
+const TOKEN_SET_COOKIE = new RegExp(`^\\s*${IDE_TOKEN_COOKIE}=`);
 
 /**
  * Set the IDE connection token in a Cookie header value as `vscode-tkn=…`,
@@ -119,12 +125,35 @@ export function stripCookie(existing: string | string[] | undefined, name: strin
     .join('; ');
 }
 
+/** The public IDE prefix the cloud relay stamps on a tunnel-borne request: `/t/<slug>/ide`. */
+const RELAYED_IDE_PREFIX = /^\/t\/[A-Za-z0-9._-]+\/ide$/;
+
 /**
- * Derive the tunnel's public authority from the cloud config, matching the
- * `accessUrl` Tower advertises (`tower-tunnel.ts`: `${server_url}/t/${tower_name}/`).
- * Returns null when the tower is not cloud-registered.
+ * The prefix the cloud relay stamped on this request, if Tower may trust it:
+ * only on a tunnel-borne request (the marker is Tower's own, stamped by
+ * `TunnelClient`, which strips inbound copies), and only when it is a plain
+ * `/t/<slug>/ide`. It carries the slug the browser actually used, which stays
+ * current across a cloud-side rename while the stored `tower_name` does not
+ * (Issue #1914). A local request never consults it.
  */
-export function getPublicAuthority(): PublicAuthority | null {
+function relayedIdePrefix(incoming: http.IncomingHttpHeaders | undefined): string | null {
+  if (!incoming || !isTunnelBorne(incoming)) return null;
+  const raw = incoming['x-forwarded-prefix'];
+  if (typeof raw !== 'string' || !RELAYED_IDE_PREFIX.test(raw)) return null;
+  return raw;
+}
+
+/**
+ * Derive the tunnel's public authority: host and proto from the cloud config;
+ * the prefix from the relay-stamped inbound `x-forwarded-prefix` when the
+ * request is tunnel-borne and it is a valid `/t/<slug>/ide`, else from the
+ * stored `tower_name`, matching the `accessUrl` Tower advertises
+ * (`tower-tunnel.ts`: `${server_url}/t/${tower_name}/`). One prefix feeds both
+ * the `x-forwarded-prefix` stamp and the `vscode-tkn` cookie Path, so the two
+ * cannot disagree. Returns null when the tower is not cloud-registered, or no
+ * safe prefix exists.
+ */
+export function getPublicAuthority(incoming?: http.IncomingHttpHeaders): PublicAuthority | null {
   const cfg = readCloudConfig();
   if (!cfg) return null;
   let host: string;
@@ -136,6 +165,13 @@ export function getPublicAuthority(): PublicAuthority | null {
   } catch {
     return null;
   }
+  const relayed = relayedIdePrefix(incoming);
+  if (relayed) return { host, proto, prefix: relayed };
+  // The stored name lands in `x-forwarded-prefix` and in a Set-Cookie Path
+  // (Issue #1914): anything outside a plain path segment (`;`, CR/LF, `/`,
+  // spaces) could inject cookie attributes or split a header, so it yields no
+  // authority.
+  if (typeof cfg.tower_name !== 'string' || !SAFE_TOWER_NAME.test(cfg.tower_name)) return null;
   return { host, proto, prefix: `/t/${cfg.tower_name}${IDE_DEFAULT_PREFIX.replace(/\/$/, '')}` };
 }
 
@@ -215,19 +251,85 @@ export { matchIdePrefix };
 export function stripConnectionTokenSetCookie(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   const entries = Array.isArray(value) ? value : [value];
-  const kept = entries.filter((entry) => !new RegExp(`^\\s*${IDE_TOKEN_COOKIE}=`).test(entry));
+  const kept = entries.filter((entry) => !TOKEN_SET_COOKIE.test(entry));
   return kept.length > 0 ? kept : undefined;
 }
 
 /**
+ * Pin every `vscode-tkn` cookie the IDE server sets to `Path=<path>` (Issue
+ * #1914), replacing any `Path` attribute it carried and keeping every other
+ * attribute and every other cookie as-is. Over the tunnel the browser does
+ * receive this cookie, on the cloud origin that all towers share; scoping it to
+ * this tower's `/t/<tower-name>/ide` prefix keeps a `Path=/` from one tower's
+ * IDE server from overwriting another's. Path keeps cookies apart; it is not an
+ * isolation boundary. Exported for testing.
+ */
+export function scopeConnectionTokenSetCookie(value: string | string[] | undefined, path: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  const entries = Array.isArray(value) ? value : [value];
+  return entries.map((entry) => {
+    if (!TOKEN_SET_COOKIE.test(entry)) return entry;
+    const parts = entry.split(';').map((part) => part.trim()).filter((part) => part.length > 0);
+    const [pair, ...attributes] = parts;
+    const kept = attributes.filter((attribute) => attribute.split('=')[0].trim().toLowerCase() !== 'path');
+    return [pair, ...kept, `Path=${path}`].join('; ');
+  });
+}
+
+/**
+ * What the forward does with the IDE server's `vscode-tkn` Set-Cookie:
+ * `strip` it (a local request, #1869; or a tunnel-borne one with no usable
+ * public authority, failing closed) or `scope` it to the tunnel's public prefix
+ * (a tunnel-borne request, #1914).
+ */
+export type TokenCookiePolicy = { kind: 'strip' } | { kind: 'scope'; path: string };
+
+/** The policy for one request. One decision shared by the HTTP and WebSocket paths. */
+export function tokenCookiePolicy(
+  headers: http.IncomingHttpHeaders,
+  publicAuthority: PublicAuthority | null,
+): TokenCookiePolicy {
+  if (isTunnelBorne(headers) && publicAuthority) {
+    return { kind: 'scope', path: publicAuthority.prefix };
+  }
+  return { kind: 'strip' };
+}
+
+/**
+ * A tunnel-borne request with no usable public authority (no cloud config, or a
+ * `tower_name` that fails the character check) gets no `x-forwarded-prefix` and
+ * its `vscode-tkn` cookie stripped. Over the tunnel that cookie is the browser
+ * workbench's token source, so the cloud workbench may not work: say so in the
+ * log instead of failing silently (Issue #1914). Once per process: every
+ * workbench asset is a request.
+ */
+let warnedTunnelWithoutAuthority = false;
+
+function warnIfTunnelWithoutAuthority(
+  headers: http.IncomingHttpHeaders,
+  publicAuthority: PublicAuthority | null,
+  log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void,
+): void {
+  if (!isTunnelBorne(headers) || publicAuthority || warnedTunnelWithoutAuthority) return;
+  warnedTunnelWithoutAuthority = true;
+  log('WARN', 'IDE forward: tunnel-borne request with no usable public authority (cloud config missing, or neither a valid relayed /t/<slug>/ide prefix nor a tower_name matching [A-Za-z0-9._-]+); vscode-tkn stripped, no x-forwarded-prefix');
+}
+
+/** Apply a `TokenCookiePolicy` to a Set-Cookie value; undefined when nothing remains. */
+function applyTokenCookiePolicy(value: string | string[], policy: TokenCookiePolicy): string[] | undefined {
+  if (policy.kind === 'scope') return scopeConnectionTokenSetCookie(value, policy.path);
+  return stripConnectionTokenSetCookie(value);
+}
+
+/**
  * Copy response headers, dropping hop-by-hop; preserves `Cache-Control` /
- * `ETag`. With `stripTokenCookie` (a LOCAL request, Issue #1869) it also drops
- * the IDE server's `vscode-tkn` Set-Cookie; the tunnel path relays it unchanged
- * (the cloud variant is a separate follow-up). Exported for testing.
+ * `ETag`. The IDE server's `vscode-tkn` Set-Cookie is handled by `policy`:
+ * stripped locally (#1869), scoped to the tenant prefix over the tunnel
+ * (#1914). Exported for testing.
  */
 export function copyResponseHeaders(
   headers: http.IncomingHttpHeaders,
-  stripTokenCookie: boolean,
+  policy: TokenCookiePolicy,
 ): Record<string, string | string[] | number> {
   const out: Record<string, string | string[] | number> = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -235,8 +337,8 @@ export function copyResponseHeaders(
     const lower = key.toLowerCase();
     if (HOP_BY_HOP.has(lower)) continue;
     if (STRIP_FROM_RESPONSE.has(lower)) continue;
-    if (stripTokenCookie && lower === 'set-cookie') {
-      const kept = stripConnectionTokenSetCookie(value);
+    if (lower === 'set-cookie') {
+      const kept = applyTokenCookiePolicy(value, policy);
       if (kept) out[key] = kept;
       continue;
     }
@@ -244,6 +346,9 @@ export function copyResponseHeaders(
   }
   return out;
 }
+
+/** The local policy, used where the request is known to be local (the workbench-page rewrite). */
+const STRIP_TOKEN_COOKIE: TokenCookiePolicy = { kind: 'strip' };
 
 /** Opening of the workbench configuration the IDE server embeds in its page. */
 const WORKBENCH_CONFIG_OPEN = '<meta id="vscode-workbench-web-configuration" data-settings="{';
@@ -345,7 +450,7 @@ function relayWorkbenchHtml(proxyRes: http.IncomingMessage, res: http.ServerResp
     if (size <= MAX_WORKBENCH_HTML_BYTES) return;
     streaming = true;
     proxyRes.off('data', onData);
-    res.writeHead(proxyRes.statusCode ?? 502, copyResponseHeaders(proxyRes.headers, true));
+    res.writeHead(proxyRes.statusCode ?? 502, copyResponseHeaders(proxyRes.headers, STRIP_TOKEN_COOKIE));
     for (const buffered of chunks) res.write(buffered);
     proxyRes.pipe(res);
   };
@@ -356,7 +461,7 @@ function relayWorkbenchHtml(proxyRes: http.IncomingMessage, res: http.ServerResp
     const original = Buffer.concat(chunks).toString('utf8');
     const rewritten = injectWorkbenchConnectionToken(original, token);
     const body = Buffer.from(rewritten ?? original, 'utf8');
-    const out = copyResponseHeaders(proxyRes.headers, true);
+    const out = copyResponseHeaders(proxyRes.headers, STRIP_TOKEN_COOKIE);
     for (const key of Object.keys(out)) {
       const lower = key.toLowerCase();
       if (lower === 'content-length' || lower === 'transfer-encoding') delete out[key];
@@ -393,17 +498,21 @@ export async function forwardIdeHttp(
 
   const connectionToken = readIdeConnectionToken();
   const local = !isTunnelBorne(req.headers);
-  const headers = buildForwardHeaders(req.headers, port, getPublicAuthority(), connectionToken);
+  const publicAuthority = getPublicAuthority(req.headers);
+  warnIfTunnelWithoutAuthority(req.headers, publicAuthority, log);
+  const cookiePolicy = tokenCookiePolicy(req.headers, publicAuthority);
+  const headers = buildForwardHeaders(req.headers, port, publicAuthority, connectionToken);
   const proxyReq = http.request(
     { hostname: '127.0.0.1', port, path: req.url || '/', method: req.method, headers },
     (proxyRes) => {
       // Local only (Issue #1869): the browser gets the token through the
-      // workbench configuration, never as a cookie. The tunnel path is unchanged.
+      // workbench configuration, never as a cookie. Over the tunnel the page is
+      // relayed as-is and the cookie is scoped to the tenant prefix (#1914).
       if (local && connectionToken && isRewritableWorkbenchPage(proxyRes)) {
         relayWorkbenchHtml(proxyRes, res, connectionToken);
         return;
       }
-      res.writeHead(proxyRes.statusCode ?? 502, copyResponseHeaders(proxyRes.headers, local));
+      res.writeHead(proxyRes.statusCode ?? 502, copyResponseHeaders(proxyRes.headers, cookiePolicy));
       proxyRes.pipe(res);
       proxyRes.on('error', () => {
         if (!res.writableEnded) res.end();
@@ -461,7 +570,10 @@ export async function forwardIdeWebSocket(
   // `Sec-WebSocket-Key` is preserved by `buildForwardHeaders` and forwarded as-is
   // so the upstream's `Sec-WebSocket-Accept` — relayed back verbatim — validates
   // against the client's own key.
-  const headers = buildForwardHeaders(req.headers, port, getPublicAuthority(), readIdeConnectionToken());
+  const publicAuthority = getPublicAuthority(req.headers);
+  warnIfTunnelWithoutAuthority(req.headers, publicAuthority, log);
+  const cookiePolicy = tokenCookiePolicy(req.headers, publicAuthority);
+  const headers = buildForwardHeaders(req.headers, port, publicAuthority, readIdeConnectionToken());
   headers['Connection'] = 'Upgrade';
   headers['Upgrade'] = 'websocket';
   const upstream = http.request({
@@ -474,7 +586,7 @@ export async function forwardIdeWebSocket(
 
   upstream.on('upgrade', (_upstreamRes, upstreamSocket, upstreamHead) => {
     // Replay the handshake response and any buffered bytes, then pipe both ways.
-    socket.write(rebuildUpgradeResponse(_upstreamRes, !isTunnelBorne(req.headers)));
+    socket.write(rebuildUpgradeResponse(_upstreamRes, cookiePolicy));
     if (upstreamHead.length > 0) socket.write(upstreamHead);
     if (head.length > 0) upstreamSocket.write(head);
 
@@ -511,19 +623,19 @@ export async function forwardIdeWebSocket(
 
 /**
  * Reconstruct the HTTP/1.1 101 switching-protocols response line + headers.
- * With `stripTokenCookie` (a LOCAL request) it drops the IDE server's
- * `vscode-tkn` Set-Cookie like the HTTP path does. Exported for testing.
+ * The IDE server's `vscode-tkn` Set-Cookie follows `policy`, exactly as on the
+ * HTTP path (stripped locally, scoped over the tunnel). Exported for testing.
  */
 export function rebuildUpgradeResponse(
   res: Pick<http.IncomingMessage, 'statusCode' | 'statusMessage' | 'headers'>,
-  stripTokenCookie: boolean,
+  policy: TokenCookiePolicy,
 ): string {
   const statusLine = `HTTP/1.1 ${res.statusCode ?? 101} ${res.statusMessage ?? 'Switching Protocols'}`;
   const lines = [statusLine];
   for (const [key, raw] of Object.entries(res.headers)) {
     if (STRIP_FROM_RESPONSE.has(key.toLowerCase())) continue;
     let value = raw;
-    if (stripTokenCookie && key.toLowerCase() === 'set-cookie') value = stripConnectionTokenSetCookie(raw);
+    if (key.toLowerCase() === 'set-cookie' && raw !== undefined) value = applyTokenCookiePolicy(raw, policy);
     if (value === undefined) continue;
     if (Array.isArray(value)) {
       for (const v of value) lines.push(`${key}: ${v}`);

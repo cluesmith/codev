@@ -1,7 +1,7 @@
 {
   "name": "@cluesmith/codev-sdk",
-  "version": "3.3.7",
-  "description": "Client SDK for Tower: the single implementation of how anything talks to Tower. Environment-agnostic (browser, Node, React Native); auth and transport arrive as injected adapters.",
+  "version": "3.3.8",
+  "description": "Client SDK for Tower: the single implementation of how anything talks to Tower, environment-agnostic (browser, Node, React Native), with auth and transport arriving as injected adapters. Its /node subpaths also hold small Node-only helpers that the CLI, Tower and the VS Code extension all need, even ones unrelated to Tower: local-key auth and executable (PATHEXT, .cmd shim) resolution.",
   "type": "module",
   "exports": {
     "./tower-client": {
@@ -67,6 +67,10 @@
     "./node": {
       "types": "./dist/node/local-key.d.ts",
       "default": "./dist/node/local-key.js"
+    },
+    "./node/executable": {
+      "types": "./dist/node/executable.d.ts",
+      "default": "./dist/node/executable.js"
     }
   },
   "files": [

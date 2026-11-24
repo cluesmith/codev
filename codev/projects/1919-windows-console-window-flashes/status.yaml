@@ -1,0 +1,30 @@
+id: '1919'
+title: windows-console-window-flashes
+protocol: pir
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  plan-approval:
+    status: approved
+    requested_at: '2026-11-18T00:00:08.733Z'
+    approved_at: '2026-11-18T00:17:05.185Z'
+  dev-approval:
+    status: approved
+    requested_at: '2026-11-18T05:28:38.730Z'
+    approved_at: '2026-11-18T07:23:16.303Z'
+  pr:
+    status: approved
+    requested_at: '2026-11-18T07:29:34.034Z'
+    approved_at: '2026-11-18T07:44:19.805Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-17T23:56:01.906Z'
+updated_at: '2026-11-18T07:44:29.256Z'
+pr_history:
+  - phase: review
+    pr_number: 1932
+    branch: builder/pir-1919
+    created_at: '2026-11-18T07:24:37.644Z'
+pr_ready_for_human: false

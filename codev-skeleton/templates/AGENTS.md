@@ -24,14 +24,15 @@ This project uses **Codev** for AI-assisted development.
 
 ## Available Protocols
 
-- **SPIR**: Multi-phase development with consultation (`codev/protocols/spir/protocol.md`)
-- **ASPIR**: Autonomous SPIR — no human gates on spec/plan (`codev/protocols/aspir/protocol.md`)
-- **AIR**: Autonomous Implement & Review for small features (`codev/protocols/air/protocol.md`)
-- **BUGFIX**: Bug fixes from GitHub issues (`codev/protocols/bugfix/protocol.md`)
-- **PIR**: Plan / Implement / Review — issue-driven with three human gates (plan-approval, dev-approval, pr) (`codev/protocols/pir/protocol.md`)
-- **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
-- **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
-- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique (`codev/protocols/research/protocol.md`)
+- **SPIR**: Multi-phase development with consultation
+- **ASPIR**: Autonomous SPIR — no human gates on spec/plan
+- **AIR**: Autonomous Implement & Review for small features
+- **BUGFIX**: Bug fixes from GitHub issues
+- **PIR**: Plan / Implement / Review — issue-driven with three human gates (plan-approval, dev-approval, pr)
+- **EXPERIMENT**: Disciplined experimentation
+- **MAINTAIN**: Codebase maintenance
+- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique
+- **SPIKE**: Time-boxed feasibility investigation — findings, not shipped code
 
 ## File Resolution (How Codev Finds Protocols and Templates)
 
@@ -44,17 +45,13 @@ Codev resolves protocol files, prompts, agent definitions, and roles through a f
 
 **The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
 
+**Finding files:** Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
+
 **Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol, do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes it from your available-protocol list while it's still callable from the CLI.
 
-## Protocol Verification (When You Don't Recognize a Protocol Name)
+## Protocol Names You Don't Recognize
 
-If the user mentions a protocol name you don't immediately recognize, verify against the CLI before responding:
-
-```bash
-afx spawn --protocol <name> --help
-```
-
-This succeeds if the protocol is registered (including via the skeleton fallback in tier 4 of the resolution chain) and errors helpfully otherwise. The CLI is the source of truth — defer to it when in doubt.
+The list above is what ships with Codev; a project can add its own under `.codev/protocols/` or `codev/protocols/`. If the user names a protocol that is in neither the list nor those directories, ask rather than guess. (`afx spawn --protocol <name> --help` is no check — `--help` succeeds for any name.)
 
 ## Key Locations
 
@@ -111,11 +108,12 @@ Commit messages format:
 
 ## CLI Commands
 
-Codev provides three CLI tools:
+Codev's core CLI tools:
 
 - **codev**: Project management (init, adopt, update, doctor)
-- **afx**: Agent Farm orchestration (start, spawn, status, cleanup)
-- **consult**: AI consultation for reviews (general, protocol, stats)
+- **afx**: Agent Farm orchestration (workspace start, spawn, status, send, cleanup)
+- **porch**: Protocol orchestration (next, done, status, approve)
+- **consult**: AI consultation — general queries (`--prompt`), protocol reviews (`--type`), and `consult stats`
 
 For complete reference, see `codev/resources/commands/`:
 - `codev/resources/commands/overview.md` - Quick start
@@ -129,7 +127,7 @@ Agents within a workspace communicate through `afx send`. Four addressing forms 
 
 | Form | Meaning | Allowed from |
 |---|---|---|
-| `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send 0042 "..."`). | Any sender. |
+| `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send spir-42 "..."`; a bare `42` also resolves when only one builder ends in it). | Any sender. |
 | `afx send architect "msg"` | From a builder: routes to the spawning architect via affinity. From an architect (or any non-builder sender): routes to the architect named `main` if present, else the first registered architect. | Any sender. |
 | `afx send architect:<name> "msg"` | Explicit per-architect addressing. **Architects (including `main`)**: open address grammar — any architect can address any other architect (sibling-architect messaging). **Builders**: allowed ONLY when `<name>` matches the builder's own spawning architect; mismatches are rejected by Tower's spoofing check. From a builder, this is an explicit form of the affinity routing, NOT an override. | Any sender (with the spoofing constraint above for builders). |
 | `afx send <workspace>:architect "msg"` | Cross-workspace addressing (e.g. `afx send marketmaker:architect "..."`). | Any sender. |
@@ -161,4 +159,4 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## For More Info
 
-Read the full protocol documentation in `codev/protocols/`.
+Porch and `afx spawn` give each agent the full text of the protocol it is running.

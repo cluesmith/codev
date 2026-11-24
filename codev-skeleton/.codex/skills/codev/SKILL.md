@@ -57,7 +57,7 @@ codev update --agent           # Agent mode: JSON stdout, no interactive merge
 
 ## codev doctor
 
-Checks all required dependencies: Node.js (>=18), git (>=2.5), gh (authenticated), and at least one AI CLI (Claude, Gemini, or Codex).
+Checks dependencies: Node.js (>=22), git (>=2.5), your forge's CLI and its auth (`gh` on GitHub), and at least one working AI model — Claude (the installed `claude` CLI: version and login), Codex, OpenCode, or Gemini (via the Antigravity CLI, `agy`).
 
 ```bash
 codev doctor
@@ -85,6 +85,17 @@ pnpm -w run local-install   # packs both packages, installs globally, restarts T
 `scripts/forge/**/*.sh` that `pnpm pack` strips, and restarts Tower last. Install runs while
 Tower is up; only the final restart causes downtime. **Do not stop Tower first**, and do not use
 `npm link` / `pnpm link` — it breaks global installs.
+
+**Native Windows:** pnpm runs `package.json` scripts through `cmd.exe`, which cannot run the
+`.sh` files that `build` and `local-install` invoke, so both fail with `'scripts' is not
+recognized as an internal or external command`. Point pnpm at Git Bash once:
+
+```
+pnpm config set script-shell "C:\Program Files\Git\bin\bash.exe"
+```
+
+Use the full path, because a bare `bash` can resolve to WSL. The setting is user-global, so it
+applies to every pnpm project on the machine; undo it with `pnpm config delete script-shell`.
 
 `pnpm build` also runs `copy-skeleton`, which copies `codev-skeleton/` into
 `packages/codev/skeleton`. **Tests read that copy**, so after editing anything under

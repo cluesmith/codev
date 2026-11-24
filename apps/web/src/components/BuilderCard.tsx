@@ -44,7 +44,9 @@ function stateLabel(builder: OverviewBuilder, state: CardState): string {
   if (state === 'waiting') return 'Waiting on input';
   if (builder.mode === 'soft') return 'running';
   if (!builder.phase) return 'starting';
-  const phases = builder.planPhases;
+  // A skipped plan phase (#1900) is dropped from the plan, so it counts in
+  // neither n nor m — matching the progress bar.
+  const phases = builder.planPhases.filter(p => p.status !== 'skipped');
   if (phases.length === 0) return builder.phase;
   const idx = phases.findIndex(p => p.id === builder.phase);
   if (idx === -1) return builder.phase;

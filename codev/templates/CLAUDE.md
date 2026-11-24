@@ -22,11 +22,34 @@ This project uses **Codev** for AI-assisted development.
 
 ## Available Protocols
 
-- **SPIR**: Multi-phase development with consultation (`codev/protocols/spir/protocol.md`)
-- **ASPIR**: Autonomous SPIR — no human gates on spec/plan (`codev/protocols/aspir/protocol.md`)
-- **TICK**: Fast autonomous implementation (`codev/protocols/tick/protocol.md`)
-- **EXPERIMENT**: Disciplined experimentation (`codev/protocols/experiment/protocol.md`)
-- **MAINTAIN**: Codebase maintenance (`codev/protocols/maintain/protocol.md`)
+- **SPIR**: Multi-phase development with consultation
+- **ASPIR**: Autonomous SPIR — no human gates on spec/plan
+- **AIR**: Autonomous Implement & Review for small features
+- **BUGFIX**: Bug fixes from GitHub issues
+- **PIR**: Plan / Implement / Review — issue-driven with three human gates (plan-approval, dev-approval, pr)
+- **EXPERIMENT**: Disciplined experimentation
+- **MAINTAIN**: Codebase maintenance
+- **RESEARCH**: Multi-agent research with 3-way investigation, synthesis, and critique
+- **SPIKE**: Time-boxed feasibility investigation — findings, not shipped code
+
+## File Resolution (How Codev Finds Protocols and Templates)
+
+Codev resolves protocol files, prompts, agent definitions, and roles through a four-tier lookup (highest priority first):
+
+1. `.codev/<path>` — user override (project-local customization)
+2. `codev/<path>` — project-local copy (customized and checked in)
+3. Runtime cache
+4. **Installed package skeleton** — ships with `@cluesmith/codev` (the default for every standard protocol)
+
+**The absence of `codev/protocols/<name>/` on disk is not a missing reference** — it's the normal case for any protocol you haven't customized. The protocol resolves from the installed package's skeleton at runtime. Only protocols you want to customize need to live in your repo's `codev/protocols/`.
+
+**Finding files:** Never search from the filesystem root (`find /`, a whole-drive search): search within the project directory or use your built-in file search tools. A framework file (protocol, prompt, template, role) that is not in the project is delivered to you another way, so do not go looking for it.
+
+**Implication for `codev update` and CLAUDE.md / AGENTS.md merges:** when an updated template references a protocol, do NOT drop the reference because `codev/protocols/<name>/` is absent locally. The protocol resolves via the package skeleton, and dropping the reference removes it from your available-protocol list while it's still callable from the CLI.
+
+## Protocol Names You Don't Recognize
+
+The list above is what ships with Codev; a project can add its own under `.codev/protocols/` or `codev/protocols/`. If the user names a protocol that is in neither the list nor those directories, ask rather than guess. (`afx spawn --protocol <name> --help` is no check — `--help` succeeds for any name.)
 
 ## Key Locations
 
@@ -34,6 +57,28 @@ This project uses **Codev** for AI-assisted development.
 - **Plans**: `codev/plans/` - Implementation plans (HOW to build)
 - **Reviews**: `codev/reviews/` - Reviews and lessons learned
 - **Protocols**: `codev/protocols/` - Development protocols
+
+## Working with Project Labels
+
+If your project uses GitHub labels with a structured prefix (e.g. `area/*`, `team/*`, `priority/*`) to organize issues, treat them as the primary axis when users ask about grouping, editing, or auditing. Run `gh label list` to discover what your project uses, infer the convention from how existing issues are labeled, and ask the user to confirm before applying broad changes.
+
+**Discover the convention:**
+
+```bash
+# List all labels (skim for structured prefixes)
+gh label list
+
+# Filter to a specific prefix family
+gh label list --search "<prefix>/"
+```
+
+**Inferring policy:** conventions vary across projects. Common patterns:
+
+- **One label per axis.** Many projects allow only one `<prefix>/*` label per issue, with a dedicated multi-axis fallback (e.g. `<prefix>/cross-cutting`).
+- **Layered families.** Some projects use multiple prefixes together (`area/*` + `team/*` + `priority/*`).
+- **Separator style.** `<family>/<value>` and `<family>:<value>` both exist in the wild — respect whatever convention the project already uses.
+
+Before bulk-applying labels or relabeling issues, ask the user to confirm the convention — don't assume.
 
 ## Quick Start
 
@@ -61,17 +106,40 @@ Commit messages format:
 
 ## CLI Commands
 
-Codev provides three CLI tools:
+Codev's core CLI tools:
 
 - **codev**: Project management (init, adopt, update, doctor)
-- **afx**: Agent Farm orchestration (start, spawn, status, cleanup)
-- **consult**: AI consultation for reviews (general, protocol, stats)
+- **afx**: Agent Farm orchestration (workspace start, spawn, status, send, cleanup)
+- **porch**: Protocol orchestration (next, done, status, approve)
+- **consult**: AI consultation — general queries (`--prompt`), protocol reviews (`--type`), and `consult stats`
 
 For complete reference, see `codev/resources/commands/`:
 - `codev/resources/commands/overview.md` - Quick start
 - `codev/resources/commands/codev.md` - Project commands
 - `codev/resources/commands/agent-farm.md` - Agent Farm commands
 - `codev/resources/commands/consult.md` - Consultation commands
+
+## Inter-agent messaging
+
+Agents within a workspace communicate through `afx send`. Four addressing forms are supported:
+
+| Form | Meaning | Allowed from |
+|---|---|---|
+| `afx send <builder-id> "msg"` | Send to a specific builder (e.g. `afx send spir-42 "..."`; a bare `42` also resolves when only one builder ends in it). | Any sender. |
+| `afx send architect "msg"` | From a builder: routes to the spawning architect via affinity. From an architect (or any non-builder sender): routes to the architect named `main` if present, else the first registered architect. | Any sender. |
+| `afx send architect:<name> "msg"` | Explicit per-architect addressing. **Architects (including `main`)**: open address grammar — any architect can address any other architect (sibling-architect messaging). **Builders**: allowed ONLY when `<name>` matches the builder's own spawning architect; mismatches are rejected by Tower's spoofing check. From a builder, this is an explicit form of the affinity routing, NOT an override. | Any sender (with the spoofing constraint above for builders). |
+| `afx send <workspace>:architect "msg"` | Cross-workspace addressing (e.g. `afx send marketmaker:architect "..."`). | Any sender. |
+
+**Send outcomes (delivered vs held)**: `afx send` reports the real first outcome. **delivered** means the message was written to the recipient's prompt after a clean render-gate pass; **held** means the prompt wasn't clear, so the message was persisted in Tower's durable mailbox and delivers automatically once the prompt is clean — with a why-held reason (`busy`, `no-profile`, or `no-live-pty`) and a mailbox id. A held message is never force-injected onto a busy line, so it can't corrupt a draft the gate can see, and held rows survive a Tower restart. (The gate reads the composer off the rendered screen and counts input through `PtySession.write()`; `afx attach` writes the shellper socket directly, so a draft typed there is seen only once the app echoes it.) List held messages with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`; `afx send --interrupt` is the explicit bypass.
+
+**Sibling-architect messaging**: when a workspace hosts more than one architect (added via `afx workspace add-architect --name <name>`), sibling architects message each other via the `architect:<name>` form. Example: `main` running `afx send architect:ob-refine "PR-iter-2 feedback ready"` lands on the `ob-refine` architect's terminal. This works because sender = architect bypasses the spoofing check.
+
+**Builder spoofing-check**: a builder may only address its own spawning architect via `architect:<name>`. The spoofing check is enforced by Tower's message router; attempts to address a different architect from a builder are rejected.
+
+**Discovering active agents**:
+
+- `afx status` lists all architects alongside builders, with names, terminal IDs, and PIDs where available.
+- Each active builder maintains a free-text narrative log at `codev/state/<builder-id>_thread.md` (relative to its worktree). **In-flight discovery**: `ls .builders/*/codev/state/*.md` and `cat .builders/<id>/codev/state/<id>_thread.md`. **Post-merge discovery**: after a builder's PR merges, its thread lands in `codev/state/` on `main` — list with `ls codev/state/` and read with `cat codev/state/<builder-id>_thread.md` from the main checkout.
 
 ## Configuration
 
@@ -89,4 +157,4 @@ Agent Farm is configured via `.codev/config.json` at the project root. Created d
 
 ## For More Info
 
-Read the full protocol documentation in `codev/protocols/`.
+Porch and `afx spawn` give each agent the full text of the protocol it is running.

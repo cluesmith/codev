@@ -9,11 +9,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildWorktreeLaunchScript } from '../commands/spawn-worktree.js';
+import { buildWorktreeLaunchScript, builderScriptLaunch } from '../commands/spawn-worktree.js';
 
 let worktree: string;
 let counter: string;
@@ -27,6 +27,12 @@ function writeLaunchScript(code: number): string {
   fs.writeFileSync(scriptPath, script);
   fs.chmodSync(scriptPath, 0o755);
   return scriptPath;
+}
+
+/** Run the script the way Tower does: `/bin/bash <script>`, or the resolved Git Bash on Windows. */
+function runScript(scriptPath: string, options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
+  const launch = builderScriptLaunch(scriptPath, worktree);
+  return spawnSync(launch.command, launch.args, options);
 }
 
 function runCount(): number {
@@ -43,13 +49,22 @@ afterEach(() => {
   fs.rmSync(worktree, { recursive: true, force: true });
 });
 
+/**
+ * Each test runs the loop through bash with an inner 10 s timeout. On Windows a
+ * Git Bash cold start under full-suite load took 8 s, past vitest's 5 s default.
+ */
+function firstBashRunTimeoutMs(): number {
+  if (process.platform === 'win32') return 30_000;
+  return 5_000;
+}
+
 describe('builder launch loop exit handling (Bugfix #1241)', () => {
   it('does not respawn the agent after a deliberate exit (code 0)', () => {
     const scriptPath = writeLaunchScript(0);
 
     // stdin is closed, so the relaunch prompt reads EOF and the script ends.
     // Without the fix this loops forever and the timeout below kills it.
-    const result = spawnSync('/bin/bash', [scriptPath], {
+    const result = runScript(scriptPath, {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf-8',
       timeout: 10_000,
@@ -60,13 +75,13 @@ describe('builder launch loop exit handling (Bugfix #1241)', () => {
     expect(runCount()).toBe(1);
     expect(result.stdout).toContain('Agent exited at your request');
     expect(result.stdout).not.toContain('Restarting in 2 seconds');
-  });
+  }, firstBashRunTimeoutMs());
 
   it('relaunches once per keypress after a deliberate exit', () => {
     const scriptPath = writeLaunchScript(0);
 
     // One Enter → one relaunch; then EOF ends the loop.
-    const result = spawnSync('/bin/bash', [scriptPath], {
+    const result = runScript(scriptPath, {
       input: '\n',
       encoding: 'utf-8',
       timeout: 10_000,
@@ -74,13 +89,13 @@ describe('builder launch loop exit handling (Bugfix #1241)', () => {
 
     expect(result.status).toBe(0);
     expect(runCount()).toBe(2);
-  });
+  }, firstBashRunTimeoutMs());
 
   it('still auto-restarts after a crash (nonzero exit)', () => {
     const scriptPath = writeLaunchScript(7);
 
     // No natural end for a crash loop — kill it after two restart delays.
-    const result = spawnSync('/bin/bash', [scriptPath], {
+    const result = runScript(scriptPath, {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf-8',
       timeout: 5_000,

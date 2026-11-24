@@ -53,15 +53,13 @@ The command above is your forge's `pr-create` concept, substituted by porch (`gh
 
 ## Optional CMAP review
 
-CMAP is your judgement call for AIR. Skip it for simple changes (config, small UI); run it for features touching core logic or several modules:
+CMAP is your judgement call for AIR. Skip it for simple changes (config, small UI); run it for features touching core logic or several modules. Porch wrote these commands from the protocol's default reviewers (gemini, codex, claude) and your project's `.codev/config.json` `porch.consultation`:
 
 ```bash
-consult -m gemini --protocol air --type pr &
-consult -m codex --protocol air --type pr &
-consult -m claude --protocol air --type pr &
+{{consult_commands}}
 ```
 
-If you run it, wait for all three, record each verdict, fix real issues, and push.
+Run each as its own background task (in Claude Code, `run_in_background: true`, not a trailing `&`). If you run CMAP, wait for every result, record each verdict, fix real issues, and push.
 
 ## Notify the architect
 
@@ -69,15 +67,6 @@ If you run it, wait for all three, record each verdict, fix real issues, and pus
 afx send architect "PR #<number> ready for review (implements issue #{{issue.number}})"
 ```
 
-If you ran CMAP, include the verdicts: `CMAP: gemini=<verdict>, codex=<verdict>, claude=<verdict>`.
+If you ran CMAP, include the verdicts: `CMAP: {{consult_verdicts}}`.
 
-## Signals
-
-- PR created and ready for review:
-  ```
-  <signal>PHASE_COMPLETE</signal>
-  ```
-- Blocked:
-  ```
-  <signal>BLOCKED:reason goes here</signal>
-  ```
+Then run the `porch done` command porch gives you below: it fires the `pr` gate. Stop and wait — a CMAP APPROVE is not merge authorization. When the architect relays the human's approval, run `porch approve {{project_id}} pr --a-human-explicitly-approved-this` yourself, then follow the merge task from `porch next`. If you are blocked, `afx send architect` the specifics and wait instead of running `porch done`.

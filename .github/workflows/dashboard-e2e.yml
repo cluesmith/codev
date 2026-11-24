@@ -8,7 +8,10 @@ on:
 jobs:
   playwright:
     name: Dashboard Tests
-    runs-on: ubuntu-latest
+    # #1935: pinned, not ubuntu-latest. The floating label rolled to ubuntu-26.04, and the
+    # Playwright this repo resolves (1.59.x) ships no Chromium build for it (support landed in
+    # 1.61). Move this pin only together with a Playwright bump, verified on the new image.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -38,6 +41,7 @@ jobs:
         run: pnpm build
 
       - name: Install Playwright browsers
+        id: install-browsers
         working-directory: packages/codev
         run: pnpm exec playwright install chromium
 
@@ -54,8 +58,10 @@ jobs:
       # Spec 1819: the Decisions tab suite writes files, so it runs through its own config —
       # no global setup activating the repository workspace — on a Tower that shares nothing
       # with the one above: its own port, state dir and shellper socket dir.
+      # It runs even when the suite above fails, but not when there is no browser to launch
+      # (#1935): a failed install is reported once, at its own step, not as launch errors.
       - name: Run Decisions tab tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.install-browsers.outcome == 'success' }}
         working-directory: packages/codev
         env:
           TOWER_TEST_PORT: '14101'

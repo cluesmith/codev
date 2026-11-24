@@ -11,8 +11,9 @@
  *
  * SCOPE — per the architect's plan-gate ruling (2026-08-01): every skill this project
  * TOUCHES must be four-tree consistent. Skills it does not touch are EXEMPT; their
- * pre-existing drift (`afx`, `porch`) and skeleton-absence (`forge`, `skill-creator`,
- * `team`) belong to a separate architect-filed issue and must not fail this test.
+ * skeleton-absence (`forge`, `skill-creator`, `team`) belongs to a separate architect-filed
+ * issue and must not fail this test. Bugfix #1902 reconciled the drifted `afx` and `porch`
+ * copies (and `consult`) and brought them under this test.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
@@ -21,10 +22,11 @@ import * as path from 'node:path';
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 
 /**
- * Skills touched by Spec 1280 (and `update-arch-docs`, by Spec 1797). Adding a skill to this
- * list is a deliberate act: it asserts the project now owns that skill's four-tree consistency.
+ * Skills touched by Spec 1280 (`update-arch-docs` by Spec 1797; `afx`, `porch`, `consult` by
+ * Bugfix #1902). Adding a skill to this list is a deliberate act: it asserts the project now
+ * owns that skill's four-tree consistency.
  */
-const TOUCHED_SKILLS = ['runnable-worktrees', 'codev', 'update-arch-docs'] as const;
+const TOUCHED_SKILLS = ['runnable-worktrees', 'codev', 'update-arch-docs', 'afx', 'porch', 'consult'] as const;
 
 const TREES = [
   '.claude/skills',
@@ -58,7 +60,8 @@ describe('T17 — touched skills are consistent across all four trees', () => {
     });
 
     it(`${skill}: carries usable frontmatter`, () => {
-      const body = fs.readFileSync(skillPath('.claude/skills', skill), 'utf-8');
+      // LF-normalized: a CRLF checkout (core.autocrlf on Windows) is the same frontmatter.
+      const body = fs.readFileSync(skillPath('.claude/skills', skill), 'utf-8').replace(/\r\n/g, '\n');
       expect(body.startsWith('---\n'), `${skill} has no frontmatter block`).toBe(true);
       expect(body).toMatch(new RegExp(`^name:\\s*${skill}$`, 'm'));
       // The description is the trigger surface — an empty one makes the skill undiscoverable,

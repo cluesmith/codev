@@ -20,6 +20,8 @@ import { resolveLifecycleReporterInjection } from '../utils/lifecycle-reporter.j
 import { getArchitectByName, setArchitectSessionId } from '../state.js';
 import type { CrashLoopFallback, FreshLaunch, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import { cmdlineHoldsSession } from './architect-session-holder.js';
+import { isWindows } from '../../lib/platform.js';
+import { isHostPathUnder } from '../../lib/host-paths.js';
 
 // ============================================================================
 // Rate Limiting
@@ -99,15 +101,18 @@ const _tmpDirResolved = (() => {
 })();
 
 /**
- * Check if a workspace path points to a temp directory.
+ * Check if a workspace path points to a temp directory. On Windows only the
+ * host temp dir counts (Spec 1658): `/tmp` is a POSIX location.
  */
 export function isTempDirectory(workspacePath: string): boolean {
-  return (
-    workspacePath.startsWith(_tmpDir + '/') ||
-    workspacePath.startsWith(_tmpDirResolved + '/') ||
-    workspacePath.startsWith('/tmp/') ||
-    workspacePath.startsWith('/private/tmp/')
-  );
+  if (isHostPathUnder(workspacePath, _tmpDir) || isHostPathUnder(workspacePath, _tmpDirResolved)) {
+    return true;
+  }
+  if (isWindows()) {
+    return false;
+  }
+  // POSIX temp roots (macOS /tmp is a symlink to /private/tmp).
+  return workspacePath.startsWith('/tmp/') || workspacePath.startsWith('/private/tmp/');
 }
 
 // ============================================================================
@@ -243,6 +248,7 @@ function sessionIsOwned(
  * which the caller treats as "could not determine" (see `sessionHasLiveHolder`).
  */
 function listProcessCommandLines(): string[] {
+  // windows-console: posix-only (sessionHasLiveHolder never reaches this on Windows)
   const out = execFileSync('ps', ['-ww', '-A', '-o', 'args='], {
     encoding: 'utf-8',
     timeout: 5000,
@@ -274,11 +280,19 @@ function listProcessCommandLines(): string[] {
  * is purely additive — it diverts to fresh ONLY on positive evidence of a live
  * holder, and never makes an un-held resume worse than today's behavior. The
  * `list` seam exists for tests.
+ *
+ * Windows has no `ps` that prints native command lines (Git's MSYS `ps` does
+ * not), and running one from console-less Tower flashes a window (Issue #1919),
+ * so with no `list` given it answers "could not determine" (`false`). Every
+ * production caller passes its own detector: the main-launch and add-architect
+ * paths use the census-backed reconcile in `architect-session-holder.ts`, and
+ * the restart-bake path opts out of the check entirely.
  */
 export function sessionHasLiveHolder(
   sessionId: string,
   opts?: { list?: () => string[] },
 ): boolean {
+  if (!opts?.list && isWindows()) return false;
   const list = opts?.list ?? listProcessCommandLines;
   try {
     return list().some((cmdline) => cmdlineHoldsSession(cmdline, sessionId));

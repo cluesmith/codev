@@ -17,7 +17,9 @@ import { resolveStamp } from '../servers/decisions/stamp.js';
 import { DECISIONS_FILE_TEMPLATE } from '../servers/decisions/template.js';
 
 const REPO = resolve(import.meta.dirname, '../../../../..');
-const read = (rel: string) => readFileSync(resolve(REPO, rel), 'utf8');
+// LF-normalized: the block and section patterns below are LF, and a CRLF checkout
+// (core.autocrlf on Windows) would match none of them.
+const read = (rel: string) => readFileSync(resolve(REPO, rel), 'utf8').replace(/\r\n/g, '\n');
 
 const DOC = 'codev-skeleton/resources/decision-protocol.md';
 const doc = read(DOC);

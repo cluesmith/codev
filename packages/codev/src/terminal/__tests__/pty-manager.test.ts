@@ -12,9 +12,9 @@ const mockPty = {
   kill: vi.fn(),
 };
 
-vi.mock('node-pty', () => ({
+vi.mock('../node-pty-loader.js', () => ({ loadNodePty: () => ({
   spawn: vi.fn(() => mockPty),
-}));
+}) }));
 
 describe('TerminalManager', () => {
   let manager: TerminalManager;

@@ -40,19 +40,23 @@ need to fetch it.
 
 ## Dispatching the investigation
 
+Run each command as its own background task (in Claude Code, `run_in_background: true`, not a
+trailing `&`), so your turn ends and you are notified as each one finishes.
+
 ```bash
 # investigate — parallel, independent
-consult -m gemini --prompt-file codev/research/<topic>-brief.md --output codev/research/<topic>-gemini.md &
-consult -m codex  --prompt-file codev/research/<topic>-brief.md --output codev/research/<topic>-codex.md &
-consult -m claude --prompt-file codev/research/<topic>-brief.md --output codev/research/<topic>-claude.md &
-wait
+consult -m gemini --prompt-file codev/research/<topic>-brief.md --output codev/research/<topic>-gemini.md
+consult -m codex  --prompt-file codev/research/<topic>-brief.md --output codev/research/<topic>-codex.md
+consult -m claude --prompt-file codev/research/<topic>-brief.md --output codev/research/<topic>-claude.md
 
-# critique — same shape, pointed at the synthesis
-consult -m gemini --prompt "Critique this research synthesis for gaps, errors, and bias:" --prompt-file codev/research/<topic>.md --output codev/research/<topic>-critique-gemini.md &
-consult -m codex  --prompt "Critique this research synthesis for gaps, errors, and bias:" --prompt-file codev/research/<topic>.md --output codev/research/<topic>-critique-codex.md &
-consult -m claude --prompt "Critique this research synthesis for gaps, errors, and bias:" --prompt-file codev/research/<topic>.md --output codev/research/<topic>-critique-claude.md &
-wait
+# critique — same shape, pointed at the synthesis (each model reads the file itself)
+consult -m gemini --prompt "Critique the research synthesis in codev/research/<topic>.md for gaps, errors, and bias." --output codev/research/<topic>-critique-gemini.md
+consult -m codex  --prompt "Critique the research synthesis in codev/research/<topic>.md for gaps, errors, and bias." --output codev/research/<topic>-critique-codex.md
+consult -m claude --prompt "Critique the research synthesis in codev/research/<topic>.md for gaps, errors, and bias." --output codev/research/<topic>-critique-claude.md
 ```
+
+`--prompt` and `--prompt-file` cannot be combined. If a lane fails or skips, record that in the
+report instead of presenting two models as three.
 
 ## Notifications
 

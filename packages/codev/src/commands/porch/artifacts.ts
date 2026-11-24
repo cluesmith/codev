@@ -84,7 +84,8 @@ export function matchesProjectId(name: string, projectId: string): boolean {
  * Used by both LocalResolver and CliResolver for consistency.
  */
 export function isPreApprovedContent(content: string): boolean {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  // CRLF too: a spec or plan checked out with core.autocrlf, or saved by a Windows editor.
+  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!frontmatterMatch) return false;
 
   const frontmatter = frontmatterMatch[1];
@@ -298,6 +299,7 @@ export class CliResolver implements ArtifactResolver {
       const output = execFileSync(this.command, ['get', '--list', scopePath], {
         encoding: 'utf-8',
         timeout: 5000,
+        windowsHide: true,
         env: { ...process.env, ...this.extraEnv },
       }).trim();
       // Cache both non-empty and empty results (empty = scope exists but has no children)
@@ -324,6 +326,7 @@ export class CliResolver implements ArtifactResolver {
       const output = execFileSync(this.command, ['get', scopePath], {
         encoding: 'utf-8',
         timeout: 5000,
+        windowsHide: true,
         env: { ...process.env, ...this.extraEnv },
       });
       this.cache.set(cacheKey, output);
@@ -358,6 +361,9 @@ export class CliResolver implements ArtifactResolver {
 // Git Ref Resolver (reads codev/ artifacts at a specific git ref)
 // =============================================================================
 
+/** Upper bound on GitRefResolver's `git fetch` (#1919: hidden, so it must not wait on a prompt). */
+export const GIT_FETCH_TIMEOUT_MS = 60_000;
+
 /**
  * Reads codev/specs/, codev/plans/, codev/reviews/, and
  * codev/projects/<id>/plan.md as they exist on a specific git ref (e.g.
@@ -386,9 +392,14 @@ export class GitRefResolver implements ArtifactResolver {
     if (ref.startsWith('origin/')) {
       const branch = ref.slice('origin/'.length);
       try {
+        // Hidden (#1919), so a credential prompt could never be answered:
+        // refuse prompts and bound the fetch rather than hang on one.
         execFileSync('git', ['fetch', 'origin', branch], {
           cwd: workspaceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+          timeout: GIT_FETCH_TIMEOUT_MS,
+          windowsHide: true,
         });
       } catch (err) {
         // Distinguish "already fetched / offline with cached copy" (silently
@@ -410,7 +421,7 @@ export class GitRefResolver implements ArtifactResolver {
       const stdout = execFileSync(
         'git',
         ['ls-tree', '--name-only', '-r', this.ref, '--', dir],
-        { cwd: this.workspaceRoot, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+        { cwd: this.workspaceRoot, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
       );
       return stdout.split('\n').filter(Boolean).map(line => path.basename(line));
     } catch {
@@ -428,6 +439,7 @@ export class GitRefResolver implements ArtifactResolver {
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'ignore'],
           maxBuffer: 32 * 1024 * 1024,
+          windowsHide: true,
         },
       );
       return stdout;
@@ -454,7 +466,7 @@ export class GitRefResolver implements ArtifactResolver {
       const stdout = execFileSync(
         'git',
         ['ls-tree', '--name-only', this.ref, '--', 'codev/projects/'],
-        { cwd: this.workspaceRoot, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+        { cwd: this.workspaceRoot, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
       );
       const projDirs = stdout.split('\n').filter(Boolean).map(line => path.basename(line));
       const projDir = projDirs.find(d => matchesProjectId(d, projectId));

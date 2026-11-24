@@ -55,6 +55,15 @@ gh run list --branch main --limit 5
 
 **Stop if**: Any check on that commit failed. Fix issues before proceeding.
 
+Native Windows has no automatic CI. Dispatch the on-demand Windows workflow against that same `main` commit and wait for it (the full suites take about an hour):
+
+```bash
+gh workflow run windows.yml --ref main -f purpose='Release vX.Y.Z' -f suites=true -f install_guard=true
+gh run list --workflow windows.yml --limit 1
+```
+
+**Stop if**: Any Windows job failed. Fix issues before proceeding.
+
 ### 4. Update Version and Tag
 
 **Normal releases — use lockstep bump.** Run `pnpm bump-version` from the repo root to set every version-aligned package (`@cluesmith/codev`, `@cluesmith/codev-core`, `@cluesmith/codev-sdk`, `@cluesmith/codev-types`, `@cluesmith/codev-artifact-canvas`, the VS Code extension, and the Stream Deck plugin) to the same version in one shot. This keeps every workspace package on the same version, preventing the class of drift bug where a release ships pointing at outdated internal dependencies and end users hit runtime API mismatches. (`@cluesmith/codev-artifact-canvas` is version-aligned for consistency but is consumed by hosts via `workspace:*` and bundled by them — **not independently npm-published in v1** per spec-945, so it appears in the bump/commit steps below but not in the `pnpm publish` step.)
@@ -85,6 +94,9 @@ git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
 git push && git push origin vX.Y.Z
 ```
 
+This commit and tag go straight to the default branch: the one exception to the architect's
+"don't commit to the default branch" rule. Make them only after the owner's go.
+
 **Backport path (single-package patch on a release branch)** — use `pnpm version` directly:
 
 ```bash
@@ -105,7 +117,9 @@ git push && git push origin vX.Y.Z
 
 ### 5. Write Release Notes
 
-Create `docs/releases/vX.Y.Z.md`:
+Create `docs/releases/vX.Y.Z-<codename>.md`, with the codename lowercased and hyphenated (`v3.3.0-luxor.md`,
+`v2.0.0-hagia-sophia.md`). If the cycle kept a `docs/releases/UNRELEASED.md`, `git mv` it to that name
+instead of starting from scratch:
 
 ```markdown
 # vX.Y.Z Codename
@@ -142,7 +156,7 @@ Brief overview of this release.
 ### 6. Create GitHub Release
 
 ```bash
-gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX.Y.Z.md
+gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX.Y.Z-<codename>.md
 ```
 
 ### 7. Publish to npm
@@ -165,7 +179,7 @@ cd packages/codev && pnpm publish --tag next --no-git-checks # RC → tag next
 
 **When to bump workspace dep versions:** unnecessary if step 4 used `pnpm bump-version` (lockstep already bumped core, sdk, and types). If you took the backport path and `packages/core/src/**`, `packages/sdk/src/**`, or `packages/types/src/**` changed since the last release, bump that package's version (`pnpm --filter @cluesmith/codev-core version patch`) before publishing — otherwise the publish step will skip it (existing version) and consumers will get the old code.
 
-**Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`.
+**Verification:** the `Post-Release E2E Verification` GitHub Actions workflow (triggered automatically on release) installs the published tarball on macOS and Ubuntu. If it fails with E404 on a `@cluesmith/*` package, that workspace dep is missing from npm — publish it and re-run the workflow with `gh workflow run "Post-Release E2E Verification" -f version=X.Y.Z`. Windows is not part of that workflow: verify the published install there with `gh workflow run windows.yml --ref main -f purpose='Post-release vX.Y.Z' -f version=X.Y.Z`.
 
 ### 8. Post to Discussion Forum
 
@@ -206,12 +220,24 @@ releases:
 
 Codev releases are named after **great examples of architecture** from around the world:
 
+One codename per minor line, taken from the release notes in `docs/releases/`. A blank cell means
+the notes do not record it.
+
 | Version | Codename | Inspiration |
 |---------|----------|-------------|
-| 1.0.0 | Alhambra | Moorish palace complex in Granada, Spain |
-| 1.1.0 | Bauhaus | German art school, functional modernism |
-| 1.2.0 | Cordoba | Great Mosque of Cordoba, Spain |
-| 1.3.0 | Doric | Ancient Greek column order, simplicity |
+| 1.0.x | Alhambra | Moorish palace complex in Granada, Spain |
+| 1.1.x | Bauhaus | German art school, functional modernism |
+| 1.2.x | Cordoba | Great Mosque of Cordoba, Spain |
+| 1.3.x | Doric | Ancient Greek column order, simplicity |
+| 1.4.x | Eichler | Joseph Eichler's mid-century modern California homes |
+| 1.5.x | Florence | |
+| 1.6.x | Gothic | |
+| 2.0.x | Hagia Sophia | The Istanbul landmark, standing for 1,500 years |
+| 2.1.x | | |
+| 3.0.x | Ionic | Greek column order whose hallmark is the volute |
+| 3.1.x | Jacobean | |
+| 3.2.x | Karnak | |
+| 3.3.x | Luxor | |
 
 Future releases continue this tradition, drawing from architectural wonders across cultures and eras.
 

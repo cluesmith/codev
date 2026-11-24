@@ -4,12 +4,11 @@
  * Port of codev/bin/codev-doctor to TypeScript
  */
 
-import { execSync, spawnSync, spawn } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
-import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, isHybridProvider, type ConceptResolution } from '../lib/forge.js';
 import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
@@ -32,7 +31,32 @@ import { resolveAgyBin, AGY_OAUTH_MARKERS } from './consult/index.js';
 import { checkCachedAgyAuth, recordAgyAuthState } from './consult/agy-auth-cache.js';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { findClaudeSessionMarkers } from '../lib/agent-env.js';
+import {
+  assertApiKeyPresent,
+  assertClaudeVersion,
+  assertLoggedIn,
+  buildClaudeChildEnv,
+  describeWithheldKeys,
+  readClaudeAuthStatus,
+  readClaudeVersion,
+  resolveClaudeAuthMode,
+  resolveClaudeBin,
+  type ClaudeAuthMode,
+  type ClaudeAuthStatus,
+} from '../lib/claude-cli.js';
+import { readDotenvFile } from '../lib/dotenv.js';
 import { getProcessesOnPort } from '../agent-farm/utils/port.js';
+import { hostPlatform, isWindows } from '../lib/platform.js';
+import { isHostPathAtOrUnder } from '../lib/host-paths.js';
+import { commandLaunch } from '../lib/platform/command-launch.js';
+import { getWorktreeConfig } from '../agent-farm/utils/config.js';
+import type { CodevConfig } from '../lib/config.js';
+import { resolveGitBash, GitBashError, type GitBash } from '../lib/platform/windows/git-bash.js';
+import { findExecutable } from '@cluesmith/codev-sdk/node/executable';
+import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { WindowsJobHelper } from '../lib/platform/windows/job-objects.js';
+import { SUPPORTED_TOWER_LAUNCH_PATHS, TOWER_IN_SESSION_WARNING } from '../agent-farm/commands/windows/tower-lifecycle.js';
+import http from 'node:http';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import {
   measureSessionLogs,
@@ -51,6 +75,11 @@ interface Dependency {
   minVersion?: string;
   required: boolean;
   installHint: {
+    macos: string;
+    linux: string;
+  };
+  /** Shown when the installed version is below `minVersion` (an install hint may not upgrade). */
+  upgradeHint?: {
     macos: string;
     linux: string;
   };
@@ -185,6 +214,55 @@ export const TOWER_ENV_SESSION_HINT =
  * plain restart Tower reads clean while the agents it spawned earlier are still
  * carrying the markers — and still unresumable.
  */
+export interface TowerSessionCheck {
+  status: 'ok' | 'warn' | 'skipped';
+  summary: string;
+  recommendation?: string;
+}
+
+/**
+ * Windows (Spec 1658 Phase 4): whether the running Tower sits inside a codev
+ * session, as Tower reports it in `/health` (doctor cannot read its
+ * environment). `null` health means no Tower answered: skipped, not a fault.
+ */
+export function checkWindowsTowerSession(health: { insideCodevSession?: unknown } | null): TowerSessionCheck {
+  if (health === null) return { status: 'skipped', summary: 'Tower is not running' };
+  if (health.insideCodevSession === true) {
+    return {
+      status: 'warn',
+      summary: TOWER_IN_SESSION_WARNING,
+      recommendation: `Stop Tower, then ${SUPPORTED_TOWER_LAUNCH_PATHS}`,
+    };
+  }
+  return { status: 'ok', summary: 'Tower is not running inside a codev session' };
+}
+
+/** GET /health on the local Tower; null when nothing answers with JSON. */
+function fetchTowerHealth(port: number): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path: '/health', method: 'GET', timeout: 15_000 }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        if (body.length < 64_000) body += chunk;
+      });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body) as Record<string, unknown>);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
 export function checkTowerEnv(
   readTowerEnv: () => Record<string, string> | null,
   readSessionEnvs: () => Array<Record<string, string>> = () => [],
@@ -279,6 +357,310 @@ export function readProcessEnv(pid: number): Record<string, string> | null {
   return env;
 }
 
+/** One line of the Windows prerequisites section (Spec 1658). */
+export interface WindowsPrereqResult {
+  name: string;
+  status: 'ok' | 'warn' | 'fail';
+  version: string;
+  note?: string;
+}
+
+/** Host seams for `checkWindowsPrerequisites`. */
+export interface WindowsPrereqDeps {
+  /** Resolve Git Bash; throws `GitBashError` when there is none or an override is invalid. */
+  resolveGitBash: () => GitBash;
+  /** Full path of `jq.exe` on `PATH` or in the Git install (`gitRoot` when Git Bash resolved), or null. */
+  findJq: (gitRoot: string | null) => string | null;
+  /** `jq --version` output, or null. */
+  jqVersion: (jqPath: string) => string | null;
+  /** Workspace-relative paths of user-authored `postSpawn`/`devCommand` script files with CRLF line endings. */
+  crlfScripts: () => string[];
+}
+
+export const JQ_INSTALL_HINT = 'install jq: winget install jqlang.jq (or choco install jq), then open a new terminal';
+
+/**
+ * The Windows prerequisites: Git for Windows (never the System32 WSL launcher)
+ * and jq are required, each a named failure when missing; a user-authored hook
+ * script with CRLF line endings is a warning, because Git Bash runs it with the
+ * `\r` still on every line.
+ */
+export function checkWindowsPrerequisites(deps: WindowsPrereqDeps): WindowsPrereqResult[] {
+  const results: WindowsPrereqResult[] = [];
+
+  let gitRoot: string | null = null;
+  try {
+    const gitBash = deps.resolveGitBash();
+    gitRoot = gitBash.root;
+    results.push({ name: 'Git Bash', status: 'ok', version: gitBash.gitVersion.replace(/^git version /, ''), note: gitBash.path });
+  } catch (err) {
+    if (!(err instanceof GitBashError)) {
+      throw err;
+    }
+    let version = 'invalid override';
+    if (err.failure === 'not-found') {
+      version = 'not found';
+    }
+    results.push({ name: 'Git Bash', status: 'fail', version, note: err.message });
+  }
+
+  const jq = deps.findJq(gitRoot);
+  if (jq === null) {
+    results.push({ name: 'jq', status: 'fail', version: 'not found', note: `forge scripts need jq; ${JQ_INSTALL_HINT}` });
+  } else {
+    const output = deps.jqVersion(jq);
+    if (output === null) {
+      results.push({ name: 'jq', status: 'fail', version: 'not working', note: `${jq} --version failed; ${JQ_INSTALL_HINT}` });
+    } else {
+      results.push({ name: 'jq', status: 'ok', version: output.replace(/^jq-/, ''), note: jq });
+    }
+  }
+
+  for (const script of deps.crlfScripts()) {
+    results.push({
+      name: 'Hook script',
+      status: 'warn',
+      version: `${script} has CRLF line endings`,
+      note: 'Git Bash fails on CRLF scripts; convert it to LF (for example `git add --renormalize` with `*.sh text eol=lf` in .gitattributes)',
+    });
+  }
+
+  return results;
+}
+
+/** Windows' path limit with the admin-only `LongPathsEnabled` off (Spec 1658). */
+export const WINDOWS_MAX_PATH = 260;
+
+/**
+ * What a builder worktree adds to the workspace root: `\.builders\<id>\`
+ * with room for a long builder id (`spir-1234-some-feature-name`).
+ */
+export const BUILDER_WORKTREE_PATH_BUDGET = 42;
+
+/**
+ * Room left for paths inside a worktree: source trees and, above all,
+ * dependency trees (`node_modules\.pnpm\<scope>+<name>@<version>\node_modules\...`).
+ */
+export const WORKTREE_CONTENT_PATH_BUDGET = 150;
+
+/** The longest workspace root that leaves both budgets inside MAX_PATH. */
+export const MAX_SAFE_WORKSPACE_ROOT_LENGTH =
+  WINDOWS_MAX_PATH - BUILDER_WORKTREE_PATH_BUDGET - WORKTREE_CONTENT_PATH_BUDGET;
+
+/** Host seams for `checkWindowsPathsAndState`. */
+export interface WindowsPathDeps {
+  /** The workspace root doctor runs in, or null outside a workspace. */
+  workspaceRoot: string | null;
+  /** The per-user `git config --global core.longpaths` value, or null when unset. */
+  gitLongPaths: () => string | null;
+  /** `CODEV_AGENT_FARM_DIR` resolved, or null when state is in its default place. */
+  relocatedStateDir: string | null;
+  /** `%USERPROFILE%`, or null when unset. */
+  userProfile: string | null;
+}
+
+/**
+ * Long-path and state-location checks for native Windows (Spec 1658). A deep
+ * workspace root risks MAX_PATH overruns in builder worktrees and their
+ * dependency trees; Git needs the per-user `core.longpaths` to check out long
+ * paths at all; and state relocated outside the user profile loses the
+ * owner-only protection that the profile's default permissions provide.
+ */
+export function checkWindowsPathsAndState(deps: WindowsPathDeps): WindowsPrereqResult[] {
+  const results: WindowsPrereqResult[] = [];
+
+  if (deps.workspaceRoot !== null) {
+    const length = deps.workspaceRoot.length;
+    if (length > MAX_SAFE_WORKSPACE_ROOT_LENGTH) {
+      results.push({
+        name: 'Workspace depth',
+        status: 'warn',
+        version: `root is ${length} characters (over ${MAX_SAFE_WORKSPACE_ROOT_LENGTH})`,
+        note: `builder worktrees and their dependency trees may exceed Windows' ${WINDOWS_MAX_PATH}-character path limit; move the workspace to a shorter root, for example C:\\src\\<repo>`,
+      });
+    } else {
+      results.push({ name: 'Workspace depth', status: 'ok', version: `root is ${length} characters` });
+    }
+  }
+
+  const longPaths = deps.gitLongPaths();
+  if (longPaths !== null && longPaths.toLowerCase() === 'true') {
+    results.push({ name: 'Git core.longpaths', status: 'ok', version: 'true' });
+  } else {
+    let version = 'not set';
+    if (longPaths !== null) {
+      version = longPaths;
+    }
+    results.push({
+      name: 'Git core.longpaths',
+      status: 'warn',
+      version,
+      note: `Git cannot check out paths over ${WINDOWS_MAX_PATH} characters without it; run: git config --global core.longpaths true`,
+    });
+  }
+
+  if (deps.relocatedStateDir !== null) {
+    const insideProfile = deps.userProfile !== null && isHostPathAtOrUnder(deps.relocatedStateDir, deps.userProfile);
+    if (!insideProfile) {
+      results.push({
+        name: 'State directory',
+        status: 'warn',
+        version: `CODEV_AGENT_FARM_DIR is outside the user profile (${deps.relocatedStateDir})`,
+        note: 'the local key and state rely on the user profile being private to you; keep CODEV_AGENT_FARM_DIR under %USERPROFILE%',
+      });
+    }
+  }
+
+  return results;
+}
+
+/** The real-host seams for `checkWindowsPathsAndState`. */
+export function windowsPathDeps(workspaceRoot: string | null): WindowsPathDeps {
+  let relocatedStateDir: string | null = null;
+  if (process.env.CODEV_AGENT_FARM_DIR) {
+    relocatedStateDir = AGENT_FARM_DIR;
+  }
+  return {
+    workspaceRoot,
+    gitLongPaths: () => {
+      // The per-user setting (spec: doctor reports whether Git's per-user core.longpaths
+      // is set): a repository-local value would not cover other clones and new worktrees.
+      const value = runCommand('git', ['config', '--global', '--get', 'core.longpaths']);
+      if (value === null || value === '') {
+        return null;
+      }
+      return value;
+    },
+    relocatedStateDir,
+    userProfile: process.env.USERPROFILE ?? null,
+  };
+}
+
+/**
+ * The words of a shell command, quote-aware: `'...'` and `"..."` group (a
+ * backslash escapes the next character outside single quotes), and `;`, `&`,
+ * `|` separate words as whitespace does. Enough to find script paths in hook
+ * commands; not a full shell parser.
+ */
+export function splitShellWords(command: string): string[] {
+  const words: string[] = [];
+  let current = '';
+  let inWord = false;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+      } else if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        i++;
+        current += command[i];
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      inWord = true;
+    } else if (ch === '\\' && i + 1 < command.length) {
+      i++;
+      current += command[i];
+      inWord = true;
+    } else if (/[\s;&|]/.test(ch)) {
+      if (inWord) {
+        words.push(current);
+      }
+      current = '';
+      inWord = false;
+    } else {
+      current += ch;
+      inWord = true;
+    }
+  }
+  if (inWord) {
+    words.push(current);
+  }
+  return words;
+}
+
+/**
+ * Script files named in `postSpawn`/`devCommand` commands that exist inside
+ * `workspaceRoot` and contain CRLF line endings, as workspace-relative paths.
+ * A word is treated as a file reference when it contains a path separator or
+ * ends in `.sh`/`.bash`; files outside the workspace are not user-authored
+ * hooks and are skipped.
+ */
+export function findCrlfHookScripts(
+  commands: string[],
+  workspaceRoot: string,
+  readFile: (file: string) => string | null = defaultReadText,
+): string[] {
+  const found: string[] = [];
+  for (const command of commands) {
+    for (const word of splitShellWords(command)) {
+      if (!(/[\\/]/.test(word) || /\.(sh|bash)$/.test(word))) {
+        continue;
+      }
+      const file = resolve(workspaceRoot, word);
+      const rel = relative(workspaceRoot, file);
+      if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || found.includes(rel)) {
+        continue;
+      }
+      const text = readFile(file);
+      if (text !== null && text.includes('\r\n')) {
+        found.push(rel);
+      }
+    }
+  }
+  return found;
+}
+
+function defaultReadText(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/** The real-host seams for `checkWindowsPrerequisites`. */
+export function windowsPrereqDeps(workspaceRoot: string | null, config: CodevConfig | null): WindowsPrereqDeps {
+  return {
+    resolveGitBash: () => resolveGitBash({ configPath: config?.windows?.gitBashPath }),
+    findJq: (gitRoot) => {
+      const onPath = findExecutable('jq', { platform: hostPlatform() });
+      if (onPath !== null || gitRoot === null) {
+        return onPath;
+      }
+      for (const rel of ['usr\\bin\\jq.exe', 'mingw64\\bin\\jq.exe']) {
+        const candidate = win32.join(gitRoot, rel);
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    },
+    jqVersion: (jqPath) => runCommand(jqPath, ['--version']),
+    crlfScripts: () => {
+      if (workspaceRoot === null) {
+        return [];
+      }
+      let worktree;
+      try {
+        worktree = getWorktreeConfig(workspaceRoot);
+      } catch {
+        return [];
+      }
+      const commands = [...worktree.postSpawn];
+      if (worktree.devCommand !== null) {
+        commands.push(worktree.devCommand);
+      }
+      return findCrlfHookScripts(commands, workspaceRoot);
+    },
+  };
+}
+
 /**
  * Compare semantic versions: returns true if v1 >= v2
  */
@@ -299,12 +681,14 @@ function versionGte(v1: string, v2: string): boolean {
  * Check if a command exists
  */
 function commandExists(cmd: string): boolean {
-  try {
-    execSync(`which ${cmd}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandLaunch().commandExists(cmd, () => {
+    try {
+      execSync(`which ${cmd}`, { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -312,7 +696,7 @@ function commandExists(cmd: string): boolean {
  */
 function runCommand(cmd: string, args: string[]): string | null {
   try {
-    const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 5000 });
+    const result = commandLaunch().spawnSync(cmd, args, { encoding: 'utf-8', timeout: 5000 });
     if (result.status === 0) {
       return result.stdout.trim();
     }
@@ -364,11 +748,15 @@ const CORE_DEPENDENCIES: Dependency[] = [
     command: 'node',
     versionArg: '--version',
     versionExtract: (output) => output.replace(/^v/, ''),
-    minVersion: '18.0.0',
+    minVersion: '22.0.0',
     required: true,
     installHint: {
       macos: 'brew install node',
-      linux: 'apt install nodejs npm',
+      linux: 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs',
+    },
+    upgradeHint: {
+      macos: 'brew upgrade node (or install Node.js 22+ from https://nodejs.org)',
+      linux: 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs',
     },
   },
   {
@@ -389,7 +777,8 @@ const CORE_DEPENDENCIES: Dependency[] = [
 ];
 
 // AI CLI dependencies - at least one required
-// Note: Claude is verified via Agent SDK (not CLI), handled separately below
+// Note: the claude lane's CLI is checked separately via checkClaude, which resolves
+// and version-checks the binary exactly as the lane does (#1912).
 // Note: the gemini lane now uses the Antigravity CLI (agy) — checked separately
 // via resolveAgyBin (the bare `which agy` resolves to the IDE symlink, not the CLI).
 const AI_DEPENDENCIES: Dependency[] = [
@@ -454,10 +843,14 @@ function checkDependency(dep: Dependency): CheckResult {
     if (versionGte(version, dep.minVersion)) {
       return { status: 'ok', version };
     } else {
+      let note = `need >= ${dep.minVersion}`;
+      if (dep.upgradeHint) {
+        note += `; upgrade: ${isMacOS ? dep.upgradeHint.macos : dep.upgradeHint.linux}`;
+      }
       return {
         status: dep.required ? 'fail' : 'warn',
         version,
-        note: `need >= ${dep.minVersion}`,
+        note,
       };
     }
   }
@@ -494,70 +887,111 @@ const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
     successCheck: (r) => r.status === 0,
     authHint: 'Run "opencode --version" to verify installation',
   },
-  // Claude is verified via Agent SDK — see verifyClaudeViaSDK() below.
-  // The gemini lane (Antigravity `agy`) is verified via verifyAgy() — not here.
+  // Claude is verified via verifyClaudeViaCli() and the gemini lane (Antigravity
+  // `agy`) via verifyAgy() — not here.
 };
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
- * Verify Claude is operational via Agent SDK.
- * Sends a minimal query to verify auth and connectivity.
+ * Presence and version check for the installed `claude` CLI, the claude consult lane's backend
+ * (#1912). It resolves and version-checks the binary exactly as the lane does, so a row that is ok
+ * here is a binary the lane will accept. Local and model-free.
+ *
+ * Any problem is a warning whose note is the lane's own message, which already says what to do:
+ * the install hint when `claude` is not on PATH, the update hint when it is below the floor.
+ * `bin` is set only on an ok row, and only then is the login checked.
+ *
+ * `env` is `process.env` with the workspace `.env` merged under it (`envWithWorkspaceDotenv`), so a
+ * `CODEV_CLAUDE_BIN` set only in `.env` is honoured here as it is by consult.
+ *
+ * Unlike `checkAgy`, this also catches the test-isolation guard (#1323) that `resolveClaudeBin`
+ * throws for an unpinned lookup under a test runner. The guard has already done its job by then
+ * (nothing was resolved or run), and its message lands in the row, where a test asserting on the
+ * rows sees it.
  */
-async function verifyClaudeViaSDK(): Promise<CheckResult> {
-  // Temporarily remove CLAUDECODE nesting guard from process.env.
-  // The SDK spawns a subprocess that checks this directly.
-  const savedClaudeCode = process.env.CLAUDECODE;
-  delete process.env.CLAUDECODE;
+function checkClaude(env: NodeJS.ProcessEnv): { result: CheckResult; bin: string | null } {
+  let bin: string;
+  try {
+    bin = resolveClaudeBin(env);
+  } catch (err) {
+    return { result: { status: 'warn', version: 'not found', note: errorMessage(err) }, bin: null };
+  }
+
+  let version: string;
+  try {
+    version = readClaudeVersion(bin, env);
+  } catch (err) {
+    return { result: { status: 'warn', version: '(version unknown)', note: errorMessage(err) }, bin: null };
+  }
 
   try {
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) {
-        env[key] = value;
-      }
-    }
-
-    const session = claudeQuery({
-      prompt: 'Reply OK',
-      options: {
-        // The #1649 audit: this is the second `bypassPermissions` call site in the
-        // package, so it runs with the same unrestricted tool access the consult
-        // lane does. It is an auth probe, not a review — one turn, no tools needed
-        // — but it had nothing telling it so, and it runs in whatever directory the
-        // user typed `codev doctor` in. Say it outright, as consultant.md now does.
-        systemPrompt:
-          'You are a connectivity probe for `codev doctor`. Reply with the requested ' +
-          'text and nothing else. Do not read, create, or modify any file, and do not ' +
-          'run any command — there is no task here beyond answering.',
-        allowedTools: [],
-        maxTurns: 1,
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        env,
-      },
-    });
-
-    for await (const message of session) {
-      if (message.type === 'result') {
-        if (message.subtype === 'success') {
-          return { status: 'ok', version: 'operational (SDK)' };
-        }
-        return { status: 'fail', version: 'SDK error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
-      }
-    }
-
-    return { status: 'ok', version: 'operational (SDK)' };
+    assertClaudeVersion(version);
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'unknown error';
-    const combined = errMsg.toLowerCase();
-    if (combined.includes('api key') || combined.includes('unauthorized') || combined.includes('authentication')) {
-      return { status: 'fail', version: 'auth error', note: 'Set ANTHROPIC_API_KEY or run: claude /login' };
-    }
-    return { status: 'fail', version: 'error', note: `Set ANTHROPIC_API_KEY or run: claude /login (${errMsg.substring(0, 60)})` };
-  } finally {
-    if (savedClaudeCode !== undefined) {
-      process.env.CLAUDECODE = savedClaudeCode;
+    return { result: { status: 'warn', version, note: errorMessage(err) }, bin: null };
+  }
+  return { result: { status: 'ok', version }, bin };
+}
+
+/**
+ * `process.env` with `<workspace>/.env` merged under it, as consult loads it, in a copy: doctor
+ * never mutates its own `process.env`. `fromDotenv` names the keys the file supplied. With no
+ * workspace root, no `.env` is read.
+ */
+function envWithWorkspaceDotenv(workspaceRoot: string | null): { env: NodeJS.ProcessEnv; fromDotenv: Set<string> } {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const fromDotenv = new Set<string>();
+  if (workspaceRoot) {
+    for (const [key, value] of Object.entries(readDotenvFile(workspaceRoot))) {
+      // The shell wins, as in consult's loader.
+      if (key in env) continue;
+      env[key] = value;
+      fromDotenv.add(key);
     }
   }
+  return { env, fromDotenv };
+}
+
+/**
+ * Verify the claude lane's login without a model call (#1912): `claude auth status`, run with the
+ * child env the lane would build from this workspace (its `.env`, its `consult.claudeAuth`). So a
+ * key the lane would withhold is reported as withheld, naming where it came from, and a login the
+ * review would not see is not reported as working.
+ *
+ * Any problem is a warning carrying the lane's own message: the mode's remedy when logged out
+ * (`claude auth login`, or the key in `api-key` mode),
+ * the output excerpt when `auth status` is unparseable, the missing key in `api-key` mode, and a
+ * config error for an unknown `consult.claudeAuth`.
+ */
+function verifyClaudeViaCli(
+  bin: string,
+  workspaceRoot: string | null,
+  { env: processEnv, fromDotenv }: { env: NodeJS.ProcessEnv; fromDotenv: Set<string> },
+): CheckResult {
+  let status: ClaudeAuthStatus;
+  let withheld: string[];
+  let mode: ClaudeAuthMode;
+  let modeSource: string | null;
+  try {
+    ({ mode, source: modeSource } = resolveClaudeAuthMode(workspaceRoot ?? process.cwd()));
+    const child = buildClaudeChildEnv(processEnv, mode);
+    withheld = child.withheld;
+    assertApiKeyPresent(child.env, mode, modeSource);
+    status = readClaudeAuthStatus(bin, child.env);
+  } catch (err) {
+    return { status: 'warn', version: 'auth unknown', note: errorMessage(err) };
+  }
+
+  try {
+    assertLoggedIn(status, { mode, modeSource, withheld });
+  } catch (err) {
+    return { status: 'warn', version: 'not logged in', note: errorMessage(err) };
+  }
+
+  const withheldNote = describeWithheldKeys(withheld, fromDotenv);
+  return { status: 'ok', version: `logged in (${status.authMethod})`, ...(withheldNote ? { note: withheldNote } : {}) };
 }
 
 /**
@@ -570,7 +1004,7 @@ function verifyAiModel(modelName: string): CheckResult {
   }
 
   try {
-    const result = spawnSync(config.command, config.args, {
+    const result = commandLaunch().spawnSync(config.command, config.args, {
       encoding: 'utf-8',
       timeout: config.timeout,
       stdio: 'pipe',
@@ -661,7 +1095,7 @@ function verifyAgy(): Promise<CheckResult> {
   }
 
   return new Promise<CheckResult>((resolve) => {
-    const proc = spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
+    const proc = commandLaunch().spawn(bin, ['--print-timeout', '20s', '--print', 'Reply with just OK'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let settled = false;
@@ -862,6 +1296,36 @@ export async function doctor(): Promise<number> {
 
   console.log('');
 
+  // Native Windows prerequisites (Spec 1658): Git Bash runs every Codev
+  // script, and the forge scripts need jq. Neither ships with Windows.
+  if (isWindows()) {
+    console.log(chalk.bold('Windows Prerequisites') + ' (required on native Windows)');
+    console.log('');
+    const prereqRoot = findWorkspaceRoot();
+    let prereqConfig: CodevConfig | null = null;
+    if (prereqRoot !== null) {
+      try {
+        const { loadConfig } = await import('../lib/config.js');
+        prereqConfig = loadConfig(prereqRoot);
+      } catch {
+        prereqConfig = null;
+      }
+    }
+    const windowsResults = [
+      ...checkWindowsPrerequisites(windowsPrereqDeps(prereqRoot, prereqConfig)),
+      ...checkWindowsPathsAndState(windowsPathDeps(prereqRoot)),
+    ];
+    for (const result of windowsResults) {
+      printStatus(result.name, result);
+      if (result.status === 'fail') errors++;
+      if (result.status === 'warn') {
+        warnings++;
+        warningDetails.push({ name: result.name, issue: result.version, recommendation: result.note });
+      }
+    }
+    console.log('');
+  }
+
   // Check AI CLI dependencies
   console.log(chalk.bold('AI CLI Dependencies') + ' (at least one required)');
   console.log('');
@@ -869,9 +1333,19 @@ export async function doctor(): Promise<number> {
   let aiCliCount = 0;
   const installedAiClis: string[] = [];
 
-  // Claude uses Agent SDK (always available as a dependency)
-  printStatus('Claude', { status: 'ok', version: 'Agent SDK' });
-  installedAiClis.push('Claude');
+  // Claude: the installed CLI the claude lane runs (#1912). Not a bundled
+  // dependency, so it can be absent, and then it does not count as installed.
+  // Both Claude rows read the workspace `.env` as consult does, so they see the same pin and keys.
+  const claudeWorkspaceRoot = findWorkspaceRoot();
+  const claudeEnv = envWithWorkspaceDotenv(claudeWorkspaceRoot);
+  const claude = checkClaude(claudeEnv.env);
+  printStatus('Claude', claude.result);
+  if (claude.bin) {
+    installedAiClis.push('Claude');
+  } else {
+    warnings++;
+    warningDetails.push({ name: 'Claude', issue: claude.result.version, recommendation: claude.result.note });
+  }
 
   // Check CLI-based AI dependencies (Codex, OpenCode)
   for (const dep of AI_DEPENDENCIES) {
@@ -893,20 +1367,22 @@ export async function doctor(): Promise<number> {
   console.log(chalk.bold('AI Model Verification') + ' (checking auth & connectivity)');
   console.log('');
 
-  // Verify Claude via SDK
-  console.log(chalk.blue(`  ⋯ ${'Claude'.padEnd(12)} verifying...`));
-  process.stdout.write('\x1b[1A\x1b[2K');
-  const claudeResult = await verifyClaudeViaSDK();
-  printStatus('Claude', claudeResult);
-  if (claudeResult.status === 'ok') {
-    aiCliCount++;
-  } else if (claudeResult.status === 'fail') {
-    warnings++;
-    warningDetails.push({
-      name: 'Claude',
-      issue: claudeResult.version,
-      recommendation: claudeResult.note,
-    });
+  // Verify Claude's login via the CLI, with no model call
+  if (claude.bin) {
+    console.log(chalk.blue(`  ⋯ ${'Claude'.padEnd(12)} verifying...`));
+    process.stdout.write('\x1b[1A\x1b[2K');
+    const claudeResult = verifyClaudeViaCli(claude.bin, claudeWorkspaceRoot, claudeEnv);
+    printStatus('Claude', claudeResult);
+    if (claudeResult.status === 'ok') {
+      aiCliCount++;
+    } else {
+      warnings++;
+      warningDetails.push({
+        name: 'Claude',
+        issue: claudeResult.version,
+        recommendation: claudeResult.note,
+      });
+    }
   }
 
   // Verify CLI-based models (agy handled separately below — custom OAuth probe)
@@ -1337,30 +1813,91 @@ export async function doctor(): Promise<number> {
   }
   console.log('');
 
+  // Process census (Spec 1658). On Windows, session teardown and the orphan
+  // and husk sweeps read the process table through an inline PowerShell CIM
+  // query; a machine where that is blocked (for example by policy) runs Tower
+  // without them, which is not a supported configuration.
+  if (isWindows()) {
+    console.log(chalk.bold('Process Census') + ' (PowerShell CIM)');
+    console.log('');
+    try {
+      const census = await listProcessCensus();
+      console.log(`  ${chalk.green('✓')} Process census available (${census.length} processes)`);
+    } catch (err) {
+      const issue = `Process census unavailable: ${(err as Error).message}`;
+      console.log(`  ${chalk.yellow('⚠')} ${issue}`);
+      warnings++;
+      warningDetails.push({
+        name: 'Process census',
+        issue,
+        recommendation: 'Allow powershell.exe to run Get-CimInstance Win32_Process; without it Tower cannot tear down session trees or reap orphaned shellpers',
+      });
+    }
+
+    // Per-session Job Objects (Phase 3b): the same helper Tower starts at boot,
+    // bound here once. A failure means sessions run without a job, and a
+    // process whose parent exited can outlive its session.
+    const jobHelper = new WindowsJobHelper();
+    try {
+      const failure = await jobHelper.start();
+      if (failure === null) {
+        console.log(`  ${chalk.green('✓')} Per-session job objects available`);
+      } else {
+        const issue = `Per-session job objects unavailable: ${failure}`;
+        console.log(`  ${chalk.yellow('⚠')} ${issue}`);
+        warnings++;
+        warningDetails.push({
+          name: 'Per-session job objects',
+          issue,
+          recommendation: 'Allow powershell.exe in FullLanguage mode; without it a process whose parent exited can outlive its session',
+        });
+      }
+    } finally {
+      jobHelper.stop();
+    }
+    console.log('');
+  }
+
   // Tower environment hygiene (#1219). A Tower that inherited a Claude Code
   // session's markers spawns agents whose transcripts are never saved, so they
-  // cannot be resumed after a crash — silent until recovery time.
-  const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
-  const towerEnv = checkTowerEnv(
-    () => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null),
-    () => findShellperPids()
-      .map(readProcessEnv)
-      .filter((e): e is Record<string, string> => e !== null),
-  );
+  // cannot be resumed after a crash — silent until recovery time. Windows
+  // exposes no way to read another process's environment, so the check is
+  // reported as not available there rather than guessed (Spec 1658).
   console.log(chalk.bold('Tower Environment') + ` (port ${DEFAULT_TOWER_PORT})`);
   console.log('');
-  if (towerEnv.status === 'warn') {
-    console.log(`  ${chalk.yellow('⚠')} ${towerEnv.summary}`);
-    warnings++;
-    warningDetails.push({
-      name: 'Tower environment',
-      issue: towerEnv.summary,
-      recommendation: towerEnv.recommendation,
-    });
-  } else if (towerEnv.status === 'skipped') {
-    console.log(`  ${chalk.blue('-')} ${towerEnv.summary}`);
+  if (isWindows()) {
+    console.log(`  ${chalk.blue('-')} Session markers: not available on Windows (a process's environment cannot be read)`);
+    const towerSession = checkWindowsTowerSession(await fetchTowerHealth(DEFAULT_TOWER_PORT));
+    if (towerSession.status === 'warn') {
+      console.log(`  ${chalk.yellow('⚠')} ${towerSession.summary}`);
+      warnings++;
+      warningDetails.push({ name: 'Tower session', issue: towerSession.summary, recommendation: towerSession.recommendation });
+    } else if (towerSession.status === 'skipped') {
+      console.log(`  ${chalk.blue('-')} ${towerSession.summary}`);
+    } else {
+      console.log(`  ${chalk.green('✓')} ${towerSession.summary}`);
+    }
   } else {
-    console.log(`  ${chalk.green('✓')} ${towerEnv.summary}`);
+    const towerPids = getProcessesOnPort(DEFAULT_TOWER_PORT);
+    const towerEnv = checkTowerEnv(
+      () => (towerPids.length > 0 ? readProcessEnv(towerPids[0]) : null),
+      () => findShellperPids()
+        .map(readProcessEnv)
+        .filter((e): e is Record<string, string> => e !== null),
+    );
+    if (towerEnv.status === 'warn') {
+      console.log(`  ${chalk.yellow('⚠')} ${towerEnv.summary}`);
+      warnings++;
+      warningDetails.push({
+        name: 'Tower environment',
+        issue: towerEnv.summary,
+        recommendation: towerEnv.recommendation,
+      });
+    } else if (towerEnv.status === 'skipped') {
+      console.log(`  ${chalk.blue('-')} ${towerEnv.summary}`);
+    } else {
+      console.log(`  ${chalk.green('✓')} ${towerEnv.summary}`);
+    }
   }
   console.log('');
 

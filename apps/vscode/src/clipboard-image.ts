@@ -31,6 +31,7 @@ export interface ClipboardDeps {
 }
 
 const DEFAULT_DEPS: ClipboardDeps = {
+  // windows-console: injected spawn; runCapture's options carry windowsHide
   spawn: realSpawn,
   platform: () => process.platform,
   env: process.env,
@@ -53,7 +54,8 @@ function runCapture(
   args: string[],
 ): Promise<CaptureResult> {
   return new Promise((resolve) => {
-    const opts: SpawnOptions = { stdio: ['ignore', 'pipe', 'pipe'] };
+    // Hidden: the extension host has no console, and the Windows reader is powershell.exe (Issue #1919).
+    const opts: SpawnOptions = { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true };
     let child: ChildProcessByStdio<null, import('node:stream').Readable, import('node:stream').Readable>;
     try {
       child = deps.spawn(cmd, args, opts) as typeof child;

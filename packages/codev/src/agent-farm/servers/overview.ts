@@ -31,6 +31,7 @@ import type {
   IssueIdKind,
 } from '@cluesmith/codev-types';
 import Database from 'better-sqlite3';
+import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
@@ -279,9 +280,12 @@ function calculateSpirProgress(parsed: ParsedStatus): number {
     case 'plan':
       return gateRequested('plan-approval') ? 45 : 35;
     case 'implement': {
-      const total = parsed.planPhases.length;
+      // A phase a human skipped (#1900) is dropped from the plan: it counts in
+      // neither the total nor the completed — matching the builder card's (n/m).
+      const phases = parsed.planPhases.filter(p => p.status !== 'skipped');
+      const total = phases.length;
       if (total === 0) return 70;
-      const completed = parsed.planPhases.filter(p => p.status === 'complete').length;
+      const completed = phases.filter(p => p.status === 'complete').length;
       return 50 + Math.round((completed / total) * 40);
     }
     case 'review':
@@ -688,7 +692,7 @@ export function loadStoredBuilderIdentities(workspaceRoot: string): Map<string, 
   try {
     const dbPath = getGlobalDbPath();
     if (!fs.existsSync(dbPath)) return result;
-    const db = new Database(dbPath, { readonly: true });
+    const db = openDatabase(dbPath, { readonly: true });
     try {
       const rows = db.prepare(
         'SELECT worktree, id, issue_number, spawned_by_architect FROM builders WHERE workspace_path = ?',
@@ -1122,7 +1126,7 @@ export class OverviewCache {
       const dbPath = getGlobalDbPath();
       if (fs.existsSync(dbPath)) {
         const normWs = normalizeWorkspacePath(workspaceRoot);
-        const db = new Database(dbPath, { readonly: true });
+        const db = openDatabase(dbPath, { readonly: true });
         try {
           // Counts + escalation flag only — never bodies (redaction rule). Per-agent
           // held counts attach to the matching builder by roleId (the same

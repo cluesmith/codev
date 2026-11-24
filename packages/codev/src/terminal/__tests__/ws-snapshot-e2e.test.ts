@@ -14,6 +14,7 @@ import { WebSocket } from 'ws';
 import { TerminalManager } from '../pty-manager.js';
 import { SessionScreen } from '../session-screen.js';
 import { decodeFrame } from '../ws-protocol.js';
+import { tmpdir } from 'node:os';
 
 const COLS = 120;
 const ROWS = 30;
@@ -32,7 +33,7 @@ describe('WS attach serves the O(screen) snapshot (PIR #1354, real PTY + real WS
   let port: number;
 
   beforeEach(async () => {
-    manager = new TerminalManager({ workspaceRoot: '/tmp', diskLogEnabled: false, maxSessions: 3 });
+    manager = new TerminalManager({ workspaceRoot: tmpdir(), diskLogEnabled: false, maxSessions: 3 });
     server = http.createServer();
     manager.attachWebSocket(server);
     server.listen(0);
@@ -59,6 +60,15 @@ describe('WS attach serves the O(screen) snapshot (PIR #1354, real PTY + real WS
     // Wait for the paint to reach Tower's mirror (real PTY output is async).
     await until(() => session.bytesWritten > 0);
     await until(() => session.screenBufferType === 'alternate');
+    // The alt-screen switch and the paint can arrive in separate chunks (ConPTY
+    // re-renders on native Windows), so wait until the mirror holds the painted text.
+    const paintDeadline = Date.now() + 5000;
+    for (;;) {
+      const snap = await session.replaySnapshot();
+      if (snap.ok && snap.data.includes('status: alive')) break;
+      if (Date.now() > paintDeadline) throw new Error('timeout waiting for the paint to reach the mirror');
+      await new Promise((r) => setTimeout(r, 25));
+    }
 
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/terminal/${info.id}`);
     const frames: Buffer[] = [];

@@ -26,8 +26,62 @@ import type Database from 'better-sqlite3';
 import { listProcessCensus, type ProcessCensusEntry } from './process-census.js';
 import { getProcessStartTime, PID_REUSE_TOLERANCE_MS } from '../../terminal/session-manager.js';
 import { reapShellpers } from './architect-session-holder.js';
+import { processes, type StartTimeLookup } from '../../lib/platform/processes.js';
+import { SHELLPER_MARKER, isShellperInScope, shellperTeardownIdentities } from '../../terminal/shellper-cmdline.js';
 
-export const SHELLPER_MARKER = 'shellper-main.js';
+export { SHELLPER_MARKER };
+
+/**
+ * True for the console host ConPTY runs under a Windows PTY owner
+ * (`conhost.exe --headless`, or `OpenConsole.exe` when node-pty ships its own).
+ * It stays a child of the shellper for as long as the pseudoconsole is open,
+ * including after the PTY's program exits, so it is infrastructure rather than
+ * a child program: it does not make a shellper "not childless". Killing the
+ * husk's tree takes it down too.
+ */
+export function isConsoleHostEntry(entry: ProcessCensusEntry): boolean {
+  return processes().isConsoleInfrastructure(entry);
+}
+
+export type { StartTimeLookup };
+
+/**
+ * The start-time source for a sweep over `census`. On Windows the census
+ * already carries creation time, so one census serves the whole sweep (Spec
+ * 1658); POSIX keeps its per-PID `getProcessStartTime`.
+ */
+export function startTimeLookupFor(census: ProcessCensusEntry[]): StartTimeLookup {
+  return processes().startTimeLookup(census);
+}
+
+/**
+ * True when a live PID is still the process a row recorded: its actual start time
+ * matches the recorded one within {@link PID_REUSE_TOLERANCE_MS}. An unreadable
+ * actual start time does not confirm identity. Shared with the Windows boot
+ * canonicalization of workspace rows (Spec 1658, M6) so both treat a reused PID
+ * as dead.
+ */
+export function startTimeMatches(actual: number | null, recorded: number): boolean {
+  return actual !== null && Math.abs(actual - recorded) <= PID_REUSE_TOLERANCE_MS;
+}
+
+/**
+ * A synchronous, PID-reuse-safe liveness check over a start-time snapshot: a PID
+ * that does not exist is dead; one that exists but whose start time does not
+ * match the recorded one was reused and is dead too; a row with no recorded start
+ * time can only be checked for existence. For callers that cannot await per PID
+ * (the Windows boot canonicalization runs inside a transaction, Spec 1658 M6).
+ */
+export function livenessFromStartTimes(
+  startTimes: ReadonlyMap<number, number>,
+  exists: (pid: number) => boolean,
+): (pid: number, recordedStartTime: number | null) => boolean {
+  return (pid, recordedStartTime) => {
+    if (!exists(pid)) return false;
+    if (recordedStartTime === null) return true;
+    return startTimeMatches(startTimes.get(pid) ?? null, recordedStartTime);
+  };
+}
 
 interface ShellperRegistryRow {
   shellper_pid: number;
@@ -57,7 +111,7 @@ export async function computeRegisteredShellperPids(
       continue;
     }
     const actual = await getStartTime(row.shellper_pid);
-    if (actual !== null && Math.abs(actual - row.shellper_start_time) <= PID_REUSE_TOLERANCE_MS) {
+    if (startTimeMatches(actual, row.shellper_start_time)) {
       registered.add(row.shellper_pid);
     }
   }
@@ -90,18 +144,17 @@ export interface FindHuskShellpersOptions {
 export async function findHuskShellpers(opts: FindHuskShellpersOptions): Promise<number[]> {
   const census = await (opts.census ?? listProcessCensus)();
   const now = opts.now ?? Date.now();
-  const getStartTime = opts.getStartTime ?? getProcessStartTime;
+  const getStartTime = opts.getStartTime ?? startTimeLookupFor(census);
 
-  // Match the trailing-'/' scope-marker technique already proven in
-  // findShellperProcesses (../../terminal/session-manager.ts:782-793) to
-  // prevent prefix collisions (e.g. /run matching /run2).
-  const scopeMarker = opts.socketDir.endsWith('/') ? opts.socketDir : `${opts.socketDir}/`;
-  const parentPids = new Set(census.map((entry) => entry.ppid));
+  // Scope to this instance: the trailing-'/' socketDir marker on POSIX
+  // (prevents /run matching /run2), the decoded `socketDir` config field on
+  // Windows (see isShellperInScope).
+  const parentPids = new Set(census.filter((entry) => !isConsoleHostEntry(entry)).map((entry) => entry.ppid));
 
   const candidates: number[] = [];
   for (const entry of census) {
     if (!entry.cmdline.includes(SHELLPER_MARKER)) continue;
-    if (!entry.cmdline.includes(scopeMarker)) continue;
+    if (!isShellperInScope(entry.cmdline, opts.socketDir)) continue;
     if (opts.registeredShellperPids.has(entry.pid)) continue;
     if (parentPids.has(entry.pid)) continue; // has a live child — not a husk
 
@@ -136,8 +189,8 @@ export interface SweepShellperHusksOptions {
   census?: () => ProcessCensusEntry[] | Promise<ProcessCensusEntry[]>;
   now?: number;
   getStartTime?: (pid: number) => Promise<number | null>;
-  /** Seam, defaults to `reapShellpers`. */
-  reap?: (pids: number[]) => Promise<void>;
+  /** Seam, defaults to `reapShellpers`. Rejects when a teardown failed. */
+  reap?: (pids: number[], startTimes?: Map<number, number>, jobNames?: Map<number, string>) => Promise<void>;
 }
 
 /**
@@ -148,21 +201,33 @@ export interface SweepShellperHusksOptions {
 export async function sweepShellperHusks(
   opts: SweepShellperHusksOptions,
 ): Promise<{ swept: number; pids: number[] }> {
-  const getStartTime = opts.getStartTime ?? getProcessStartTime;
+  // One census per sweep, shared by the registration check and the husk
+  // predicate. On Windows it rejects on failure, which the sweep's callers log.
+  const census = await (opts.census ?? listProcessCensus)();
+  const getStartTime = opts.getStartTime ?? startTimeLookupFor(census);
   const registeredShellperPids = await computeRegisteredShellperPids(opts.db, getStartTime);
   const pids = await findHuskShellpers({
     socketDir: opts.socketDir,
     registeredShellperPids,
     graceMs: opts.graceMs,
-    census: opts.census,
+    census: () => census,
     now: opts.now,
     getStartTime,
   });
 
   if (pids.length > 0) {
     opts.log?.(`Sweeping ${pids.length} husk shellper process(es): ${pids.join(', ')}`);
-    const reap = opts.reap ?? reapShellpers;
-    await reap(pids);
+    // The census creation times (Windows only; POSIX has none) let a teardown
+    // refuse a pid reused since the sweep looked.
+    // The session job names (Windows, Phase 3b) let the teardown end
+    // descendants no parent link leads to.
+    const { startTimes, jobNames } = shellperTeardownIdentities(census, pids);
+    const reap = opts.reap ?? ((targets: number[], times?: Map<number, number>, names?: Map<number, string>) => reapShellpers(targets, { startTimes: times, jobNames: names }));
+    if (startTimes.size > 0) {
+      await reap(pids, startTimes, jobNames);
+    } else {
+      await reap(pids);
+    }
   }
 
   return { swept: pids.length, pids };

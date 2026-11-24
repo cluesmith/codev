@@ -9,7 +9,11 @@ import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { rmSync } from 'node:fs';
 
-const TMP_DIR = vi.hoisted(() => `${process.env.TMPDIR || '/tmp'}/ide-forward-int-${process.pid}-${Date.now()}`);
+const TMP_DIR = await vi.hoisted(async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return join(tmpdir(), `ide-forward-int-${process.pid}-${Date.now()}`);
+});
 
 vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
   const actual = await importActual<typeof import('@cluesmith/codev-core/constants')>();
@@ -18,9 +22,12 @@ vi.mock('@cluesmith/codev-core/constants', async (importActual) => {
 
 import { forwardIdeHttp, forwardIdeWebSocket } from '../servers/ide-forward.js';
 import { writeIdeRecord, deleteIdeRecord, ensureIdeConnectionToken, type IdeServerRecord } from '../lib/ide-record.js';
+import { writeCloudConfig, deleteCloudConfig, type CloudConfig } from '../lib/cloud-config.js';
 import type { IncomingHttpHeaders } from 'node:http';
 
-const noopLog = (): void => {};
+const CLOUD: CloudConfig = { tower_id: 't1', tower_name: 'mytower', api_key: 'ctk_x', server_url: 'https://cloud.codevos.ai' };
+
+const forwardLog = vi.fn((_level: 'INFO' | 'ERROR' | 'WARN', _message: string): void => {});
 
 let token: string;
 let lastWsReqHeaders: IncomingHttpHeaders | null = null;
@@ -101,10 +108,10 @@ beforeAll(async () => {
 
   // Tower stand-in: its request/upgrade handlers delegate to the forward.
   tower = http.createServer((req, res) => {
-    void forwardIdeHttp(req, res, noopLog);
+    void forwardIdeHttp(req, res, forwardLog);
   });
   tower.on('upgrade', (req, socket, head) => {
-    void forwardIdeWebSocket(req, socket, head as Buffer, noopLog);
+    void forwardIdeWebSocket(req, socket, head as Buffer, forwardLog);
   });
   towerPort = await listen(tower);
 });
@@ -131,6 +138,25 @@ function get(path: string, headers: Record<string, string> = {}): Promise<{ stat
 }
 
 describe('IDE HTTP forward (stub loopback)', () => {
+  // Spec 1658 Phase 9: on native Windows `?folder=` carries a native path
+  // (drive letter, backslashes, possibly past MAX_PATH). The forward must hand
+  // it to the server byte for byte, encoded or not.
+  it('forwards a native Windows ?folder path unchanged, encoded, raw, or long', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    const longRepo = `C:\\Users\\dev\\${'nested-folder\\'.repeat(20)}repo`;
+    expect(longRepo.length).toBeGreaterThan(260);
+    const paths = [
+      `/ide/?folder=${encodeURIComponent('C:\\Users\\dev\\My Repo')}`,
+      '/ide/?folder=C:\\Users\\dev\\repo',
+      `/ide/?folder=${encodeURIComponent(longRepo)}`,
+    ];
+    for (const path of paths) {
+      const res = await get(path);
+      expect(res.status).toBe(200);
+      expect((JSON.parse(res.body) as { url: string }).url).toBe(path);
+    }
+  });
+
   it('forwards path + ?folder unchanged, sanitizes request headers, and preserves Cache-Control/ETag', async () => {
     writeIdeRecord(recordFor(stubPort));
 
@@ -230,10 +256,41 @@ describe('IDE HTTP forward never hands the browser the connection token (Issue #
     expect(JSON.parse(res.body).headers['x-forwarded-host']).toBe('localhost:4100');
   });
 
-  it('relays the tunnel path unchanged: Set-Cookie kept (cloud variant is a follow-up)', async () => {
+  it('over the tunnel: relays vscode-tkn scoped to /t/<tower>/ide, other cookies untouched (Issue #1914)', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    writeCloudConfig(CLOUD);
+    try {
+      const res = await get('/ide/', { 'x-codev-tunnel-proxy': '1' });
+      expect(res.headers['set-cookie']).toEqual([
+        'vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax; Path=/t/mytower/ide',
+        'other=keep',
+      ]);
+    } finally {
+      deleteCloudConfig();
+    }
+  });
+
+  it('over the tunnel after a rename: stamp and cookie Path follow the relayed slug, not the stored name (#1914)', async () => {
+    writeIdeRecord(recordFor(stubPort));
+    writeCloudConfig(CLOUD);
+    try {
+      const res = await get('/ide/', { 'x-codev-tunnel-proxy': '1', 'x-forwarded-prefix': '/t/renamed-tower/ide' });
+      expect(JSON.parse(res.body).headers['x-forwarded-prefix']).toBe('/t/renamed-tower/ide');
+      expect(res.headers['set-cookie']).toContain('vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax; Path=/t/renamed-tower/ide');
+    } finally {
+      deleteCloudConfig();
+    }
+  });
+
+  it('over the tunnel with no usable public authority: strips vscode-tkn (fail closed, Issue #1914)', async () => {
     writeIdeRecord(recordFor(stubPort));
     const res = await get('/ide/', { 'x-codev-tunnel-proxy': '1' });
-    expect((res.headers['set-cookie'] ?? []).join('\n')).toContain('vscode-tkn=UPSTREAM-TOKEN');
+    const setCookie = res.headers['set-cookie'] ?? [];
+    expect(setCookie.join('\n')).not.toContain('vscode-tkn');
+    expect(setCookie).toContain('other=keep');
+    // Not silent: the fail-closed state is logged, once per process.
+    const warnings = forwardLog.mock.calls.filter(([level, message]) => level === 'WARN' && message.includes('no usable public authority'));
+    expect(warnings).toHaveLength(1);
   });
 });
 
@@ -258,10 +315,15 @@ describe('IDE workbench page gets its token from configuration, not a cookie (Is
     expect(huge.body.length).toBeGreaterThan(2 * 1024 * 1024);
   });
 
-  it('over the tunnel: the page and its Set-Cookie are relayed unchanged (local-only scope)', async () => {
+  it('over the tunnel: the page is relayed unchanged and its Set-Cookie scoped to the tenant prefix (#1914)', async () => {
     writeIdeRecord(recordFor(stubPort));
-    const res = await get('/ide/workbench', { 'x-codev-tunnel-proxy': '1' });
-    expect(res.body).not.toContain('connectionToken');
-    expect((res.headers['set-cookie'] ?? []).join('\n')).toContain('vscode-tkn=UPSTREAM-TOKEN');
+    writeCloudConfig(CLOUD);
+    try {
+      const res = await get('/ide/workbench', { 'x-codev-tunnel-proxy': '1' });
+      expect(res.body).not.toContain('connectionToken');
+      expect(res.headers['set-cookie']).toEqual(['vscode-tkn=UPSTREAM-TOKEN; Max-Age=604800; SameSite=Lax; Path=/t/mytower/ide']);
+    } finally {
+      deleteCloudConfig();
+    }
   });
 });

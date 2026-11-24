@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { ConnectionManager } from '../connection-manager.js';
 import type { OverviewCache } from '../views/overview-data.js';
 import { issueRef } from '../issue-id.js';
-
-const execFileAsync = promisify(execFile);
+import { execCodevCli } from '../cli-process.js';
 
 /**
  * Codev: Cleanup Builder — pick builder, run `afx cleanup`, then refresh the
@@ -48,7 +45,7 @@ export async function cleanupBuilder(
   if (!picked) { return; }
 
   try {
-    await execFileAsync('afx', ['cleanup', '-p', picked.id], { cwd: workspacePath });
+    await execCodevCli('afx', ['cleanup', '-p', picked.id], { cwd: workspacePath });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`Codev: afx cleanup failed — ${msg}`);

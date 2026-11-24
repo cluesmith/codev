@@ -10,7 +10,15 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import { globSync } from 'glob';
 import type { ProjectState, Protocol, PlanPhase } from './types.js';
-import { stalledRefreshes, unacknowledgedRefreshes } from './context-refresh.js';
+import {
+  stalledRefreshes,
+  unacknowledgedRefreshes,
+  shouldRefresh,
+  declaresEnter,
+  declaresPlanPhaseAdvance,
+  enterBoundary,
+  planPhaseBoundary,
+} from './context-refresh.js';
 import {
   listAllProjects,
   readState,
@@ -38,9 +46,10 @@ import {
   findPlanFile,
   extractPlanPhases,
   getCurrentPlanPhase,
+  getNextPlanPhase,
   getPhaseContent,
   allPlanPhasesComplete,
-  isPlanPhaseComplete,
+  skipPlanPhase,
 } from './plan.js';
 import { getResolver, LocalResolver, type ArtifactResolver } from './artifacts.js';
 import {
@@ -202,8 +211,11 @@ export async function status(
   console.log(`  PROTOCOL: ${state.protocol}`);
   console.log(`  PHASE: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
 
-  // For phased protocols, show plan phase status
-  if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
+  // For phased protocols, show plan phase status. Keep showing it after
+  // implement when a phase was skipped, so the drop and its reason stay
+  // visible once the project has moved on to review (#1900).
+  const hasSkipped = state.plan_phases.some(p => p.status === 'skipped');
+  if (state.plan_phases.length > 0 && (isPhased(protocol, state.phase) || hasSkipped)) {
     console.log('');
     console.log(chalk.bold('PLAN PHASES:'));
     console.log('');
@@ -214,6 +226,7 @@ export async function status(
         case 'verified': return chalk.green('✓');
         case 'complete': return chalk.green('✓'); // backward compat
         case 'in_progress': return chalk.yellow('►');
+        case 'skipped': return chalk.gray('⊘');
         default: return chalk.gray('○');
       }
     };
@@ -224,7 +237,8 @@ export async function status(
       const prefix = isCurrent ? chalk.cyan('→ ') : '  ';
       const title = isCurrent ? chalk.bold(phase.title) : phase.title;
 
-      console.log(`${prefix}${icon(phase.status)} ${phase.id}: ${title}`);
+      const skipped = phase.status === 'skipped' ? chalk.gray(` (skipped: ${phase.skip_reason ?? 'no reason recorded'})`) : '';
+      console.log(`${prefix}${icon(phase.status)} ${phase.id}: ${title}${skipped}`);
     }
   }
 
@@ -285,8 +299,7 @@ export async function status(
       }
 
       // Find the next phase name for the warning
-      const currentIdx = state.plan_phases.findIndex(p => p.id === currentPlanPhase.id);
-      const nextPlanPhase = state.plan_phases[currentIdx + 1];
+      const nextPlanPhase = getNextPlanPhase(state.plan_phases, currentPlanPhase.id);
 
       console.log('');
       console.log(chalk.red.bold('╔══════════════════════════════════════════════════════════════╗'));
@@ -316,7 +329,7 @@ export async function status(
     console.log(section('STATUS', chalk.yellow('WAITING FOR HUMAN APPROVAL')));
     console.log(`\n  Gate: ${gate}`);
     console.log('  Do not proceed until gate is approved.');
-    console.log(`\n  To approve: porch approve ${state.id} ${gate}`);
+    console.log(`\n  To approve: porch approve ${state.id} ${gate} --a-human-explicitly-approved-this`);
   } else {
     console.log(section('INSTRUCTIONS', getInstructions(state, protocol)));
   }
@@ -512,9 +525,11 @@ export async function done(workspaceRoot: string, projectId: string, resolver?: 
       const missingModels: string[] = [];
 
       for (const model of effectiveModels) {
-        // Look for any review file for this model+phase (any iteration)
-        const pattern = path.join(projectDir, `${state.id}-${phase}-iter*-${model}.txt`);
-        const matches = globSync(pattern);
+        // Look for any review file for this model+phase (any iteration). The pattern is relative
+        // to `cwd`, never joined onto projectDir: glob treats '\' as an escape character, so a
+        // Windows absolute path in the pattern matched nothing and `done` always refused.
+        const pattern = `${state.id}-${phase}-iter*-${model}.txt`;
+        const matches = globSync(pattern, { cwd: projectDir });
         if (matches.length === 0) {
           missingModels.push(model);
         }
@@ -692,8 +707,8 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
         console.log('');
         console.log(chalk.cyan('  Opening artifact for human review...'));
         // Use afx open to display in annotation viewer
-        const { spawn } = await import('node:child_process');
-        spawn('afx', ['open', fullPath], {
+        const { commandLaunch } = await import('../../lib/platform/command-launch.js');
+        commandLaunch().spawn('afx', ['open', fullPath], {
           stdio: 'inherit',
           detached: true
         }).unref();
@@ -707,7 +722,7 @@ export async function gate(workspaceRoot: string, projectId: string, resolver?: 
   console.log('');
   console.log(chalk.bold('STATUS: WAITING FOR HUMAN APPROVAL'));
   console.log('');
-  console.log(chalk.dim(`  To approve: porch approve ${state.id} ${gateName}`));
+  console.log(chalk.dim(`  To approve: porch approve ${state.id} ${gateName} --a-human-explicitly-approved-this`));
   console.log('');
 }
 
@@ -934,6 +949,100 @@ export async function rollback(
   console.log(`  Project: ${state.id}`);
   console.log(`  Protocol: ${state.protocol}`);
   console.log(`\n  Run: porch status ${state.id}`);
+  console.log('');
+}
+
+/**
+ * porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this
+ *
+ * Drop one unbuilt plan phase after implement has started (#1900). Plan phases
+ * are snapshotted into status.yaml on entering implement and never re-read, so
+ * editing the plan cannot remove a phase; without this the dropped phase stays
+ * pending and the review phase is unreachable. Human-gated because it changes
+ * an approved plan. Skipping the last unsettled phase advances to the next
+ * protocol phase (review).
+ */
+export async function skipPhase(
+  workspaceRoot: string,
+  projectId: string,
+  planPhaseId: string,
+  reason: string | undefined,
+  hasHumanFlag: boolean,
+): Promise<void> {
+  if (!hasHumanFlag) {
+    throw new Error(
+      'Human approval required: skipping a plan phase changes an approved plan.\n' +
+      '  Run it only after the architect relays a human\'s decision:\n' +
+      `    porch skip-phase ${projectId} ${planPhaseId} --reason "..." --a-human-explicitly-approved-this`,
+    );
+  }
+  const why = reason?.trim();
+  if (!why) {
+    throw new Error('--reason is required: record why this phase is being dropped from the plan.');
+  }
+
+  const statusPath = findStatusPath(workspaceRoot, projectId);
+  if (!statusPath) {
+    throw new Error(`Project ${projectId} not found.`);
+  }
+  const state = readState(statusPath);
+  const protocol = loadProtocol(workspaceRoot, state.protocol);
+  if (!isPhased(protocol, state.phase) || state.plan_phases.length === 0) {
+    throw new Error(`porch skip-phase only applies while plan phases are being implemented (current phase: ${state.phase}).`);
+  }
+
+  const wasCurrent = getCurrentPlanPhase(state.plan_phases)?.id === planPhaseId;
+  const { phases, moveToReview } = skipPlanPhase(state.plan_phases, planPhaseId, why, new Date().toISOString());
+  state.plan_phases = phases;
+  if (wasCurrent) {
+    // The in-flight build/verify cycle belonged to the dropped phase.
+    state.iteration = 1;
+    state.build_complete = false;
+  }
+
+  const previousPhase = state.phase;
+  if (moveToReview) {
+    // Same target as the normal advance in next.ts handleVerifyApproved: 'review'
+    // is hardcoded there too, because normalizePhase maps a per_plan_phase phase's
+    // `transition.on_complete` (itself) to `next` — getNextPhase would loop back
+    // to implement. Change the two together.
+    if (!getPhaseConfig(protocol, 'review')) {
+      throw new Error(`Protocol ${state.protocol} has no 'review' phase to advance to after the last plan phase; skip-phase supports SPIR/ASPIR-shaped protocols only.`);
+    }
+    state.phase = 'review';
+    state.current_plan_phase = null;
+  } else {
+    state.current_plan_phase = getCurrentPlanPhase(state.plan_phases)?.id ?? null;
+  }
+
+  // A skip that hands work on (to the next plan phase, or to review) crosses the
+  // same context-refresh boundary the normal advance would. Porch can only emit
+  // a refresh TASK from `porch next`, at the transition; recording the boundary
+  // here would mark it consumed without any builder ever receiving the task, and
+  // the next `porch next` would acknowledge it. So say so instead (#1900).
+  const crossed = moveToReview
+    ? { boundary: enterBoundary(state.phase), declared: declaresEnter(protocol, state.phase) }
+    : wasCurrent && state.current_plan_phase
+      ? { boundary: planPhaseBoundary(state.current_plan_phase), declared: declaresPlanPhaseAdvance(protocol) }
+      : null;
+  const refreshDue = crossed !== null && shouldRefresh(state, crossed.declared, crossed.boundary);
+
+  await writeStateAndCommit(statusPath, state, `chore(porch): ${state.id} skip plan phase ${planPhaseId}: ${why}`);
+
+  console.log('');
+  console.log(chalk.yellow(`SKIPPED: ${planPhaseId}`));
+  console.log(`  Reason: ${why}`);
+  if (moveToReview) {
+    console.log(chalk.green(`  All plan phases settled: ${previousPhase} → ${state.phase}`));
+  } else {
+    console.log(`  Current plan phase: ${state.current_plan_phase}`);
+  }
+  if (refreshDue && crossed) {
+    console.log('');
+    console.log(chalk.yellow(`  Context refresh due at \`${crossed.boundary}\`. porch next emits refresh tasks only at its own`));
+    console.log(chalk.yellow('  transitions, so this skip cannot. The builder should run /builder-refresh, then porch next.'));
+  }
+  console.log(`\n  Run: porch next ${state.id}`);
   console.log('');
 }
 
@@ -1175,8 +1284,71 @@ function getArtifactForPhase(workspaceRoot: string, state: ProjectState, resolve
 // CLI
 // ============================================================================
 
+function printHelp(): void {
+  console.log('porch - Protocol Orchestrator');
+  console.log('');
+  console.log('Commands:');
+  console.log('  next [id]                Emit next tasks as JSON (planner mode)');
+  console.log('  status [id]              Show current state and instructions');
+  console.log('  check [id]               Run checks for current phase');
+  console.log('  done [id]                Signal build complete (validates checks, advances)');
+  console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
+  console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
+  console.log('  gate [id]                Request human approval');
+  console.log('  pending [--all]          List gates awaiting approval across projects (--all includes stale records on finished projects)');
+  console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
+  console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
+  console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
+  console.log('  skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this');
+  console.log('                           Drop one unbuilt plan phase from an approved plan');
+  console.log('  init <protocol> <id> <name>  Initialize a new project');
+  console.log('');
+  console.log('Flags:');
+  console.log('  -C <dir>                 Run as if porch was started in <dir> (before the command, like git -C)');
+  console.log('  --version, -v            Print porch (codev) version');
+  console.log('');
+  console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
+  console.log('');
+}
+
+/**
+ * #1950 `porch -C <dir>`: like `git -C`, run as if porch had been started in `<dir>`. Leading
+ * and repeatable, each resolved against the last. It changes where porch runs, nothing else —
+ * `approve` and `skip-phase` still require their human-approval flag.
+ */
+function applyDirectoryFlags(args: string[]): string[] {
+  let i = 0;
+  while (args[i] === '-C') {
+    const dir = args[i + 1];
+    if (!dir) throw new Error('-C requires a directory');
+    const resolved = path.resolve(dir);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      throw new Error(`-C ${dir}: not a directory (${resolved})`);
+    }
+    process.chdir(resolved);
+    i += 2;
+  }
+  if (i > 0) console.error(chalk.dim(`[porch -C: running in ${process.cwd()}]`));
+  return args.slice(i);
+}
+
 export async function cli(args: string[]): Promise<void> {
-  const [command, ...rest] = args;
+  let located: string[];
+  try {
+    located = applyDirectoryFlags(args);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${(err as Error).message}`));
+    process.exit(1);
+  }
+  const [command, ...rest] = located;
+
+  // `porch <command> --help` prints help and exits. Without this, the subcommand ran:
+  // `porch done --help` executed `porch done` on the auto-detected project — checks and all —
+  // and `porch gate --help` requested a gate (#1902).
+  if (command && (rest.includes('--help') || rest.includes('-h'))) {
+    printHelp();
+    return;
+  }
 
   // Handle --version / -v before any project resolution — version output
   // must work from any directory and never require a project context.
@@ -1203,12 +1375,12 @@ export async function cli(args: string[]): Promise<void> {
   // overview-refresh so subscribed clients (VSCode sidebar, dashboard)
   // pick up the change immediately instead of waiting for an unrelated
   // SSE event to incidentally cause a re-fetch.
-  const MUTATING_COMMANDS = new Set(['next', 'done', 'gate', 'approve', 'rollback', 'verify', 'init']);
+  const MUTATING_COMMANDS = new Set(['next', 'done', 'gate', 'approve', 'rollback', 'skip-phase', 'verify', 'init']);
 
   try {
     switch (command) {
       case 'pending':
-        await pending(workspaceRoot, { all: args.includes('--all') });
+        await pending(workspaceRoot, { all: rest.includes('--all') });
         break;
 
       case 'next': {
@@ -1279,6 +1451,17 @@ export async function cli(args: string[]): Promise<void> {
         await rollback(workspaceRoot, rest[0], rest[1], resolver);
         break;
 
+      case 'skip-phase': {
+        const usage = 'Usage: porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this';
+        if (!rest[0] || !rest[1] || rest[0].startsWith('--') || rest[1].startsWith('--')) throw new Error(usage);
+        const reasonIdx = rest.indexOf('--reason');
+        const reasonArg = reasonIdx !== -1 ? rest[reasonIdx + 1] : undefined;
+        // A missing reason is reported by skipPhase AFTER the human-flag check — the more useful error first.
+        const skipPhaseReason = reasonArg && !reasonArg.startsWith('--') ? reasonArg : undefined;
+        await skipPhase(workspaceRoot, rest[0], rest[1], skipPhaseReason, rest.includes('--a-human-explicitly-approved-this'));
+        break;
+      }
+
       case 'verify': {
         const verifyProjectId = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
         const skipIdx = rest.indexOf('--skip');
@@ -1309,27 +1492,7 @@ export async function cli(args: string[]): Promise<void> {
         break;
 
       default:
-        console.log('porch - Protocol Orchestrator');
-        console.log('');
-        console.log('Commands:');
-        console.log('  next [id]                Emit next tasks as JSON (planner mode)');
-        console.log('  status [id]              Show current state and instructions');
-        console.log('  check [id]               Run checks for current phase');
-        console.log('  done [id]                Signal build complete (validates checks, advances)');
-        console.log('  done [id] --pr N --branch NAME   Record PR creation (no phase advancement)');
-        console.log('  done [id] --merged N             Mark PR as merged (no phase advancement)');
-        console.log('  gate [id]                Request human approval');
-        console.log('  pending [--all]          List gates awaiting approval across projects (--all includes stale records on finished projects)');
-        console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
-        console.log('  verify <id> --skip "reason"      Skip verification and mark as verified');
-        console.log('  rollback <id> <phase>    Rewind project to an earlier phase');
-        console.log('  init <protocol> <id> <name>  Initialize a new project');
-        console.log('');
-        console.log('Flags:');
-        console.log('  --version, -v            Print porch (codev) version');
-        console.log('');
-        console.log('Project ID is auto-detected from worktree path or when exactly one project exists.');
-        console.log('');
+        printHelp();
         process.exit(command && command !== '--help' && command !== '-h' ? 1 : 0);
     }
 

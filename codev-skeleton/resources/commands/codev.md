@@ -136,12 +136,12 @@ codev doctor
 Verifies that all required dependencies are installed and properly configured:
 
 **Core Dependencies (required):**
-- Node.js (>= 18.0.0)
+- Node.js (>= 22.0.0)
 - git (>= 2.5.0)
 - gh (GitHub CLI, authenticated)
 
 **AI CLI Dependencies (at least one required):**
-- Claude (`@anthropic-ai/claude-code`)
+- Claude (the installed `claude` CLI, 2.1.141 or newer; its login is checked with `claude auth status`, with no model call)
 - Gemini (Antigravity CLI, `agy`)
 - Codex (`@openai/codex`)
 
@@ -167,14 +167,14 @@ Codev Doctor - Checking your environment
 
 Core Dependencies (required for Agent Farm)
 
-  ✓ Node.js      20.10.0
+  ✓ Node.js      22.12.0
   ✓ git          2.42.0
   ✓ gh           authenticated
   ✓ @cluesmith/codev  1.0.0
 
 AI CLI Dependencies (at least one required)
 
-  ✓ Claude       working
+  ✓ Claude       2.1.326
   ✓ Gemini       working
   ○ Codex        not installed (npm i -g @openai/codex)
 

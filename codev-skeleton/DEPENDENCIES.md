@@ -20,8 +20,19 @@ These are required for Agent Farm to function.
 
 | Requirement | Value |
 |-------------|-------|
-| Minimum Version | 18.0.0 |
+| Minimum Version | 22.0.0 |
+| Tested | 22 |
 | Purpose | Runtime for Agent Farm server |
+
+Codev's native dependencies (node-pty, better-sqlite3) install from prebuilt binaries where one
+exists for your platform and Node version. Where none exists, npm builds them from source, which
+needs a C/C++ toolchain:
+
+- **Linux and WSL:** node-pty compiles from source, so install `build-essential` and `python3`
+  before `npm install -g @cluesmith/codev`.
+- **Native Windows:** Node 22 (x64 and ARM64) is supported. On a Node version with no
+  Windows prebuild the install stops and names the supported version, rather than starting a
+  source build.
 
 **Installation:**
 
@@ -29,12 +40,14 @@ These are required for Agent Farm to function.
 # macOS
 brew install node
 
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+# Ubuntu/Debian (and WSL)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs build-essential python3
+
+# Windows: the Node.js 22 installer from https://nodejs.org
 
 # Verify
-node --version  # Should show v18.x or higher
+node --version  # Should show v22.x or newer
 ```
 
 ### git
@@ -99,6 +112,7 @@ You need at least one AI CLI installed to use Codev. Install more for multi-agen
 |-------------|-------|
 | Purpose | Primary AI agent for development |
 | Required For | `codev import` command (spawns interactive Claude session) |
+| Consult lane | `consult -m claude` runs this CLI: version 2.1.141 or newer, logged in (`claude auth login`) |
 | Documentation | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
 
 **Installation:**
@@ -159,8 +173,9 @@ codex --version
 
 | Dependency | Minimum Version | Required? |
 |------------|-----------------|-----------|
-| Node.js | 18.0.0 | Yes |
-| git | 2.5.0 | Yes |
+| Node.js | 22.0.0 | Yes |
+| git | 2.5.0 (native Windows: Git for Windows) | Yes |
+| jq | any | Native Windows only |
 | gh | latest | Yes |
 | Claude Code | latest | At least one AI CLI |
 | Antigravity CLI (`agy`) | latest | At least one AI CLI |
@@ -187,21 +202,98 @@ xcode-select --install
 Most dependencies are available via apt:
 
 ```bash
-# Core dependencies
-sudo apt install nodejs npm git
+# Node.js 22 from NodeSource (the distribution's nodejs package is older than 22)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+
+# Core dependencies (build-essential and python3 build node-pty)
+sudo apt install nodejs git build-essential python3
 
 # gh requires adding GitHub's apt repository (see above)
 ```
 
 ### Windows
 
-Codev is designed for Unix-like systems. On Windows, use WSL2:
+Codev supports two paths on Windows: native, with Git for Windows, and WSL 2.
+
+#### Native Windows (Git for Windows)
+
+Codev runs directly on Windows 10 22H2 or Windows 11, x64 or ARM64, with no admin rights.
+
+| Prerequisite | Notes |
+|--------------|-------|
+| Node.js 22 | The supported and tested version; Node 20 is not supported |
+| [Git for Windows](https://git-scm.com/download/win) | Provides `git` and Git Bash, the shell Codev uses for its scripts |
+| jq | `winget install jqlang.jq`; the forge scripts need it |
+| gh | `winget install GitHub.cli`, then `gh auth login` |
+
+```powershell
+# After installing Node.js 22 from https://nodejs.org
+winget install Git.Git
+winget install jqlang.jq
+winget install GitHub.cli
+npm install -g @cluesmith/codev
+codev doctor
+```
+
+How it works and what to know:
+
+- **Shells.** Architect and builder terminals run their configured agent CLI (`claude` by
+  default) directly. Plain shell terminals open Windows PowerShell 5.1 by default (set
+  `shell.shell` to `"pwsh"` in `.codev/config.json` to use PowerShell 7). Codev's own scripts
+  (forge concepts, the builder launch script, `postSpawn`) run under Git Bash. Codev never runs
+  bare `bash`, because `C:\Windows\System32\bash.exe` starts WSL. It finds Git Bash from
+  `windows.gitBashPath` in `.codev/config.json` or `CLAUDE_CODE_GIT_BASH_PATH`, else the standard
+  Git for Windows install paths, else `PATH`. An override that points at a bash other than Git
+  Bash is an error.
+- **Long paths.** Builder worktrees nest under `.builders/<id>/`, and dependency trees inside them
+  can pass Windows' 260-character path limit. Keep the workspace root short (for example
+  `C:\src\<repo>`) and enable long paths in git for your user (no admin needed):
+  `git config --global core.longpaths true`. `codev doctor` checks both.
+- **Developer Mode is optional.** Runnable-worktree links (`worktree.symlinks`) are real symlinks
+  when Developer Mode is on. When it is off, a directory link becomes a junction and a file link
+  becomes a hard link, or a copy when no hard link can be made. A copy does not write through to
+  the original, and `afx spawn` warns when it makes one.
+- **Privacy.** Codev's state (`%USERPROFILE%\.agent-farm`, `%USERPROFILE%\.codev`) relies on
+  your user folder being private to you, which is the Windows default. Codev sets no ACLs of its
+  own. Terminal sessions use named pipes that require a per-session secret, so other users on
+  the machine cannot read or drive them.
+- **Line endings.** Scripts Codev ships are pinned to LF. A `postSpawn` or `devCommand` script you
+  write must use LF line endings to run under Git Bash; `codev doctor` warns about CRLF ones.
+- **PowerShell.** Tower uses the built-in `powershell.exe` (CIM) to list and stop the processes
+  each session starts. A machine policy that blocks it, or Constrained Language Mode, is not
+  supported; `codev doctor` and Tower's log report it.
+- **Everything a session starts stays in it.** Each terminal runs in its own Windows Job Object,
+  and programs cannot leave it: the agent, every command it runs, and anything those start.
+  Closing or cleaning up a session ends all of them, as a process group does on macOS and Linux.
+  That includes what an agent's timed-out command leaves running (often a root-wide file
+  search using a full CPU): it ends with its session. It also includes a GUI program or a
+  background server started from that terminal (for example `code .` when VS Code is not already
+  running, or a dev server started with `&`), and a browser that a Codev command opens for you
+  (`afx workspace start`, `afx attach`, `afx tower cloud login`) when no browser was already
+  running. Start such a program from outside Codev (a Windows
+  Terminal or PowerShell window) when it must outlive the session. Tower itself is started outside
+  the session by `afx tower start`, and refuses to run inside any session.
+- **Programs never run from the current folder.** Windows normally looks a program started by
+  bare name (`git`, `npm`) up in the current folder before `PATH`, so a `git.exe` inside a
+  repository could run in place of Git. Codev turns that lookup off (it sets
+  `NoDefaultCurrentDirectoryInExePath`) in its own processes, the commands they run, and every
+  terminal Tower opens: architect and builder sessions and shell tabs alike. In a `cmd.exe`
+  shell, a program in the current folder then runs only when you name its folder (`.\name`);
+  PowerShell already works this way. One known effect: a .NET 10 NativeAOT `dotnet publish` fails
+  inside a Codev terminal, because Visual Studio's `vcvarsall.bat` does not support the setting
+  (fixed in .NET 11; [dotnet/runtime#129340](https://github.com/dotnet/runtime/issues/129340)).
+  Codev runs its own Windows tools by full system path.
+- **Known limitations.** Doctor cannot show Tower's environment on Windows (the process table does
+  not expose it). Building this repository from source on ARM64 fails in one bundler; installing
+  the published package on ARM64 works.
+
+#### WSL 2
+
+Codev also runs inside WSL 2 as on Linux. Install a distribution, then follow the Ubuntu
+instructions above inside it, including `build-essential` and `python3`:
 
 ```bash
-# Install WSL2 with Ubuntu
 wsl --install -d Ubuntu
-
-# Then follow Ubuntu installation instructions inside WSL
 ```
 
 ---
@@ -219,6 +311,14 @@ echo $PATH
 # Common fix: add npm global bin to PATH
 export PATH="$PATH:$(npm config get prefix)/bin"
 ```
+
+On native Windows, npm's global bin directory is `npm config get prefix` itself (for example
+`%APPDATA%\npm`), with no `bin` subdirectory; the Node.js installer adds it to `PATH`.
+
+### Install fails on native Windows with "supported Node versions"
+
+Your Node version has no prebuilt better-sqlite3 for Windows. Install Node 22 and run the
+install again.
 
 ### Terminal connection issues
 

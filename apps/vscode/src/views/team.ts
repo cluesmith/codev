@@ -2,17 +2,114 @@ import * as vscode from 'vscode';
 import type { TeamApiResponse } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
 
+/** At most one SSE-driven fetch per this window (ms). */
+export const TEAM_SSE_THROTTLE_MS = 30_000;
+
+/** The slice of `vscode.TreeView` the provider reads. */
+export interface TeamViewVisibility {
+  readonly visible: boolean;
+  readonly onDidChangeVisibility: vscode.Event<vscode.TreeViewVisibilityChangeEvent>;
+}
+
+/**
+ * Team members with their GitHub activity (Spec 587).
+ *
+ * Issue #1919: Tower broadcasts an SSE event for nearly every agent tool call
+ * (about two a second during a turn), and team data does not come from those
+ * events. Each fetch makes Tower read the git origin and run the team-activity
+ * GraphQL query, so the view fetches:
+ *
+ * - on an SSE event only while the view is visible, at most once per
+ *   {@link TEAM_SSE_THROTTLE_MS} (trailing, so the last event is not lost);
+ * - immediately when the view becomes visible, when the connection comes up,
+ *   and on a manual `refresh()`.
+ *
+ * A fetch never overlaps another: a trigger that lands while one is in flight
+ * re-runs once it settles.
+ */
 export class TeamProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
   private data: TeamApiResponse | null = null;
 
-  constructor(private connectionManager: ConnectionManager) {
-    connectionManager.onSSEEvent(() => this.refresh());
+  private readonly subscriptions: vscode.Disposable[] = [];
+  private view: TeamViewVisibility | null = null;
+  private lastFetchStartedAt = Number.NEGATIVE_INFINITY;
+  private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+  private inFlight: Promise<void> | null = null;
+  private rerunQueued = false;
+
+  constructor(
+    private connectionManager: ConnectionManager,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.subscriptions.push(
+      connectionManager.onSSEEvent(() => this.onSSEEvent()),
+      connectionManager.onStateChange((state) => {
+        if (state === 'connected' && this.isVisible()) { this.refresh(); }
+      }),
+    );
   }
 
+  /** Bind the tree view whose visibility gates SSE-driven fetches. */
+  attachView(view: TeamViewVisibility): void {
+    this.view = view;
+    this.subscriptions.push(view.onDidChangeVisibility(({ visible }) => {
+      if (visible) { this.refresh(); }
+    }));
+    if (view.visible) { this.refresh(); }
+  }
+
+  /** Fetch now (manual refresh, reveal, connect). */
   refresh(): void {
-    this.fetchData();
+    this.clearThrottleTimer();
+    this.startFetch();
+  }
+
+  dispose(): void {
+    this.clearThrottleTimer();
+    for (const subscription of this.subscriptions) { subscription.dispose(); }
+    this.subscriptions.length = 0;
+    this.changeEmitter.dispose();
+  }
+
+  private isVisible(): boolean {
+    return this.view?.visible ?? false;
+  }
+
+  private onSSEEvent(): void {
+    if (!this.isVisible() || this.throttleTimer !== null) { return; }
+    const wait = this.lastFetchStartedAt + TEAM_SSE_THROTTLE_MS - this.now();
+    if (wait <= 0) {
+      this.startFetch();
+      return;
+    }
+    this.throttleTimer = setTimeout(() => {
+      this.throttleTimer = null;
+      if (this.isVisible()) { this.startFetch(); }
+    }, wait);
+  }
+
+  private clearThrottleTimer(): void {
+    if (this.throttleTimer !== null) {
+      clearTimeout(this.throttleTimer);
+      this.throttleTimer = null;
+    }
+  }
+
+  private startFetch(): void {
+    if (this.inFlight) {
+      this.rerunQueued = true;
+      return;
+    }
+    this.lastFetchStartedAt = this.now();
+    this.inFlight = this.fetchData().finally(() => {
+      this.inFlight = null;
+      if (this.rerunQueued) {
+        this.rerunQueued = false;
+        this.startFetch();
+      }
+    });
   }
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {

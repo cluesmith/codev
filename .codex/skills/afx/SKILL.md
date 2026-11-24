@@ -17,32 +17,37 @@ afx spawn [number] [options]
 
 | Flag | Description |
 |------|-------------|
-| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, tick, maintain, experiment. **Required for numbered spawns.** |
+| `--protocol <name>` | Protocol: spir, aspir, air, bugfix, pir, maintain, experiment. **Required for numbered spawns.** |
 | `--task <text>` | Ad-hoc task (no issue number needed) |
 | `--shell` | Bare Claude session |
 | `--worktree` | Bare worktree session |
-| `--amends <number>` | Original spec number (TICK only) |
 | `--files <files>` | Context files, comma-separated. **Requires `--task`.** |
 | `--no-comment` | Skip commenting on the GitHub issue |
 | `--force` | Skip dirty-worktree and collision checks |
 | `--soft` | Soft mode (AI follows protocol, you verify) |
 | `--strict` | Strict mode (porch orchestrates) — this is the default |
 | `--resume` | Resume builder in existing worktree |
+| `--branch <name>` | Build on an existing remote branch instead of creating one. **Requires `--protocol`.** |
+| `--remote <name>` | Remote to fetch the `--branch` from (fork PRs) |
 | `--no-role` | Skip loading role prompt |
+| `--max-load <n>` | Refuse while the one-minute load average is ≥ N: exit 75, nothing created. Unsupported on native Windows (exits 1). |
+| `--wait <seconds>` | With `--max-load`: re-check every 15s for up to this long, then spawn or exit 75 |
 
-**There is NO `-t`, `--title`, `--name`, or `--branch` flag.** The branch name is auto-generated from the issue title.
+**There is NO `-t`, `--title`, or `--name` flag.** The worktree is `.builders/<protocol>-<id>` and the branch `builder/<protocol>-<id>`, unless `--branch` reuses an existing one.
 
 **Examples:**
 ```bash
 afx spawn 42 --protocol spir           # SPIR builder for issue #42
-afx spawn 42 --protocol aspir          # ASPIR (autonomous, no human gates)
+afx spawn 42 --protocol aspir          # ASPIR (no spec/plan gates)
 afx spawn 42 --protocol air            # AIR (small features)
 afx spawn 42 --protocol bugfix         # Bugfix
-afx spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
+afx spawn 42 --protocol pir            # PIR (plan, dev and pr gates)
+afx spawn 42 --protocol spir --branch fix/foo --remote fork   # Reuse a contributor's branch
 afx spawn 42 --protocol spir --soft    # Soft mode
 afx spawn 42 --resume                  # Resume existing builder
 afx spawn --task "fix the flaky test"  # Ad-hoc task (no issue)
 afx spawn 42 --protocol spir --force   # Skip dirty-worktree check
+afx spawn 42 --protocol air --max-load 18 --wait 300   # Wait up to 5 min for load < 18
 ```
 
 **Pre-spawn checklist:**
@@ -52,7 +57,7 @@ afx spawn 42 --protocol spir --force   # Skip dirty-worktree check
 
 ## afx send
 
-Sends a message to a running builder.
+Sends a message to a builder or an architect (see the addressing forms below).
 
 ```
 afx send [builder] [message]
@@ -61,21 +66,39 @@ afx send [builder] [message]
 | Flag | Description |
 |------|-------------|
 | `--all` | Send to all builders |
-| `--file <path>` | Include file content |
+| `--file <path>` | Append a file's content to the message |
+| `--message-file <path>` | Read the message body from a file — no shell quoting. Combines with `--file`; 48 KB limit on the result. |
 | `--interrupt` | Send Ctrl+C first |
 | `--raw` | Skip structured formatting |
 | `--no-enter` | Don't press Enter after message |
+| `--delay <seconds>` | Deliver after N seconds (persisted; survives a Tower restart, except a delayed `--interrupt` ^C) |
+| `--exit-code` | Exit by outcome (below). Without it, a held message exits 0 like a delivered one. |
+| `--retry <n>` | Up to N retries in total, only when the request provably never reached Tower (connection refused, Tower down). Never after held, refused or a timeout. |
 
 ```bash
-afx send 0042 "PR approved, please merge"
-afx send 0585 "check the test output" --file /tmp/test-results.txt
+afx send spir-42 "PR approved, please merge"
+afx send 585 "check the test output" --file /tmp/test-results.txt
+afx send architect --message-file /tmp/report.md --exit-code --retry 3
 ```
+
+The reply is `delivered`, or `held` with a reason: a held message waits in Tower's mailbox and
+delivers once the recipient's prompt is clear. See `afx inbox`. **Never resend a held message** —
+it is persisted and will deliver; a resend arrives twice.
+
+`--exit-code` (with `--all`, the worst across recipients; 1 if there are none):
+
+| Exit | Outcome |
+|------|---------|
+| 0 | delivered, or scheduled by `--delay` |
+| 1 | failed or refused |
+| 3 | held |
+| 4 | delivered but unverified — header not seen, input raced the write, or the write was not serialized. Recorded as delivered; not resent. |
 
 **Addressing forms** — the recipient isn't only a builder ID:
 
 | Form | Routes to |
 |------|-----------|
-| `afx send 0585 "…"` | Builder `0585` (zero-padded). |
+| `afx send spir-585 "…"` | Builder `spir-585`. A bare `585` also works when exactly one builder id ends in it; leading zeros are ignored. |
 | `afx send architect "…"` | From a builder: its spawning architect. From an architect: the `main` architect (else first registered). |
 | `afx send architect:<name> "…"` | A specific named architect (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
 | `afx send <workspace>:architect "…"` | The architect in **another workspace** (cross-workspace). |
@@ -107,8 +130,8 @@ A builder chaining foreground waits inside one turn queues every `afx send` unre
 to stop. ESC ends the turn so the queue processes. Distinct from `afx send --interrupt` (Ctrl+C).
 
 ```bash
-afx interrupt 0042
-afx send 0042 "That producer died — stop waiting and report."
+afx interrupt spir-42
+afx send spir-42 "That producer died — stop waiting and report."
 ```
 
 ## afx refresh
@@ -139,10 +162,35 @@ naming the gate. Requires a harness with in-session context clearing (Claude Cod
 in a future release.
 
 ```bash
-afx refresh 0042 --dry-run                # inspect first — touches nothing
-afx refresh 0042
-afx refresh 0042 --note "PR #90 merged while you were mid-phase. Rebase first."
-afx refresh 0042 --interrupt-first        # builder is wedged mid-turn
+afx refresh spir-42 --dry-run                # inspect first — touches nothing
+afx refresh spir-42
+afx refresh spir-42 --note "PR #90 merged while you were mid-phase. Rebase first."
+afx refresh spir-42 --interrupt-first        # builder is wedged mid-turn
+```
+
+## afx self-refresh
+
+A builder refreshes **its own** context at a protocol boundary: save state, verify it, clear,
+re-orient. Two steps — `--begin` issues the challenge and prints what to save, then a second
+call verifies the saved state and clears. Porch chooses the moment (a context-refresh task);
+the `builder-refresh` skill carries the procedure.
+
+| Flag | Description |
+|------|-------------|
+| `--begin` | Issue the challenge and print what to save (step 1 of 2) |
+| `--boundary <id>` | Protocol boundary this refresh is for (e.g. `enter:review`) |
+| `--note <text>` | Addendum appended to the re-orientation |
+| `--dry-run` | Verify and assemble; send and clear nothing |
+| `--delay <seconds>` | Seconds Tower holds the re-entry before delivering it |
+
+## afx inbox
+
+Held (undelivered) messages for this workspace.
+
+```bash
+afx inbox                       # List held messages
+afx inbox show <id>             # One message, including its body
+afx inbox dismiss <id>          # Mark it dismissed; it is never delivered
 ```
 
 ## afx cleanup
@@ -159,21 +207,33 @@ afx cleanup [options]
 | `-i, --issue <number>` | Cleanup bugfix builder by issue number |
 | `-t, --task <id>` | Cleanup task builder (e.g., `task-bEPd`) |
 | `-f, --force` | Force cleanup even if branch not merged |
+| `--keep-ignored` | Before the worktree is removed, copy untracked files and keep-listed ignored files to `~/.agent-farm/kept/<workspace>/<builder-id>/` |
 
 ```bash
 afx cleanup -p 585              # Clean up project 585
 afx cleanup -p 585 -f           # Force (unmerged branch)
+afx cleanup -i 42 --keep-ignored   # Keep review outputs, notes, tmp/ before removal
 ```
 
-**Note:** `afx cleanup` uses plain numbers (`585`), not zero-padded (`0585`). But `afx send` uses zero-padded IDs (`0585`).
+`--keep-ignored` keeps every untracked, non-ignored file plus ignored files matching
+`cleanup.keepIgnored` in `.codev/config.json` (default `codev/projects/**`, `codev/state/**`,
+`.builder-*`, `tmp/**`, `scratch/**`). Dependency and build output (`node_modules`, `dist`,
+virtualenvs, …) and symlinks are never copied. Each copy is checksum-verified. It refuses if the
+kept folder already exists, and any failure stops cleanup before the worktree, branch or builder
+row is removed. Only bugfix and task cleanups remove a worktree; for others it keeps nothing.
+
+**Note:** `afx cleanup -p` takes the plain number (`585`), not a zero-padded one (`0585`). `afx send` takes the full builder id (`spir-585`) or the bare number.
 
 ## afx status
 
 ```bash
-afx status                      # Show all builders and workspace status
+afx status                      # Tower, workspace, architects and every builder
+afx status --mine               # Only builders this architect spawned
+afx status --activity           # Also: last transcript lines, API-error flag, running test/review processes (slower)
+afx status --json               # Machine-readable (add --activity for the activity fields)
 ```
 
-No flags needed. Shows Tower status, workspace, and all active builders.
+Each builder row shows its live porch **Phase** and the **Gate** it waits at with its age (read from the builder's own worktree `status.yaml`), and **Last active** — time since its terminal last printed (`stopped` = no live session). A field that cannot be read shows `unknown`.
 
 ## afx whoami
 
@@ -285,6 +345,8 @@ enabled: true                   # optional, default true
 
 `condition` is a JavaScript expression with two variables in scope: `output` (string — the command's trimmed output) and `exitCode` (number — 0 on success, the command's exit code on non-zero exit, 124 on timeout, -1 on spawn failure). With a `condition`, the message is delivered exactly when it evaluates truthy — including on failed runs (e.g. `exitCode != 0` alerts when the command fails). Without a `condition`, the message is delivered only when the command exits 0.
 
+The command runs through the platform shell — `/bin/sh` on macOS/Linux, `cmd.exe` on Windows. cmd.exe does not treat single quotes as quotes, so quote arguments with double quotes (`\"` for a quote inside one, e.g. `--jq "select(.conclusion == \"failure\")"`). But cmd.exe still counts every `"` as a quote toggle, so the text *between* an escaped `\"…\"` pair is unquoted to it: keep shell metacharacters (`|`, `&`, `<`, `>`, `^`) out of inner strings, and put anything that needs them in a script. A condition is evaluated on failed runs too, so a condition that inspects `output` should also require `exitCode == 0` — otherwise the command's own error text (tool missing, not authenticated, offline) reads as the alert.
+
 ## Other commands
 
 ```bash
@@ -294,4 +356,6 @@ afx attach                      # Attach to running builder terminal
 afx rename <name>               # Rename current shell session
 afx decisions init              # Create the decisions file; turns on the Decisions tab
 afx architect                   # Start architect session in current terminal
+afx dev [builder-id]            # Run a builder's dev server (see the runnable-worktrees skill)
+afx setup [builder-id]          # Re-run worktree.postSpawn for an existing builder
 ```

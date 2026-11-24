@@ -2,11 +2,11 @@
 
 ## Context
 
-You are reviewing an implementation plan during the Plan phase. The spec is already approved; judge whether the plan adequately describes HOW to implement it.
+You are reviewing an implementation plan during the Plan phase. The spec has passed its own review (ASPIR has no human spec gate); judge whether the plan adequately describes HOW to implement it.
 
 ## Baked Decisions
 
-If the issue body or the approved spec's Constraints section includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may `COMMENT` with concerns; reserve `REQUEST_CHANGES` for the case where the plan **fails to honor** a stated baked decision — that is a real defect.
+If the issue body or the spec's Constraints section includes content under a "Baked Decisions" heading, the architect has marked those choices as fixed. Do not autonomously challenge them: do not propose alternative languages, frameworks, deployment shapes, or dependencies that contradict a baked decision. You may `COMMENT` with concerns; reserve `REQUEST_CHANGES` for the case where the plan **fails to honor** a stated baked decision — that is a real defect.
 
 If the baked decisions themselves contradict each other, do not pick one — `REQUEST_CHANGES` and ask the architect to clarify before proceeding.
 
@@ -18,7 +18,7 @@ If the baked decisions themselves contradict each other, do not pick one — `RE
 - **Testability** — each phase has clear test criteria and the spec's edge cases are addressable.
 - **Risk** — blockers and cross-system dependencies are identified; the plan is realistic given the constraints.
 
-The spec is already approved — do not re-litigate spec decisions. Judge the plan as a guide a builder can follow successfully; verify referenced file paths look accurate.
+The spec is settled — do not re-litigate spec decisions. Judge the plan as a guide a builder can follow successfully; verify referenced file paths look accurate.
 
 ## Verdict Format
 

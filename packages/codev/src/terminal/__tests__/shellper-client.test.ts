@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import {
   FrameType,
   PROTOCOL_VERSION,
@@ -21,11 +20,11 @@ import {
   type WelcomeMessage,
 } from '../shellper-protocol.js';
 import { ShellperClient, LEGACY_REPLAY_TIMEOUT_MS } from '../shellper-client.js';
+import { tmpTestEndpoint } from './shellper-test-endpoint.js';
 
-// Helper: create a temp socket path
+// Helper: create a temp socket path (a named pipe on a Windows host)
 function tmpSocketPath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellper-client-test-'));
-  return path.join(dir, 'test.sock');
+  return tmpTestEndpoint('shellper-client-test-');
 }
 
 // Helper: mini shellper server that does HELLO/WELCOME handshake

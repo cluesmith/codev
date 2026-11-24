@@ -4,7 +4,7 @@ You are executing the **REVIEW** phase of the ASPIR protocol.
 
 ## Goal
 
-Review the whole implementation, write the retrospective at `codev/reviews/{{artifact_name}}.md`, and open the PR — so porch's consultation and the architect both review a real PR.
+Review the whole implementation, write the retrospective at `codev/reviews/{{artifact_name}}.md`, and open the PR — so the consultation and the architect both review a real PR.
 
 ## Context
 
@@ -22,7 +22,7 @@ Review the whole implementation, write the retrospective at `codev/reviews/{{art
 - **The review document exists** at `codev/reviews/{{artifact_name}}.md`, following the template below (its headings, its order — do not pattern-match an older review that predates it).
 - **Consultation feedback is captured.** The review carries a `## Consultation Feedback` section that, per phase / round / model, records each concern and its disposition — **Addressed** (changed), **Rebutted** (why it does not apply), or **N/A** (out of scope / handled elsewhere). "No concerns raised — all consultations approved" is the right line when that is true; note COMMENT verdicts and any `CONSULT_ERROR`. Read the consult outputs from `codev/projects/{{project_id}}-*/`.
 - **Governance facts are routed by tier** (see below).
-- **The PR exists before you signal**, with a close-keyword so merging auto-closes the issue (see below).
+- **The PR exists before you run `porch done`**, with a close-keyword so merging auto-closes the issue (see below).
 
 ## Output
 
@@ -39,7 +39,7 @@ Each governance doc has two tiers. **Route** each new fact; do not simply append
 
 The review's `## Architecture Updates` and `## Lessons Learned Updates` sections state what you routed where; if nothing qualifies, keep the heading with a one-line reason. Never grow a hot file past its cap by appending — route to cold or displace. The `update-arch-docs` skill encodes this discipline.
 
-## Create the PR (before signaling)
+## Create the PR (before `porch done`)
 
 The PR body must carry `Closes #<N>` (feature) or `Fixes #<N>` (bug) for the driving issue — one keyword per issue if several — so GitHub auto-closes on merge. **Exception:** a PR that only partially addresses its issue uses `Refs #<N>` or `Part of #<N>` instead, leaving the issue open for the follow-up.
 
@@ -70,15 +70,11 @@ EOF
 
 The command above is your forge's `pr-create` concept, substituted by porch (`gh pr create` by default). It takes `CODEV_PR_TITLE` / `CODEV_PR_BODY` — optionally `CODEV_PR_BASE`, `CODEV_PR_HEAD`, `CODEV_PR_REPO` — from the environment, which is why they are exported rather than prefixed onto the command line: an inline override that spells `--title "$CODEV_PR_TITLE"` needs them set in the calling shell too. It prints `{"number": <int>, "url": "<url>"}`.
 
-## Signals
+## When you finish
 
-- Review document complete:
-  ```
-  <signal>REVIEW_COMPLETE</signal>
-  ```
-- PR created — signal so porch runs the 3-way consultation:
-  ```
-  <signal>PR_READY</signal>
-  ```
+Commit the review document, push, make sure the PR exists, then run `porch done {{project_id}}`.
+After `porch done`, `porch next` hands you the consultation commands for this phase — three reviewers by default, or your project's `.codev/config.json` `porch.consultation` lanes. Run exactly those, each as a background task, then `porch next` again. Do not run any other `consult`.
 
-Do not run `consult` (porch handles it) and merge your own PR only after the human approves the `pr` gate — never before.
+Merge your own PR only after the human approves the `pr` gate — never before. Approval reaches you
+from the architect; then you run `porch approve {{project_id}} pr --a-human-explicitly-approved-this`
+and follow `porch next`.

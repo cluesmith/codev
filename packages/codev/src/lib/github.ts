@@ -285,7 +285,7 @@ export async function fetchForOverview(concept: OverviewConcept, cwd: string): P
  */
 export function probeGhGraphqlRateLimit(_backend: string, cwd: string): Promise<RateLimitProbeResult | null> {
   return new Promise(resolvePromise => {
-    execFile('gh', ['api', 'rate_limit', '--jq', '.resources.graphql'], { cwd, timeout: 15_000 }, (err, stdout) => {
+    execFile('gh', ['api', 'rate_limit', '--jq', '.resources.graphql'], { cwd, timeout: 15_000, windowsHide: true }, (err, stdout) => {
       if (err) return resolvePromise(null);
       try {
         const parsed = JSON.parse(stdout) as { remaining?: unknown; reset?: unknown };

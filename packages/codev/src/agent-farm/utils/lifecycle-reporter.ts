@@ -32,7 +32,8 @@ import { randomBytes } from 'node:crypto';
 import { AGENT_FARM_DIR } from '@cluesmith/codev-core/constants';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { logger } from './logger.js';
-import { shellEscapeSingleQuote, toShellPath, type HarnessProvider } from './harness.js';
+import { toShellPath, type HarnessProvider } from './harness.js';
+import { shellEscapeSingleQuote } from '../../lib/shell-quote.js';
 
 /**
  * Basename of the installed reporter script. Both files read Claude's hook payloads and settings

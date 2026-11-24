@@ -107,7 +107,7 @@ tail -f ~/.agent-farm/tower.log
 
 8. **Consultation Requirements**: External AI consultation (Gemini, Codex) is mandatory at SPIR checkpoints unless explicitly disabled.
 
-9. **Tower API Authentication**: Tower's local HTTP + WebSocket API enforces request authentication (advisory GHSA-xvjp-7748-v88v). Every route outside the narrow public-route allowlist (`isPublicRoute` in `agent-farm/utils/server-utils.ts`) requires the shared local key (`~/.agent-farm/local-key`), sent as the `codev-tower-key` HTTP header or a `Sec-WebSocket-Protocol` subprotocol, and fails closed with 401 (the server also accepts the legacy `codev-web-key` header for one release). Any new Tower route must decide public-vs-keyed — a wrong allowlist entry either breaks a pre-auth path (health/version probes, the served HTML shells + static assets, the cloud OAuth callback redirect) or exposes a data route. The key is delivered to browser shells via same-origin serve-time injection; those shell responses omit `Access-Control-Allow-Origin` so the injected key is not cross-origin readable. **One ambient exception (Issue #1869):** the `/ide` prefix also accepts the `codev-ide-session` cookie (`HMAC(localKey, purpose)`, HttpOnly, SameSite=Strict, Path=/ide), minted by the key-gated `POST /api/ide/session`. It is decided only in `decideForwardAuthorization` (Host, then key header, then cookie), and the cookie branch refuses requests whose `Origin` / `Sec-Fetch-Site` show another origin, because ports are not part of a cookie site and WebSockets bypass CORS. Tower must never set `Access-Control-Allow-Credentials`: `isAllowedOrigin` reflects any `localhost:<port>`, so that header would let other local pages read cookie-authorized responses. For a LOCAL request the forward also stamps `x-forwarded-host` = the incoming Host (the IDE server builds the workbench's `remoteAuthority` from it, so without it the workbench dials the IDE port directly and bypasses this seam), strips the IDE server's `vscode-tkn` Set-Cookie and injects the token into the workbench's `vscode-workbench-web-configuration` instead (a cookie is readable by every localhost port), and always replaces any browser-held `vscode-tkn` with the token file's value; the token is regenerated on every IDE server spawn, never on adopt. Client-supplied `x-forwarded-*` never reach the IDE server. The tunnel path keeps the server's Set-Cookie (cloud variant pending).
+9. **Tower API Authentication**: Tower's local HTTP + WebSocket API enforces request authentication (advisory GHSA-xvjp-7748-v88v). Every route outside the narrow public-route allowlist (`isPublicRoute` in `agent-farm/utils/server-utils.ts`) requires the shared local key (`~/.agent-farm/local-key`), sent as the `codev-tower-key` HTTP header or a `Sec-WebSocket-Protocol` subprotocol, and fails closed with 401 (the server also accepts the legacy `codev-web-key` header for one release). Any new Tower route must decide public-vs-keyed — a wrong allowlist entry either breaks a pre-auth path (health/version probes, the served HTML shells + static assets, the cloud OAuth callback redirect) or exposes a data route. The key is delivered to browser shells via same-origin serve-time injection; those shell responses omit `Access-Control-Allow-Origin` so the injected key is not cross-origin readable. **One ambient exception (Issue #1869):** the `/ide` prefix also accepts the `codev-ide-session` cookie (`HMAC(localKey, purpose)`, HttpOnly, SameSite=Strict, Path=/ide), minted by the key-gated `POST /api/ide/session`. It is decided only in `decideForwardAuthorization` (Host, then key header, then cookie), and the cookie branch refuses requests whose `Origin` / `Sec-Fetch-Site` show another origin, because ports are not part of a cookie site and WebSockets bypass CORS. Tower must never set `Access-Control-Allow-Credentials`: `isAllowedOrigin` reflects any `localhost:<port>`, so that header would let other local pages read cookie-authorized responses. For a LOCAL request the forward also stamps `x-forwarded-host` = the incoming Host (the IDE server builds the workbench's `remoteAuthority` from it, so without it the workbench dials the IDE port directly and bypasses this seam), strips the IDE server's `vscode-tkn` Set-Cookie and injects the token into the workbench's `vscode-workbench-web-configuration` instead (a cookie is readable by every localhost port), and always replaces any browser-held `vscode-tkn` with the token file's value; the token is regenerated on every IDE server spawn, never on adopt. Client-supplied `x-forwarded-*` never reach the IDE server. For a TUNNEL-borne request the server's `vscode-tkn` Set-Cookie is relayed scoped to `Path=/t/<tower-name>/ide` (Issue #1914), so towers sharing the cloud origin cannot overwrite each other's cookie; with no usable public authority it is stripped. Path keeps cookies apart, it is not an isolation boundary.
 
 10. **Terminal dimensions must be earned, not assumed**: `PtySession` tracks *requested* dims separately from *applied* dims, and commits `cols`/`rows` — and re-wraps the render gate's classification mirror — only after the resize is confirmed to have reached the process. A resize that the shellper drops leaves Tower's dims where they were and sets an *outstanding* flag; the REST resize routes answer **409 `RESIZE_DROPPED`** (404 stays reserved for an unknown session id) rather than 200-echoing the requested dims. On attach, the shellper's WELCOME geometry wins over Tower's belief. This is load-bearing for `afx send`: the render gate classifies a headless mirror of the screen, and its verdict is only meaningful if that mirror wraps text the way the real TUI does — on a committed 139x63 fixture, classifying at 135 or 131 columns yields `busy:no-region-end`, a hold that never clears. Never assign dims before confirming the resize landed, and never discard the boolean that says it did not.
 
@@ -228,7 +228,7 @@ A Tower↔shellper connection that dies **unexpectedly** (post-handshake socket 
 
 **Clients never see the shellper's REPLAY frame** — a system-shape surprise worth internalising before touching replay. The intuitive model is `shellper → client`, and #1205's own issue body proposed putting a terminal-state emulator "inside the shellper" on that basis. The actual path is `shellper --REPLAY--> Tower (seeds ring + screen mirror) --snapshot/lines--> client`. The shellper's replay is used *only* to seed Tower's per-session state at adoption: the ring buffer gets the `capRingSeed` 1 MiB tail, the `SessionScreen` mirror gets the full (≤8 MB) replay. This is why the O(screen) reconnect emulator (PIR #1354) lives Tower-side — a shellper-side one would deliver nothing to any client. Anything intended to change what a *viewer* sees on reconnect has to change Tower's replay representation, not (only) the shellper's.
 
-**Viewer attach serves the mirror's serialized snapshot, not the raw ring** (PIR #1354). Both the VSCode adapter and the web dashboard attach via `tower-websocket.ts` (and the standalone `TerminalManager` server via the same shared routing, `attach-replay.ts`): a fresh attach — and a resume of a session whose mirror is in the *alternate* buffer, the case a line-delta cannot serve — receives `SessionScreen.serialize()` (screen + both buffers + bounded scrollback, typically KBs regardless of session age), produced under `PtySession.replaySnapshot()`'s flush-until-quiescent `bytesWritten` token loop; the client is attached in the same microtask as the token re-check, so every output byte lands in exactly one of snapshot or live stream. A resume on a *normal*-buffer session keeps the raw `getSince()` line-delta (correct and minimal for scrolling shells). Any snapshot failure falls back to the capped raw-ring replay plus client nudge — never worse than pre-#1354 — and logs `replay-snapshot-fallback session=<id> reason=<no-mirror|flush-timeout|serialize-error|empty-snapshot>` (WARN for desync reasons, INFO for the routine no-mirror case), the field signal for emulation desync.
+**Viewer attach serves the mirror's serialized snapshot, not the raw ring** (PIR #1354). Both the VSCode adapter and the web dashboard attach via `tower-websocket.ts` (and the standalone `TerminalManager` server via the same shared routing, `attach-replay.ts`): a fresh attach — and a resume of a session whose mirror is in the *alternate* buffer, the case a line-delta cannot serve — receives `SessionScreen.serialize()` (screen + both buffers + bounded scrollback, typically KBs regardless of session age), produced under `PtySession.replaySnapshot()`'s flush-until-quiescent `bytesWritten` token loop; the client is attached in the same microtask as the token re-check, so every output byte lands in exactly one of snapshot or live stream. A resume on a *normal*-buffer session keeps the raw `getSince()` line-delta (correct and minimal for scrolling shells). Any snapshot failure falls back to the capped raw-ring replay plus client nudge — never worse than pre-#1354 — and logs `replay-snapshot-fallback session=<id> reason=<no-mirror|flush-timeout|serialize-error|empty-snapshot>` (WARN for desync reasons, INFO for the routine no-mirror case), the field signal for emulation desync. `@xterm/addon-serialize` writes the buffers, the cursor position and most modes but **not cursor visibility (DECTCEM)**; `serialize()` appends `?25l`/`?25h` from the mirror (#1917, via the private `_core.coreService.isCursorHidden`, pinned by a test). Without it, every attach re-showed a cursor the app had hidden, at whatever position it was parked in. An empty addon payload is passed through unchanged so the `empty-snapshot` canary still fires. The guarantee covers the snapshot route only: a normal-buffer delta resume ships raw ring lines and carries DECTCEM only if the toggle falls inside the resume window, and a mirror seeded after a Tower restart reports the cursor visible if the app hid it before the replay tail began (both pre-existing; they self-heal on the next toggle). Cursor style (DECSCUSR) is not serialized either. Anything else a viewer must see after a reconnect has to be checked against what the addon actually serializes.
 
 **Invariants**: (1) never tear down a terminal's registry/DB state (socket unlink, `deleteTerminalSession`) on a raw socket close without first checking whether the shellper process is alive — the close path's cleanup is destructive, and the shellper protocol exists precisely so a lost connection can be re-established; (2) `removeDeadSession` never unlinks the socket of a still-live shellper process — an unlinked socket makes a live shellper unreachable *and* flags it for `killOrphanedShellpers`' kill path, converting a connect failure into a killed conversation; (3) the shellper never emits a frame larger than `MAX_FRAME_SIZE`. Relatedly, `towerStop` polls until the SIGTERMed process exits (SIGKILL after 8s) so `afx tower stop && afx tower start` cannot overlap the old Tower's teardown with the new Tower's adoption pass, and both adoption call sites use `waitForReplay()` rather than reading replay data synchronously (the REPLAY frame usually arrives in a later socket read than WELCOME).
 
@@ -439,6 +439,8 @@ const baseEnv = {
   LANG: process.env.LANG ?? 'en_US.UTF-8',  // Required for Unicode rendering
 };
 ```
+
+`TERM` is enforced at the spawn chokepoint, not left to callers (#1920): `withPtyTerminalType()` (`lib/agent-env.ts`) overwrites `TERM` with `PTY_TERMINAL_TYPE` (`xterm-256color`) in the shellper config, both shellper relaunch `SPAWN` frames, and the non-shellper `PtySession.spawn`. node-pty derives `TERM` from its `name` only on POSIX; on Windows a ConPTY child sees only the env's `TERM`, and claude with no Unicode signal (`TERM=xterm-256color`, `WT_SESSION`, `TERM_PROGRAM`, …) draws ASCII fallbacks — a `>` composer marker followed by U+00A0. The claude gate profile accepts that marker too (`CLAUDE_COMPOSER_MARKER` in `gate-profiles.ts`: `❯`/`›`, or `>` followed by a space, NBSP or end of line), so sessions already drawn in fallback mode still deliver. codex keeps the strict `COMPOSER_MARKER`.
 
 **Ring Buffer**: Each session maintains a 1000-line ring buffer with monotonic sequence numbers for reconnection replay. On WebSocket connect, the server replays the full buffer. Non-browser clients can send an `X-Session-Resume` header with their last sequence number to receive only missed data (browsers cannot set custom WebSocket headers).
 
@@ -918,12 +920,12 @@ packages/codev/dashboard/
 **Decisions View** (Spec 1819):
 - A view of the workspace's pending-decisions file (`dashboard.decisionsFile`, workspace-relative, default `codev/state/pending-decisions.md`) that writes the owner's word back into it. The file is the only state: no store, no database.
 - Conditional, then sticky tab: `decisionsEnabled` in `DashboardState` (set by `decisionsFilePresent()` in `/api/state`) adds it; `useTabs` keeps it for the page session, so a file deleted while the tab is open shows not-found and any held drafts instead of the tab vanishing. The flag reuses the configured path for up to 5 s (`/api/state` is polled every second); a config error makes it false, is logged once per workspace, and never fails `/api/state`.
-- Routes: `GET /api/decisions` → `{ ok: true, document }` (the parsed `DecisionsDocument`); `POST /api/decisions/rule` with `{ id, fingerprint, word?, comment? }` → the re-parsed document. Both answer refusals as `{ ok: false, code, message }` with a status from `DECISIONS_REFUSAL_STATUS` (400 input, 404 not-found, 409 the file's state, 422 a structure the splice would break, 500 config or I/O). Wire types in `packages/types/src/api.ts`.
+- Routes: `GET /api/decisions` → `{ ok: true, document }` (the parsed `DecisionsDocument`); `POST /api/decisions/rule` with `{ id, fingerprint, word?, comment? }` → the re-parsed document. `GET /api/decisions/image?path=` (#1938) → the bytes of one image an item references: the only decisions route that takes a path, so it fails closed (relative to the decisions file's directory, `/` = workspace root; the realpath must be inside the workspace; png/jpg/jpeg/gif/webp/svg on both the link and its target; at most 10 MB; `nosniff` and a sandbox CSP). All answer refusals as `{ ok: false, code, message }` with a status from `DECISIONS_REFUSAL_STATUS` (400 input, 404 not-found, 409 the file's state, 413/415 an image too large or not an image, 422 a structure the splice would break, 500 config or I/O). Wire types in `packages/types/src/api.ts`.
 - Server-side parsing (`servers/decisions/`): `grammar.ts` (a CommonMark subset: ATX headings and fences), `parse.ts` (items, options, the Q&A thread, the current ruling, a per-item SHA-256 fingerprint), `stamp.ts` (item timestamps to instants by `Intl` offset probing; ambiguous abbreviations and DST gaps/folds stay unconverted), `splice.ts` (pure: inserts the word and comment on the lines after `**Your word:**`, refuses anything else, and re-parses to verify).
 - Writes (`file.ts`): the path is canonicalized (symlinks followed) on every read and write and refused outside the workspace; one `KeyedSerializer` per canonical path, so of two concurrent submits to an item the second refuses as already ruled; the file is replaced atomically by an fsynced temporary file renamed over it, keeping its mode and any symlink.
 - Hub notice (#1828): after a write succeeds and its response is sent, the route calls a `notify` port with `rulingNotice()` (`notice.ts`: `RULED <id>: <word>` or `QUESTION <id>:`, then the comment). `notifyHubOfRuling` in `tower-routes.ts` requires an architect registered as `main` — no fallback, since the registry's "first registered" order is by name (#1633) — so an offline `main` holds `no-live-pty` and a workspace without one is logged and skipped; it refuses a notice over `MAX_MESSAGE_BYTES`, enqueues one mailbox row (`from_agent` `DECISIONS_TAB_SENDER` from codev-types, which `formatMessageForTarget` frames as `[USER via Decisions tab]`), runs the gated delivery and logs its outcome. Best-effort: a failure is logged, never returned; `handleRequest`'s catch skips its 500 once headers are sent.
 - Race-safe polling (`useDecisions(isActive)`): a 2 s poll only while the tab is active and the page visible, skipping a tick while a fetch is in flight; a generation counter, bumped by each fetch and by `applyDocument` (a write's returned document), drops stale responses, so an old poll cannot overwrite a newer document.
-- `DecisionsView` keeps drafts by item id, reconciled against every document; a draft whose item stops being writable (ruled elsewhere, moved out of `## Open`, duplicated, file gone) is held, copyable, until discarded. Bodies render through `MarkdownView` from `@cluesmith/codev-artifact-canvas`; only literal `http(s)` links open, in a new tab, and other links are inert.
+- `DecisionsView` keeps drafts by item id, reconciled against every document; a draft whose item stops being writable (ruled elsewhere, moved out of `## Open`, duplicated, file gone) is held, copyable, until discarded. Bodies render through `renderMarkdown` from `@cluesmith/codev-artifact-canvas`; only literal `http(s)` links open, in a new tab, and other links are inert. Every image source that is not `http(s)` is parked in `data-decisions-src` in an inert document before the HTML reaches the page, so the browser never requests a workspace path itself; the view fetches it with the key, shows it as an object URL (revoked on cleanup), and shows a not-loaded note for a refusal or any other scheme (#1938). A click opens a workspace image on a page holding only an `<img>` of it, so an SVG never runs as a document of the dashboard's origin.
 
 **Responsive Design**:
 - Desktop (>768px): Split-pane layout with file browser sidebar
@@ -1017,6 +1019,98 @@ git worktree prune
 ```
 
 This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups.
+
+### Platform Layer (Spec 1658)
+
+Native Windows runs behind one seam, so POSIX behavior stays byte-identical and the Windows
+branches are testable on macOS/Linux.
+
+- **Seam**: `lib/platform.ts` (`hostPlatform()`, `isWindows()`). Runtime Windows branches ask it,
+  never `process.platform`. Tests force it per test with `forceHostPlatform()` or per `describe`
+  with `useHostPlatform()` (`src/__tests__/helpers/host-platform.ts`, both reset when the test
+  finishes) and inject exec/fs. Real-Windows behavior is covered by the on-demand `windows.yml`
+  workflow (dispatch only, never required).
+- **Capabilities** (Spec 1658 Amendment 2): shared code does not branch on the platform; it asks a
+  capability, each an interface in `lib/platform/<capability>.ts` with an implementation of the
+  same name in `lib/platform/posix/` and `lib/platform/windows/`, and one accessor that picks by
+  the seam:
+  `commandLaunch()` (shell strings, scripts, bare-command spawns, which-probes, the terminal
+  profile), `hostPaths()` (workspace canonicalization and keys, separators, builder-worktree
+  matchers), `processes()` (census, start times, listening ports, session-tree teardown),
+  `shellperTransport()` (endpoint, per-session secret, the reconnect gate, how a shellper's
+  command line reads).
+  The POSIX implementations are the pre-refactor macOS/Linux code, moved verbatim; site-specific
+  POSIX forms are passed in by the caller rather than unified. The Windows implementations are
+  adapters over the Windows modules below, which never import an accessor (no cycles). Existing
+  entry points (`listProcessCensus`, `killSessionTree`, `workspaceKey`, `expandHomePath`, ...)
+  keep their names and delegate. A platform branch that has one call site stays a plain
+  `isWindows()` one-off (doctor sections, install checks, Tower start/stop, worktree links).
+- **Layout** (Amendment 3): platform-specific code lives in a `posix/` or `windows/` folder of
+  its own layer: `lib/platform/{posix,windows}/` for mechanism, `agent-farm/commands/windows/`
+  for Tower's Windows start/stop (`tower-lifecycle.ts`). Everything outside those folders is
+  shared. `lib/` does not import `agent-farm/`, except the older `lib/config.ts`
+  (`validateCustomHarnessConfig`, a known residual).
+- **Endpoint**: chosen by `shellperTransport()`; `terminal/shellper-endpoint.ts` holds the
+  helpers that branch on the endpoint's form. POSIX: Unix socket `shellper-<id>.sock` (0600),
+  reconnect gated on the start time and the socket file. Windows: named pipe
+  `\\.\pipe\codev-shellper-<user>-<uuid>`, every connection gated on a per-session secret
+  (other users can open a pipe by name), reconnect identity proven by the WELCOME.
+- **Process tree**: `lib/process-tree.ts` `killSessionTree` / `waitForTreeExit` replace
+  `process.kill(-pid)` (through `processes()`). Windows (`lib/platform/windows/process-tree.ts`): a
+  fresh census snapshot (`windows/process-census.ts`, CIM via PowerShell; other callers share a
+  short-TTL cached, coalesced read), then the session's Job Object (`windows/job-objects.ts`, one
+  in-memory PowerShell helper per Tower, never KILL_ON_JOB_CLOSE), then `taskkill /T /F`, then the
+  recorded survivors. Session jobs allow no breakaway (#1915, reversing Spec 1658 Phase 3b ruling
+  (c)): the MSYS runtime breaks every native program Git Bash starts out of a job that allows it,
+  which left the agent and all its tool-call processes outside their session's job. Without it they
+  stay in, so ending the job ends the whole agent tree, as a process group does on POSIX.
+  Because nothing can leave a session job, Tower refuses to run inside any (it checks the job of
+  every live shellper at boot); `afx tower start` creates it outside through CIM.
+  `servers/architect-session-holder.ts` keeps its own `ps` listing on POSIX rather than the census,
+  so its entries carry a creation time, and its pre-reap PID-reuse check runs, on Windows only.
+- **Console windows** (#1919): Tower started by `afx tower start` is `detached` (DETACHED_PROCESS),
+  so it has no console, and an unhidden console child (`git`, `gh`, `ps`, a cron command) gets a
+  visible window of its own. Every spawn reachable from Tower, `afx spawn` / `afx tower`, and the
+  VS Code extension host passes `windowsHide: true` (Node ignores it off Windows), or carries a
+  `// windows-console: <reason>` comment on the line above when it can never run on Windows.
+  `src/__tests__/windows-console-spawn-guard.test.ts` walks those import graphs and enforces it.
+  The extension spawns `afx` / `codev` / `porch` through `cli-process.ts` (`spawnCodevCli`,
+  `execCodevCli`), which resolve `.cmd` shims and hide the window. A Tower started from inside a
+  codev session (the CIM launch path) has a hidden console, so it does not show the flash.
+  A hidden child has no console anyone can see, so it can never prompt: anything that might
+  prompt (a `git fetch` / `git push` needing credentials) must be made non-interactive and fail
+  instead, as `GitRefResolver`'s fetch (`GIT_TERMINAL_PROMPT=0`, a timeout) and porch's status
+  push now are.
+- **Process bootstrap and current-folder lookup** (#1911): every Codev process entry point (each
+  `bin/*.js`, `tower-server.ts`, `shellper-main.ts`) imports `lib/process-bootstrap.ts` as its
+  FIRST import; `process-bootstrap.test.ts` enforces it. Its one step today, on Windows, sets
+  `NoDefaultCurrentDirectoryInExePath=1` (`lib/platform/windows/exe-search.ts`), so a bare-name
+  spawn (`git`, `npm`) never resolves to a same-named file in the cwd (libuv and `cmd.exe` both
+  honor it; node-pty already searches `PATH` only). Children inherit it: every persistent
+  terminal Tower opens (architect, builder, shell tab) is built from Tower's own environment, and
+  the non-persistent fallback's `windowsPtyBaseEnv` allowlist sets it explicitly, so every
+  terminal carries it: in a `cmd.exe` terminal a current-folder program runs only as `.\name`.
+  The VS Code extension host is shared, so it does not set the variable; `cli-process.ts`
+  refuses an unresolved bare `codev`/`afx` name instead.
+- **Resolvers**: `lib/platform/windows/git-bash.ts` (Git Bash: override, then install paths, then `PATH`; never the
+  System32 WSL launcher), `codev-sdk/node/executable` (`findExecutable` with `PATHEXT`,
+  `resolveSpawnable` turns `.cmd` shims into `node <entry>` or `%COMSPEC% /d /s /c`),
+  `windows/git-bash-launch.ts` (every Windows plumbing launch site routes through it),
+  `lib/host-executable.ts` (host `which` and shell-free spawn form), `windows/msys-path.ts` (path
+  translation across the Git Bash boundary), `lib/host-paths.ts`, and
+  `agent-farm/lib/worktree-links.ts` (symlink, else junction / hard link / copy).
+- **Install**: Windows Node needs a better-sqlite3 prebuild (Node 22 is the supported, tested version); a
+  preinstall gate fails other versions with that message instead of a node-gyp build. `engines.node` is `>=22` (#1944).
+- **Workspace keys** (finding M6): Windows paths are case-insensitive but every workspace key
+  (Tower's registry, `workspace_path` in global.db) is an exact string, and VS Code (`c:\`) and
+  Git Bash (`C:\`) spell one directory differently. Invariant: every raw workspace path that
+  keys anything goes through `workspaceKey()` (`agent-farm/utils/workspace-path.ts`: on Windows
+  `realpathSync.native`, upper-case drive, per-process cache; identity on POSIX); every
+  workspace-keyed in-memory collection is a `WorkspaceKeyedMap` (`servers/tower-terminals.ts`),
+  which applies it in its accessors; and on Windows boot Tower collapses stored spellings onto
+  the canonical key (`db/canonicalize-workspace-paths.ts`) without ever deleting a row whose
+  process is still running (liveness is PID-reuse checked against the recorded start time).
+  POSIX is unchanged; macOS case-insensitivity is #1870.
 
 ### Security Model
 
@@ -1137,7 +1231,7 @@ const CONFIG = {
 ### Agent-Farm CLI (TypeScript)
 - **commander.js**: CLI argument parsing and command structure
 - **better-sqlite3**: SQLite database for atomic state management (WAL mode, `synchronous = FULL` — commits fsync before acknowledging, so a committed removal can't be rolled back by OS crash; ~26µs/commit on SSD, acceptable at global.db's lifecycle-event write rate — Issue #1150)
-- **tree-kill**: Process cleanup and termination
+- **Session-tree teardown**: `lib/process-tree.ts` (`killSessionTree`; see Platform Layer), which replaced `tree-kill`
 - **Shellper processes**: Detached Node.js processes for terminal session persistence (Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (Spec 0085)
 - **React 19 + Vite 6**: Dashboard SPA at `apps/web/` (standalone workspace member)
@@ -1162,10 +1256,11 @@ const CONFIG = {
 
 ### Supported Platforms
 - macOS (Darwin)
-- Linux (GNU/Linux)
-- Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
-- Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
-- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions)
+- Linux (GNU/Linux), including WSL 2
+- Native Windows 10/11, x64 and ARM64 (Spec 1658; see Platform Layer)
+- Requires: Node.js 22+ (tested on 22), Bash 4.0+ (Git Bash on Windows), Git 2.5+ (worktree support), standard Unix utilities (plus `jq` on Windows)
+- Native addon: node-pty (compiled during npm install on Linux, may need `npm rebuild node-pty`; prebuilt on Windows)
+- Runtime directory: `~/.codev/run/` for shellper Unix sockets (created automatically with `0700` permissions); Windows uses named pipes
 
 ## Monorepo Structure
 
@@ -1176,7 +1271,7 @@ live in `packages/`; end-user client surfaces live in `apps/`:
 |---------|----------|---------|
 | `packages/codev` | `@cluesmith/codev` | CLI + Tower server (published to npm) |
 | `packages/core` | `@cluesmith/codev-core` | Server-side runtime: local-key issuance, homedir paths (published to npm) |
-| `packages/sdk` | `@cluesmith/codev-sdk` | Client SDK for Tower: TowerClient, workspace encoding, EscapeBuffer, ReconnectPolicy, SSE, pure grouping/naming helpers. Environment-agnostic (browser / Node / React Native): zero runtime deps, injected auth + transport, CI-enforced import boundary. Never imports codev-core (published to npm) |
+| `packages/sdk` | `@cluesmith/codev-sdk` | Client SDK for Tower: TowerClient, workspace encoding, EscapeBuffer, ReconnectPolicy, SSE, pure grouping/naming helpers. Environment-agnostic (browser / Node / React Native): zero runtime deps, injected auth + transport, CI-enforced import boundary. Its `/node` subpaths also host shared Node-side utilities (see the charter below). Never imports codev-core (published to npm) |
 | `packages/types` | `@cluesmith/codev-types` | Shared TypeScript types: WebSocket protocol, API shapes, SSE events (dev dependency only) |
 | `packages/config` | `@cluesmith/codev-config` | Shared tsconfig base (cross-project) |
 | `packages/artifact-canvas` | `@cluesmith/codev-artifact-canvas` | Reusable React surface for rendering/reviewing Codev markdown artifacts |
@@ -1207,6 +1302,14 @@ and `packages/core/src/__tests__/no-sdk-import.test.ts`). The one sanctioned
 duplication: Tower's own reconnect backoff + WS close code live in a private
 copy at `packages/codev/src/agent-farm/lib/reconnect-backoff.ts` because the
 server must not import the client sdk.
+
+**sdk charter (#1658 integration review).** The sdk has two roles. Its environment-agnostic
+graph is the single implementation of how anything talks to Tower. Its `/node` subpaths
+(`./node`, `./node/executable`) hold **small Node-only helpers that the CLI, Tower and the VS Code
+extension all need, even ones unrelated to Tower**: `node` holds local-key auth, and
+`node/executable` holds `PATHEXT` executable and `.cmd` shim resolution. A new shared Node utility lands under a `/node` subpath by this
+decision; it still follows the isolation invariant (no codev-core import, zero runtime deps) and
+never leaks into the environment-agnostic graph.
 
 **Build order:** `pnpm build` from root builds artifact-canvas (consumed by the VS Code extension; zero workspace deps, so no ordering hazard) and then `@cluesmith/codev`, whose own build script first builds its graph-derived workspace-dependency closure via `pnpm --filter "@cluesmith/codev^..." build` (types, sdk, core, apps/web in topological order, then the dashboard copy — Issue #1352, replacing the drift-prone hand-list). The closure guarantees `types/dist` exists, which the VS Code extension's esbuild bundle needs: it resolves the package's runtime `exports.default` (`./dist/index.js`), and a missing `types/dist` breaks the extension build even though tsc and vite resolve it from source via `exports.types` (`./src/index.ts`).
 
@@ -1762,9 +1865,9 @@ The canonical builder loop:
 
 - **`porch next`** — Reads `status.yaml` + filesystem, returns a `PorchNextResponse` with status (`tasks`, `gate_pending`, `complete`, `error`) and an array of `PorchTask` objects (subject, description, sequential flag). No side effects except reading state.
 - **`porch done`** — Signals task completion, runs checks (npm test/build), records reviews, advances state machine.
-- **`porch run`** — Loops `next` → execute → `done` until complete or gate-blocked. Used by strict-mode builders.
 - **`porch status`** — Shows current state and prescriptive next steps.
-- **`porch approve <id> <gate>`** — Human-only gate approval.
+- **`porch skip-phase <id> <plan-phase> --reason "..." --a-human-explicitly-approved-this`** — Drops one unbuilt plan phase from an approved plan (#1900). `plan_phases` is snapshotted into `status.yaml` on entering `implement` and never re-read, so editing the plan changes nothing. The phase becomes `skipped` with its reason; navigation (`isPlanPhaseSettled`) steps over it; skipping the last unsettled phase moves to `review`. The builder runs it after the architect relays a human's decision, same as `porch approve`.
+- **`porch approve <id> <gate> --a-human-explicitly-approved-this`** — Records a human's gate decision. The builder runs it after the architect relays the decision. (`porch run` was removed; strict-mode builders loop `porch next` → execute → `porch done` themselves.)
 
 #### State: `status.yaml`
 
@@ -2024,7 +2127,9 @@ consult -m codex spec 42
   → spawns: codex exec -c experimental_instructions_file=<tmpfile> --full-auto "<query>"
 
 consult -m claude spec 42
-  → spawns: claude --print -p "<role + query>" --dangerously-skip-permissions
+  → spawns: claude -p --output-format stream-json --verbose --tools Read,Glob,Grep
+            --permission-mode dontAsk --setting-sources "" --strict-mcp-config
+            --no-session-persistence --system-prompt-file <0600 role file> --add-dir <sandbox>  (prompt on stdin)
 ```
 
 **Model configuration** (top of `index.ts`):
@@ -2033,7 +2138,7 @@ consult -m claude spec 42
 |-------|-----------|----------------|-------------|
 | gemini | `agy` (Antigravity CLI; resolved real bin, not the IDE symlink) | Folded into the prompt (role + query) | OAuth / subscription (no API key) |
 | codex | `codex` | Temp file via `-c experimental_instructions_file=` flag | `OPENAI_API_KEY` |
-| claude | `claude` | Prepended to query string | `ANTHROPIC_API_KEY` |
+| claude | the installed `claude` CLI (`CODEV_CLAUDE_BIN` pin, else `PATH`; floor 2.1.141, Spec 1912) | Role + claude-lane capability note via `--system-prompt-file` | The CLI's own login (subscription for most). `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` are withheld unless `consult.claudeAuth: "api-key"`: a billing guarantee, not secrecy (the reviewer can still Read the workspace `.env`). Caps: `consult.claudeMaxTurns` (200) and `consult.claudeMaxBudgetUsd` ($25) |
 
 **Query building**: Five subcommands (`pr`, `spec`, `plan`, `impl`, `general`) each build a prompt that includes the spec/plan/diff content plus a verdict template (`VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]`). PR diffs truncated to 50k chars, impl diffs to 80k chars.
 
@@ -2045,9 +2150,7 @@ consult -m claude spec 42
 
 **Consultation feedback flow** (Spec 0395): Consultation concerns and builder responses are captured in the **review document** (`codev/reviews/<project>.md`), not in porch project directories. The builder writes a `## Consultation Feedback` section during the review phase, summarizing each reviewer's concerns with one of three responses: **Addressed** (fixed), **Rebutted** (disagreed), or **N/A** (out of scope). This is prompt-driven — the porch review prompt and review templates instruct the builder to read raw consultation output files and summarize them. Raw consultation files remain ephemeral session artifacts; the review file is the durable record. Specs and plans stay clean as forward-looking documents.
 
-**Claude nesting limitation**: The `claude` CLI detects nested sessions via the `CLAUDECODE` environment variable and refuses to run inside another Claude session. This affects builders (which run inside Claude) trying to run `consult -m claude`. Two mitigation options exist:
-1. **Unset `CLAUDECODE`**: Builder's shellper session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
-2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
+**Claude lane (Spec 1912)**: `consult -m claude` runs the user's installed `claude` CLI, not the Agent SDK (Spec 0103's SDK lane is gone, and so is the dependency). Before the review it runs three local preflights, none of them a model call: binary resolution, `--version` against `CLAUDE_MIN_VERSION`, then `claude auth status --json` with the child's own env. The shared primitives live in `packages/codev/src/lib/claude-cli.ts`, which `codev doctor` reuses. The child env drops every Claude Code session marker (`isClaudeSessionMarker` from `lib/agent-env.ts`), which is how the nested-session guard is handled; consult's own `process.env` is never mutated. Read-only is a session property: `--tools` leaves only Read/Glob/Grep, and the lane fails and kills the child if the stream's `system/init` event lists any other tool. Every failure is loud, with no fallback to the SDK or to an API key. The `[CLAUDE] binary:` and `[CLAUDE] auth:` lines go to stderr, and stdout carries only the review text.
 
 ### 6. Single Canonical Implementation (TypeScript agent-farm)
 **Decision**: Delete all bash architect scripts; TypeScript agent-farm is the single source of truth
@@ -2229,6 +2332,17 @@ workspaces, so no single default makes sense (owner ruling, 2026-10-21, retired 
   only when tunnel-borne.
 - **Management API**: `POST/DELETE/GET /api/ide` (driven by `afx ide start|stop|status`) is
   local-only — blocked from the tunnel like `/api/tunnel/*` because it spawns/kills a process.
+- **Dashboard availability signal (Issue #1914)**: the dashboard never polls `/api/ide`. It reads
+  `ide: { available, viaTunnel }` from `GET /api/status` (`ideAvailability` in `ide-server.ts`, no
+  `lsof`): local = record present (the cookie mint respawns a dead server), tunnel-borne = record
+  present AND the port accepts a connect (no mint over the tunnel). `viaTunnel` comes from Tower's
+  own marker and selects the open path: locally mint then navigate; over the tunnel navigate
+  straight to `./ide/?folder=…`, always relative to `location.href` (never a stored slug), carrying
+  no key or cookie. The public prefix (for the `x-forwarded-prefix` stamp and the cookie
+  Path alike) comes from the relay-stamped inbound `x-forwarded-prefix` on a tunnel-borne request
+  when it matches `^/t/[A-Za-z0-9._-]+/ide$` (it tracks cloud-side renames; the stored `tower_name`
+  does not), else from `tower_name`, which is used only if it matches `^[A-Za-z0-9._-]+$`
+  (`getPublicAuthority`).
 - **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
   pid}`, plus optional `serverVersion`, `extensionsDir`, `sidebarVersion` from Spec 1789; legacy
   records without them still parse, and a retired `defaultFolder` is ignored), the `cloud-config.json` pattern — **no

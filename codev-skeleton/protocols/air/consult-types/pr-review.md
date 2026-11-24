@@ -13,9 +13,9 @@ If the baked decisions themselves contradict each other, do not pick one — `RE
 ## Focus Areas
 
 - **Completeness** — the issue's requirements are implemented and the PR body's review section (summary, key decisions, test plan) is filled out.
-- **Test Status** — all tests pass, coverage is adequate, and any skipped/flaky tests are accounted for.
+- **Test Status** — all tests pass, coverage is adequate, and any flaky pre-existing test is named under Flaky Tests (reported and left running, not skipped).
 - **Code Cleanliness** — no debug code, no stray `TODO`, code properly formatted.
-- **Scope** — the change stays under ~300 LOC and focused on the issue, with no unrelated changes bundled in.
+- **Scope** — the change stays focused on the issue (~300 LOC is a guideline). A small adjacent fix named in the PR body is fine — AIR fixes in place; unrelated refactors are not.
 - **PR Quality** — the PR links to the issue, the body's review section is informative, and the branch is up to date with its base (the integration branch the PR targets).
 
 ## Scope
