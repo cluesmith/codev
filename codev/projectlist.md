@@ -43,6 +43,11 @@ Releases group projects into deployable units with semantic versioning:
 
 ```yaml
 releases:
+  - version: "v3.3.8"
+    name: "Luxor"
+    status: released
+    target_date: "2026-11-24"
+    notes: "Native Windows 11 support without WSL (Spec 1658/PR #1859) and its follow-ups: Windows never runs a program from the current folder (#1911/PR #1948), everything a session starts ends with the session (#1915/PR #1959), no console windows flash (#1919/PR #1932), architect mail after a Tower restart (#1920/PR #1928), one cursor in the dashboard terminal (#1917/PR #1934). Node.js 22 is the minimum and the one tested version; Node.js 20 is no longer supported (#1944/PR #1962). The claude review lane runs on the installed Claude Code (#1912/PR #1913, follow-ups #1941/PR #1942). Open IDE over Codev Cloud (#1914/PR #1931), porch skip-phase (#1900/PR #1908), afx status live phases (#1893/PR #1955), new afx/porch options (#1950/PR #1954), Decisions tab images (#1938/PR #1939), plus terminal, Tower, consult and prompt fixes. Extension republished at 3.3.8 on the Marketplace and Open VSX. Contributors: Amr Elsayed, M Waleed Kadous."
   - version: "v3.3.7"
     name: "Luxor"
     status: released
