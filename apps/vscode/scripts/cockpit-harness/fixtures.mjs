@@ -45,7 +45,13 @@ const DEV_CONFIG = {
  * - `siblings`: architects added after activation through Tower's own add-architect route;
  * - `deactivate`: activate, then deactivate, so Tower lists it as dormant;
  * - `worktree`: merged into the fixture's `.codev/config.json` as its `worktree` block, committed
- *   before any builder branches.
+ *   before any builder branches;
+ * - `decisions`: write the pending-decisions file (`DECISIONS_FILE`) and its image, so the
+ *   Decisions surfaces have an open item to rule on. A workspace without it has no decisions file;
+ * - `forge`: point the PR and issue concepts at fixed JSON (`forgeFixture`), committed with the
+ *   spec, plan and review files those items name, so Work's Needs Attention, Backlog and Recently
+ *   Closed have rows. A workspace without it has no forge (the `gh` concepts fail, as on a
+ *   machine without `gh`).
  *
  * Optional builder fields:
  * - `gate`: a human gate porch has requested (`status: pending` + `requested_at`), so the builder
@@ -75,6 +81,8 @@ export const SCENARIOS = {
         siblings: ['web'],
         architects: ['main', 'web'],
         worktree: DEV_CONFIG,
+        decisions: true,
+        forge: true,
         builders: [
           { project: '101', slug: 'gated-spec', architect: 'main', gate: 'spec-approval', spec: true, changedFile: 'src/feature/alpha.ts' },
           { project: '102', slug: 'second-main', architect: 'main' },
@@ -87,6 +95,113 @@ export const SCENARIOS = {
     ],
   },
 };
+
+/** Where Tower reads a workspace's decisions file when its config names none. */
+export const DECISIONS_FILE = 'codev/state/pending-decisions.md';
+
+/**
+ * Phase 6's decisions file: `main-1` is open and writable, with an image (a workspace path the
+ * Decisions view loads through Tower) and an http(s) link; `web-1` already has a ruling written
+ * under it; `## Ruled` holds one line.
+ */
+export const DECISIONS_DOC = `# Pending owner decisions — all architects (hub: main)
+
+Rule inline: one word on the line under an item's **Your word:** line, or in the Decisions tab.
+Newest first. Only main edits this file; architects send items with \`afx send architect:main 'DECISION …'\`.
+
+_Status: 2 open — main-1, web-1._
+_Zone: UTC_
+
+## Open
+
+### main-1 · 2026-11-20 09:30 UTC · Should the fixture board show builders compact or stacked?
+
+- **Context:** a fixture decision for the cockpit harness.
+- **Options:** (a) \`compact\` = one row per builder (b) \`stacked\` = a card per builder
+- **Links:** https://example.com/fixture/main-1
+
+![Compact board](decision-assets/main-1-compact.svg)
+
+**Your word:** \`compact\` / \`stacked\` / \`hold\`
+
+### web-1 · 2026-11-20 08:00 UTC · Ship the web fixture now?
+
+- **Context:** an item that already has a ruling written under it.
+
+**Your word:** \`ship\` / \`hold\`
+hold
+
+## Ruled
+
+- **main-0** · ruled \`keep\` — the first fixture decision.
+`;
+
+const DECISIONS_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120">
+<rect width="240" height="120" fill="#2b6cb0"/><rect x="16" y="20" width="208" height="16" fill="#bee3f8"/>
+<rect x="16" y="52" width="208" height="16" fill="#bee3f8"/><rect x="16" y="84" width="208" height="16" fill="#bee3f8"/>
+</svg>
+`;
+
+function writeDecisions(dir) {
+  const file = path.join(dir, DECISIONS_FILE);
+  fs.mkdirSync(path.join(path.dirname(file), 'decision-assets'), { recursive: true });
+  fs.writeFileSync(file, DECISIONS_DOC);
+  fs.writeFileSync(path.join(path.dirname(file), 'decision-assets', 'main-1-compact.svg'), DECISIONS_IMAGE);
+}
+
+/**
+ * Phase 6's forge data, as the PR and issue concept commands print it. Times are relative to the
+ * seed, because the overview keeps only issues closed in the last 24 hours.
+ * - PR #301 is human-authored and awaits review: a Needs Attention row with a link.
+ * - Issues #401 (spec and plan written) and #402 (a bug) are the backlog. The builders' issues
+ *   (#101–#103) are open too, and the overview leaves them out of the backlog.
+ * - Issue #399 closed an hour ago, with a review written and merged PR #398 naming it.
+ */
+export function forgeFixture(now = Date.now()) {
+  const iso = (hoursAgo) => new Date(now - hoursAgo * 3_600_000).toISOString();
+  const url = (kind, n) => `https://example.com/fixture/${kind}/${n}`;
+  const issue = (n, title, labels, hoursAgo) => ({ number: n, title, url: url('issues', n), labels: labels.map((name) => ({ name })), createdAt: iso(hoursAgo), author: { login: 'fixture-owner' }, assignees: [] });
+  return {
+    concepts: {
+      'pr-list': [{ number: 301, title: 'Fixture: a human-authored change', url: url('pull', 301), reviewDecision: 'REVIEW_REQUIRED', body: '', createdAt: iso(5), author: { login: 'fixture-human' }, reviewRequests: [], isDraft: false }],
+      'issue-list': [
+        issue(401, 'Fixture backlog feature', ['type:project', 'priority:high'], 72),
+        issue(402, 'Fixture backlog bug', ['type:bug'], 30),
+        issue(101, 'gated-spec', [], 96), issue(102, 'second-main', [], 96), issue(103, 'web-work', [], 96),
+      ],
+      'recently-closed': [{ ...issue(399, 'Fixture closed feature', ['type:project'], 120), closedAt: iso(1) }],
+      'recently-merged': [{ number: 398, title: 'Fixture: close the feature', url: url('pull', 398), reviewDecision: 'APPROVED', body: 'Fixes #399', createdAt: iso(3), mergedAt: iso(1), author: { login: 'fixture-human' }, reviewRequests: [], isDraft: false }],
+    },
+    files: {
+      'codev/specs/401-fixture-backlog.md': '# Spec 401: fixture backlog feature\n\nCockpit-harness fixture spec.\n',
+      'codev/plans/401-fixture-backlog.md': '# Plan 401: fixture backlog feature\n\nCockpit-harness fixture plan.\n',
+      'codev/reviews/399-fixture-closed.md': '# Review 399: fixture closed feature\n\nCockpit-harness fixture review.\n',
+    },
+  };
+}
+
+/** Write the forge fixture's JSON and artifact files, and point the concepts at the JSON. */
+function writeForge(dir) {
+  const { concepts, files } = forgeFixture();
+  const forgeDir = path.join(dir, '.codev', 'forge');
+  fs.mkdirSync(forgeDir, { recursive: true });
+  const forge = {};
+  for (const [concept, data] of Object.entries(concepts)) {
+    const file = path.join(forgeDir, `${concept}.json`);
+    fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+    forge[concept] = `cat '${file}'`;
+  }
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  }
+  const configFile = path.join(dir, '.codev', 'config.json');
+  const config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+  config.forge = forge;
+  fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
+  git(dir, ['add', '.codev/config.json', '.codev/forge', ...Object.keys(files)]);
+  git(dir, ['commit', '-q', '-m', 'fixture: forge data']);
+}
 
 export const roleIdFor = (builder) => `builder-spir-${builder.project}`;
 
@@ -249,6 +364,8 @@ async function seed(scenarioName) {
     const dir = path.join(fixturesDir, ws.name);
     ensureWorkspaceRepo(dir);
     if (ws.worktree) writeWorktreeConfig(dir, ws.worktree);
+    if (ws.forge) writeForge(dir);
+    if (ws.decisions) writeDecisions(dir);
     if (ws.activate) await activate(call, dir);
     for (const name of ws.siblings ?? []) await addSibling(call, dir, name);
     for (const builder of ws.builders) await seedBuilder(call, dir, builder);

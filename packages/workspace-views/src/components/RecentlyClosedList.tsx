@@ -1,10 +1,11 @@
-import type { OverviewRecentlyClosed } from '../lib/api.js';
-import { createFileTab } from '../lib/api.js';
+import type { OverviewRecentlyClosed } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
+import { ArtifactLink } from './ArtifactLink.js';
 
 interface RecentlyClosedListProps {
   items: OverviewRecentlyClosed[];
-  onRefresh?: () => void;
+  /** Open a spec / plan / review file. Without it, the item's artifact links are not shown. */
+  onOpenArtifact?: (path: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -23,29 +24,14 @@ const TYPE_CLASS: Record<string, string> = {
   spike: 'type-tag--spike',
 };
 
-function ArtifactLink({ label, filePath, onRefresh }: { label: string; filePath: string; onRefresh?: () => void }) {
-  return (
-    <button
-      className="backlog-artifact-link"
-      onClick={async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await createFileTab(filePath);
-        onRefresh?.();
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-export function RecentlyClosedList({ items, onRefresh }: RecentlyClosedListProps) {
+export function RecentlyClosedList({ items, onOpenArtifact }: RecentlyClosedListProps) {
   if (items.length === 0) return null;
 
   return (
     <div className="recently-closed-rows">
       {items.map(item => {
-        const hasArtifacts = item.prUrl || item.specPath || item.planPath || item.reviewPath;
+        const hasFiles = !!onOpenArtifact && !!(item.specPath || item.planPath || item.reviewPath);
+        const hasArtifacts = item.prUrl || hasFiles;
         return (
           <div key={item.id} className="recently-closed-row">
             <a className="recently-closed-row-main" href={item.url} target="_blank" rel="noopener noreferrer">
@@ -57,9 +43,9 @@ export function RecentlyClosedList({ items, onRefresh }: RecentlyClosedListProps
             </a>
             {hasArtifacts && (
               <span className="backlog-artifacts">
-                {item.specPath && <ArtifactLink label="spec" filePath={item.specPath} onRefresh={onRefresh} />}
-                {item.planPath && <ArtifactLink label="plan" filePath={item.planPath} onRefresh={onRefresh} />}
-                {item.reviewPath && <ArtifactLink label="review" filePath={item.reviewPath} onRefresh={onRefresh} />}
+                {onOpenArtifact && item.specPath && <ArtifactLink label="spec" filePath={item.specPath} onOpen={onOpenArtifact} />}
+                {onOpenArtifact && item.planPath && <ArtifactLink label="plan" filePath={item.planPath} onOpen={onOpenArtifact} />}
+                {onOpenArtifact && item.reviewPath && <ArtifactLink label="review" filePath={item.reviewPath} onOpen={onOpenArtifact} />}
                 {item.prUrl && (
                   <a
                     className="backlog-artifact-link"

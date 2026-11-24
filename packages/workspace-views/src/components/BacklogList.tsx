@@ -1,10 +1,11 @@
-import type { OverviewBacklogItem } from '../lib/api.js';
-import { createFileTab } from '../lib/api.js';
+import type { OverviewBacklogItem } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
+import { ArtifactLink } from './ArtifactLink.js';
 
 interface BacklogListProps {
   items: OverviewBacklogItem[];
-  onRefresh?: () => void;
+  /** Open a spec / plan / review file. Without it, the item's artifact links are not shown. */
+  onOpenArtifact?: (path: string) => void;
 }
 
 /** Compact age, or '' when the forge supplied no (or an unparseable) date (#1740). */
@@ -33,23 +34,7 @@ const TYPE_CLASS: Record<string, string> = {
   spike: 'type-tag--spike',
 };
 
-function ArtifactLink({ label, filePath, onRefresh }: { label: string; filePath: string; onRefresh?: () => void }) {
-  return (
-    <button
-      className="backlog-artifact-link"
-      onClick={async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await createFileTab(filePath);
-        onRefresh?.();
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-export function BacklogList({ items, onRefresh }: BacklogListProps) {
+export function BacklogList({ items, onOpenArtifact }: BacklogListProps) {
   const visible = items.filter(i => !i.hasBuilder);
 
   if (visible.length === 0) {
@@ -75,11 +60,11 @@ export function BacklogList({ items, onRefresh }: BacklogListProps) {
             </span>
             <span className="backlog-row-age">{timeAgo(item.createdAt)}</span>
           </a>
-          {(item.specPath || item.planPath || item.reviewPath) && (
+          {onOpenArtifact && (item.specPath || item.planPath || item.reviewPath) && (
             <span className="backlog-artifacts">
-              {item.specPath && <ArtifactLink label="spec" filePath={item.specPath} onRefresh={onRefresh} />}
-              {item.planPath && <ArtifactLink label="plan" filePath={item.planPath} onRefresh={onRefresh} />}
-              {item.reviewPath && <ArtifactLink label="review" filePath={item.reviewPath} onRefresh={onRefresh} />}
+              {item.specPath && <ArtifactLink label="spec" filePath={item.specPath} onOpen={onOpenArtifact} />}
+              {item.planPath && <ArtifactLink label="plan" filePath={item.planPath} onOpen={onOpenArtifact} />}
+              {item.reviewPath && <ArtifactLink label="review" filePath={item.reviewPath} onOpen={onOpenArtifact} />}
             </span>
           )}
         </div>

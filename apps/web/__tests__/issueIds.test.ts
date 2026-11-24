@@ -1,21 +1,15 @@
 /**
- * Issue #1740: tracker-key issue ids (Jira/Linear `ENG-123`) on the dashboard.
+ * Issue #1740: tracker-key issue ids (Jira/Linear `ENG-123`) on the dashboard: finding a
+ * builder's terminal tab. (`issueRef` is tested with the Work view in
+ * @cluesmith/codev-workspace-views.)
  */
 
 import { describe, it, expect } from 'vitest';
-import { findBuilderTab, issueRef } from '../src/lib/issueIds.js';
+import { findBuilderTab } from '../src/lib/issueIds.js';
 import type { Builder, OverviewBuilder } from '../src/lib/api.js';
 
 const tab = (id: string, name = id) => ({ id, name } as unknown as Builder);
 const builder = (over: Partial<OverviewBuilder>) => ({ id: 'x', issueId: null, roleId: null, ...over } as OverviewBuilder);
-
-describe('issueRef', () => {
-  it('keeps # for numbers and non-key ids, drops it for a canonical key', () => {
-    expect(issueRef('42')).toBe('#42');
-    expect(issueRef('task-AbCd')).toBe('#task-AbCd');
-    expect(issueRef('ENG-123')).toBe('ENG-123');
-  });
-});
 
 describe('findBuilderTab', () => {
   it('opens a tracker-key builder by its roleId (upper-case key, lower-case terminal id)', () => {

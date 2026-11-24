@@ -125,6 +125,15 @@ before retrying.
   - `alpha` is activated with a sibling architect `web` and a dev config (`devCommand` and two
     `devUrls`). It has three builders: `#101` (spawned by `main`, blocked on spec approval, with a
     committed spec and a changed file), `#102` (`main`) and `#103` (`web`).
+  - `alpha` also has (Phase 6):
+    - a decisions file (`codev/state/pending-decisions.md`): `main-1` open with an SVG image and an
+      http(s) link, `web-1` with a ruling already written, and one `## Ruled` line;
+    - a forge: its `.codev/config.json` points the `pr-list`, `issue-list`, `recently-closed` and
+      `recently-merged` concepts at `cat` of fixed JSON under `.codev/forge/`, committed with the
+      spec, plan and review those items name. Work's Needs Attention gets PR `#301`, Backlog gets
+      `#401` (spec and plan) and `#402` (a bug), and Recently Closed gets `#399` (review, merged PR
+      `#398`). The other workspaces have no forge, so their `gh` concepts fail, as on a machine
+      without `gh`.
   - `beta` has one builder, `#201`.
   - `gamma` has none.
   - `delta` is activated and then deactivated, so it is dormant.
@@ -150,6 +159,7 @@ state, so run them in this order, once per `start`:
 | `windows` | Builder-worktree window, no-workspace window, and Cockpit-only freshness (`#102` requests its gate) |
 | `requests` | Spec scenario 21. Tower request counts in three layouts: the Cockpit alone; the Workspace, Agents and Tower views alone; and both at once (the Cockpit moved to the panel with *View: Move View*, undone with *Reset View Locations*). Each layout asserts what the side bar, secondary side bar and panel show before measuring. Each counts a 60 s idle window plus a 15 s burst (`#103`'s gate and a `codev-config-updated`), started 2 s after a fleet poll tick so no poll tick lands in it. Each runs in a freshly restarted VS Code server (`vscode-restart`), because VS Code keeps a closed window's extension host alive for its reconnection grace period, and those hosts would keep polling the Tower. It fails if the Cockpit alone makes anything the source views do not, if fleet or overview counts differ across layouts, if `getWorktreeConfig` runs while idle, if both at once add anything but `getWorktreeConfig`, or if a window opens more than one event stream |
 | `actions` | Every builder context action, Approve Gate inline (it relays to the spawning architect through `/api/send`, #1494, so the check asserts that and no porch call), every workspace-row action (Spawn Builder's `afx spawn` checked in the stub log, with its cwd), and Remove Architect: offered on siblings only. A childless sibling, added through Tower, loses its row. A sibling that spawned a builder keeps its header as that builder's owner, as in Agents. Other workspaces' rows navigate; their workspace rows keep Open and Deactivate. It sets #102's and #103's gates back to unrequested first, because `windows` and `requests` request them |
+| `dashboard` | Spec scenario 20, on **its own** `start` + `seed fleet` (it rules `main-1` and opens a shell in `alpha`). The browser dashboard the isolated Tower serves for `alpha`, in headless Chromium, not VS Code. It refreshes the overview first, because Tower caches the forge failure from the extension's activation before the seed. Five checks: Work renders every section with rows; Decisions renders both cards and loads the image as a blob; a link and a full-size image open in a new tab (the link's URL, the image's blob page); a ruling round-trips to the file; and Work's actions (Open, + Shell, an artifact link, an issue link, Refresh) do what they did. It writes `shots/dashboard-snapshot.json`: every element under the two views, with its classes, its own text (ages masked) and its computed colour, type and box. With `COCKPIT_BASELINE=<a snapshot file>` it adds a sixth check that fails on any difference from that snapshot. To compare a change against its base, run once on the base's build, keep the snapshot, then run again on the change's build with `COCKPIT_BASELINE` pointing at it |
 | `reconnect` | **Run last.** A loaded Cockpit keeps its content with Tower down; a fresh window shows *Not connected to Tower*; Tower up + the row's Reconnect restores it. Stops and restarts only the isolated Tower, by PID (`tower-down` / `tower-up`) |
 
 A restarted Tower does not reconnect the fixture sessions: its startup reconciliation skips, and

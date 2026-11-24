@@ -1,7 +1,8 @@
 /**
  * Issue #1740: the tracker-key grammar has one home per package that cannot
- * import another (codev, the VS Code extension, the web dashboard) plus the
- * Jira shell scripts. Sync notes alone have let twins drift in this repo
+ * import another (codev, the VS Code extension, the shared Work view in
+ * @cluesmith/codev-workspace-views that the dashboard renders) plus the Jira
+ * shell scripts. Sync notes alone have let twins drift in this repo
  * before (#1196, #1489), so this test extracts every copy from source and
  * compares it with the codev-side constants.
  */
@@ -31,8 +32,8 @@ describe('issue-key grammar parity (#1740)', () => {
     expect(exportedSource('apps/vscode/src/issue-id.ts', 'CANONICAL_KEY_SOURCE')).toBe(CANONICAL_KEY_SOURCE);
   });
 
-  it('the web dashboard carries the same canonical-key grammar', () => {
-    expect(exportedSource('apps/web/src/lib/issueIds.ts', 'CANONICAL_KEY_SOURCE')).toBe(CANONICAL_KEY_SOURCE);
+  it('the shared Work view (dashboard and VS Code, Spec 1963) carries the same canonical-key grammar', () => {
+    expect(exportedSource('packages/workspace-views/src/lib/issueIds.ts', 'CANONICAL_KEY_SOURCE')).toBe(CANONICAL_KEY_SOURCE);
   });
 
   it('the Jira scripts validate ids with the same grammar', () => {
@@ -49,6 +50,8 @@ describe('issue-key grammar parity (#1740)', () => {
       'apps/vscode/src/views/backlog-filter.ts',
       'apps/vscode/src/commands/open-issue-by-id.ts',
       'apps/web/src/components/WorkView.tsx',
+      'apps/web/src/lib/issueIds.ts',
+      'packages/workspace-views/src/components/WorkView.tsx',
     ]) {
       expect(literal.test(read(rel)), rel).toBe(false);
     }

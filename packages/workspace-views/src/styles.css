@@ -1,0 +1,1083 @@
+/*
+ * @cluesmith/codev-workspace-views: the Work and Decisions views' styles (Spec 1963).
+ *
+ * Moved from the dashboard's index.css. Every colour and font is a `--codev-wv-*` token whose
+ * default is the dashboard's value, so a host that maps nothing gets the dashboard's look. Each host
+ * maps the tokens to its own theme:
+ *
+ * | Token                               | Default                   | Dashboard (index.css)   |
+ * |-------------------------------------|---------------------------|-------------------------|
+ * | Chrome                              |                           |                         |
+ * | --codev-wv-bg                       | #1a1a1a                   | --bg-primary            |
+ * | --codev-wv-bg-secondary             | #252525                   | --bg-secondary          |
+ * | --codev-wv-bg-tertiary              | #2a2a2a                   | --bg-tertiary           |
+ * | --codev-wv-bg-hover                 | #333333                   | --bg-hover              |
+ * | --codev-wv-fg                       | #e0e0e0                   | --text-primary          |
+ * | --codev-wv-fg-secondary             | #a0a0a0                   | --text-secondary        |
+ * | --codev-wv-fg-muted                 | #666666                   | --text-muted            |
+ * | --codev-wv-border                   | #333333                   | --border-color          |
+ * | --codev-wv-accent                   | #3b82f6                   | --accent                |
+ * | --codev-wv-accent-hover             | #2563eb                   | --accent-hover          |
+ * | --codev-wv-accent-tint              | rgba(59, 130, 246, 0.08)  | (its own value)         |
+ * | --codev-wv-accent-tint-hover        | rgba(59, 130, 246, 0.18)  | (its own value)         |
+ * | --codev-wv-accent-tint-border       | rgba(59, 130, 246, 0.2)   | (its own value)         |
+ * | --codev-wv-link                     | #60a5fa                   | (its own value)         |
+ * | --codev-wv-font-family              | the system UI stack       | (its own value)         |
+ * | --codev-wv-font-mono                | monospace                 | (its own value)         |
+ * | Status                              |                           |                         |
+ * | --codev-wv-status-active            | #22c55e                   | --status-active         |
+ * | --codev-wv-status-waiting           | #eab308                   | --status-waiting        |
+ * | --codev-wv-status-error             | #ef4444                   | --status-error          |
+ * | --codev-wv-status-implementing      | #f97316                   | --status-implementing   |
+ * | --codev-wv-status-waiting-tint      | rgba(234, 179, 8, 0.1)    | (its own value)         |
+ * | --codev-wv-status-error-tint        | rgba(239, 68, 68, 0.1)    | (its own value)         |
+ * | --codev-wv-tag-bug-bg               | rgba(239, 68, 68, 0.15)   | (its own value)         |
+ * | --codev-wv-tag-project              | #a855f7                   | (its own value)         |
+ * | --codev-wv-tag-project-bg           | rgba(168, 85, 247, 0.12)  | (its own value)         |
+ * | --codev-wv-tag-spike                | #0ea5e9                   | (its own value)         |
+ * | --codev-wv-tag-spike-bg             | rgba(14, 165, 233, 0.12)  | (its own value)         |
+ *
+ * The VS Code host maps them to `--vscode-*` theme colours in its webview stylesheet.
+ */
+
+/* ==========================================================================
+   Work View (Spec 0126 Phase 5)
+   ========================================================================== */
+
+.work-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.work-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.work-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.work-title {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--codev-wv-fg, #e0e0e0);
+}
+
+.work-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.work-btn {
+  background: var(--codev-wv-accent, #3b82f6);
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.work-btn:hover {
+  background: var(--codev-wv-accent-hover, #2563eb);
+}
+
+.work-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--codev-wv-border, #333333);
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+}
+
+.work-btn-secondary:hover {
+  background: var(--codev-wv-bg-hover, #333333);
+  color: var(--codev-wv-fg, #e0e0e0);
+}
+
+
+/* Work sections */
+.work-section {
+  margin-bottom: 20px;
+}
+
+.work-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.work-empty {
+  color: var(--codev-wv-fg-muted, #666666);
+  font-style: italic;
+  font-size: 14px;
+  padding: 8px 0;
+}
+
+.work-unavailable {
+  color: var(--codev-wv-status-waiting, #eab308);
+  font-size: 14px;
+  padding: 8px 0;
+}
+
+.work-error {
+  color: var(--codev-wv-status-error, #ef4444);
+  font-size: 14px;
+  padding: 8px;
+  margin-bottom: 12px;
+  background: var(--codev-wv-status-error-tint, rgba(239, 68, 68, 0.1));
+  border-radius: 4px;
+}
+
+.work-loading {
+  color: var(--codev-wv-fg-muted, #666666);
+  padding: 16px;
+}
+
+/* Builder rows */
+/* Builder table layout (Bugfix #388) */
+.builder-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+}
+
+.builder-table thead th {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  text-align: left;
+  padding: 0 10px 4px;
+  white-space: nowrap;
+}
+
+.builder-row td {
+  background: var(--codev-wv-bg-secondary, #252525);
+  padding: 8px 10px;
+  font-size: 16px;
+  border-top: 1px solid var(--codev-wv-border, #333333);
+  border-bottom: 1px solid var(--codev-wv-border, #333333);
+}
+
+.builder-row td:first-child {
+  border-left: 1px solid var(--codev-wv-border, #333333);
+  border-radius: 8px 0 0 8px;
+}
+
+.builder-row td:last-child {
+  border-right: 1px solid var(--codev-wv-border, #333333);
+  border-radius: 0 8px 8px 0;
+}
+
+.builder-row:hover td {
+  border-color: var(--codev-wv-accent, #3b82f6);
+}
+
+.builder-row--blocked td:first-child {
+  border-left: 3px solid var(--codev-wv-status-waiting, #eab308);
+}
+
+.builder-col-id {
+  font-weight: 500;
+  color: var(--codev-wv-accent, #3b82f6);
+  white-space: nowrap;
+  /* Spec 823: `min-width` instead of `width` so the cell grows naturally when
+     the attribution span renders (` · <architect-name>`) at N>1 architects.
+     At N=1, the cell renders identically to the prior 60px-wide layout. */
+  min-width: 60px;
+}
+
+/* Spec 823: inline attribution tag for builder spawning architect. Rendered
+   only at architectCount > 1 (locked to baked decision 2b — separator + name,
+   no "spawned by" prefix). The full prefix lives in the `title` hover-tooltip. */
+.builder-attribution {
+  font-size: 0.9em;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  font-weight: normal;
+}
+
+.builder-col-title {
+  color: var(--codev-wv-fg, #e0e0e0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
+  width: 40%;
+}
+
+.builder-col-state {
+  white-space: nowrap;
+  width: 140px;
+}
+
+.builder-state-active {
+  font-size: 14px;
+  color: var(--codev-wv-accent, #3b82f6);
+}
+
+.builder-state-blocked {
+  font-size: 14px;
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+/* Spec 1595: a long permission summary is cut with an ellipsis; the full text is the title. */
+.builder-state-needs-input {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+/* Spec 1595: an exited agent reads distinctly from the waits (SC7). */
+.builder-state-dead {
+  font-size: 14px;
+  color: var(--codev-wv-status-error, #ef4444);
+}
+
+.builder-row--dead td:first-child {
+  border-left: 3px solid var(--codev-wv-status-error, #ef4444);
+}
+
+.builder-col-progress {
+  width: 120px;
+  white-space: nowrap;
+}
+
+.progress-bar {
+  width: 80px;
+  height: 4px;
+  background: var(--codev-wv-bg-tertiary, #2a2a2a);
+  border-radius: 2px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--codev-wv-status-active, #22c55e);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-fill--blocked {
+  background: var(--codev-wv-status-waiting, #eab308);
+}
+
+.progress-pct {
+  font-size: 13px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.builder-col-elapsed {
+  font-size: 14px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  white-space: nowrap;
+  width: 70px;
+}
+
+.builder-col-actions {
+  width: 60px;
+  text-align: right;
+}
+
+.builder-row-open {
+  font-size: 13px;
+  color: var(--codev-wv-accent, #3b82f6);
+  background: var(--codev-wv-accent-tint, rgba(59, 130, 246, 0.08));
+  border: 1px solid var(--codev-wv-accent-tint-border, rgba(59, 130, 246, 0.2));
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.builder-row-open:hover {
+  background: var(--codev-wv-accent-tint-hover, rgba(59, 130, 246, 0.18));
+}
+
+
+/* Needs Attention rows */
+.attention-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+a.attention-row {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.attention-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--codev-wv-bg-secondary, #252525);
+  border: 1px solid var(--codev-wv-border, #333333);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.attention-row:hover {
+  border-color: var(--codev-wv-accent, #3b82f6);
+}
+
+.attention-row-id {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--codev-wv-accent, #3b82f6);
+  white-space: nowrap;
+}
+
+.attention-row-title {
+  flex: 1;
+  font-size: 16px;
+  color: var(--codev-wv-fg, #e0e0e0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attention-row-kind {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.attention-kind--pr {
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.attention-kind--spec {
+  color: var(--codev-wv-status-error, #ef4444);
+}
+
+.attention-kind--plan {
+  color: var(--codev-wv-status-error, #ef4444);
+}
+
+/* dev-approval — PIR's human gate at the END of the implement phase, where the
+   human reviews the running worktree before the PR exists (#931). Uses the
+   orange "implementing" color so dev-review rows are visually DISTINCT from the
+   red spec/plan design gates and the yellow PR/verify review waits — a 3-tier
+   design → implement → review progression. (Reusing plan's --status-error would
+   leave dev rows indistinguishable from plan rows, which is the very symptom
+   #931 reports.) */
+.attention-kind--dev {
+  color: var(--codev-wv-status-implementing, #f97316);
+}
+
+/* verify-approval — post-merge human gate (#927). Review-style wait, grouped
+   visually with the PR review row rather than the urgent pre-PR error gates. */
+.attention-kind--verify {
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+/* The non-core protocol gates (experiment / maintain / scope / research, #1779) and any
+   unknown gate: one neutral colour rather than four more, so they read as gates without
+   competing with the core spec → plan → dev → PR → verify progression. */
+.attention-kind--other {
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+}
+
+/* Spec 1595: an agent at a prompt waits like a review; an exited agent reads as an error. */
+.attention-kind--needs-input {
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.attention-kind--dead {
+  color: var(--codev-wv-status-error, #ef4444);
+}
+
+.attention-row-age {
+  font-size: 13px;
+  color: var(--codev-wv-fg-muted, #666666);
+  white-space: nowrap;
+}
+
+/* Backlog rows */
+.backlog-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.backlog-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 6px;
+}
+
+.backlog-row:hover {
+  background: var(--codev-wv-bg-secondary, #252525);
+}
+
+.backlog-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.backlog-row-main:hover .backlog-row-title {
+  color: var(--codev-wv-accent, #3b82f6);
+}
+
+.backlog-artifacts {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.backlog-artifact-link {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--codev-wv-border, #333333);
+  background: transparent;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.backlog-artifact-link:hover {
+  background: var(--codev-wv-bg-hover, #333333);
+  color: var(--codev-wv-accent, #3b82f6);
+  border-color: var(--codev-wv-accent, #3b82f6);
+}
+
+.backlog-priority-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.priority-dot--high {
+  background: var(--codev-wv-status-error, #ef4444);
+}
+
+.priority-dot--med {
+  background: var(--codev-wv-status-waiting, #eab308);
+}
+
+.priority-dot--low {
+  background: var(--codev-wv-fg-muted, #666666);
+}
+
+.backlog-row-number {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--codev-wv-accent, #3b82f6);
+  white-space: nowrap;
+}
+
+.backlog-type-tag {
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.type-tag--bug {
+  background: var(--codev-wv-tag-bug-bg, rgba(239, 68, 68, 0.15));
+  color: var(--codev-wv-status-error, #ef4444);
+}
+
+.type-tag--project {
+  background: var(--codev-wv-tag-project-bg, rgba(168, 85, 247, 0.12));
+  color: var(--codev-wv-tag-project, #a855f7);
+}
+
+.type-tag--spike {
+  background: var(--codev-wv-tag-spike-bg, rgba(14, 165, 233, 0.12));
+  color: var(--codev-wv-tag-spike, #0ea5e9);
+}
+
+.backlog-row-title {
+  flex: 1;
+  font-size: 16px;
+  color: var(--codev-wv-fg, #e0e0e0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backlog-row-age {
+  font-size: 13px;
+  color: var(--codev-wv-fg-muted, #666666);
+  white-space: nowrap;
+}
+
+.backlog-row-author,
+.backlog-row-assignees {
+  font-size: 12px;
+  color: var(--codev-wv-fg-muted, #666666);
+  white-space: nowrap;
+}
+
+/* Recently Closed */
+.recently-closed-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recently-closed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  opacity: 0.7;
+}
+
+.recently-closed-row:hover {
+  background: var(--codev-wv-bg-secondary, #252525);
+  opacity: 1;
+}
+
+.recently-closed-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.recently-closed-check {
+  font-size: 13px;
+  color: var(--codev-wv-status-active, #22c55e);
+  flex-shrink: 0;
+}
+
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .work-content {
+    padding: 8px 12px;
+  }
+
+  .work-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .attention-row {
+    flex-wrap: wrap;
+  }
+
+  .builder-table {
+    font-size: 14px;
+  }
+
+  .builder-col-elapsed,
+  .builder-table thead th:nth-child(5) {
+    display: none;
+  }
+
+  .attention-row-title,
+  .backlog-row-title {
+    min-width: 60%;
+  }
+}
+
+/* Decisions Tab (Spec 1819) */
+.decisions-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.decisions-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.decisions-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.decisions-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--codev-wv-fg, #e0e0e0);
+  margin: 0;
+}
+
+.decisions-count {
+  font-size: 12px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  white-space: nowrap;
+}
+
+.decisions-path {
+  font-size: 12px;
+  color: var(--codev-wv-fg-muted, #666666);
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-loading,
+.decisions-empty {
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  font-size: 13px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.decisions-notice,
+.decisions-error {
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-notice {
+  color: var(--codev-wv-status-waiting, #eab308);
+  background: var(--codev-wv-status-waiting-tint, rgba(234, 179, 8, 0.1));
+}
+
+.decisions-error {
+  color: var(--codev-wv-status-error, #ef4444);
+  background: var(--codev-wv-status-error-tint, rgba(239, 68, 68, 0.1));
+}
+
+/* The shared markdown renderer, re-themed to the dashboard. The tokens are declared on the
+   renderer's own root, so the override must target that root, not an ancestor. */
+.decisions-view .codev-artifact-canvas-rendered {
+  --codev-canvas-foreground: var(--codev-wv-fg, #e0e0e0);
+  --codev-canvas-background: transparent;
+  --codev-canvas-accent: var(--codev-wv-accent, #3b82f6);
+  --codev-canvas-border: var(--codev-wv-border, #333333);
+  --codev-canvas-muted: var(--codev-wv-fg-secondary, #a0a0a0);
+  --codev-canvas-code-background: var(--codev-wv-bg-tertiary, #2a2a2a);
+  --codev-canvas-code-foreground: var(--codev-wv-fg, #e0e0e0);
+  --codev-canvas-link: var(--codev-wv-link, #60a5fa);
+  --codev-canvas-font-size: 13px;
+  --codev-canvas-paragraph-spacing: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* An image in an item (#1938) never widens the card and keeps its aspect ratio; a click opens it
+   full size in a new tab. */
+.decisions-view .codev-artifact-canvas-rendered img {
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+  vertical-align: top;
+  cursor: zoom-in;
+}
+
+.decisions-view .codev-artifact-canvas-rendered a img {
+  cursor: pointer;
+}
+
+/* In place of an image that was not loaded: its alt text and its path, never a broken icon. */
+.decisions-image-missing {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px dashed var(--codev-wv-status-waiting, #eab308);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+}
+
+.decisions-image-missing-label {
+  font-weight: 600;
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.decisions-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.decisions-card {
+  background: var(--codev-wv-bg-secondary, #252525);
+  border: 1px solid var(--codev-wv-border, #333333);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.decisions-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  font-size: 12px;
+}
+
+.decisions-item-id {
+  font-family: var(--codev-wv-font-mono, monospace);
+  color: var(--codev-wv-accent, #3b82f6);
+}
+
+.decisions-stamp {
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+}
+
+.decisions-stamp-unconverted {
+  font-family: var(--codev-wv-font-mono, monospace);
+}
+
+.decisions-stamp-flag {
+  display: block;
+  font-family: var(--codev-wv-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  font-size: 11px;
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.decisions-card-question {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--codev-wv-fg, #e0e0e0);
+  margin: 4px 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-card-body {
+  margin-bottom: 8px;
+}
+
+.decisions-section-label {
+  font-size: 10px;
+  color: var(--codev-wv-fg-muted, #666666);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.decisions-thread {
+  list-style: none;
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--codev-wv-border, #333333);
+}
+
+.decisions-thread-entry + .decisions-thread-entry {
+  margin-top: 6px;
+}
+
+.decisions-thread-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.decisions-thread-who {
+  font-weight: 600;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+}
+
+.decisions-thread-answer .decisions-thread-who {
+  color: var(--codev-wv-accent, #3b82f6);
+}
+
+.decisions-thread-time {
+  color: var(--codev-wv-fg-muted, #666666);
+}
+
+.decisions-thread-awaiting {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.decisions-options {
+  margin-bottom: 8px;
+}
+
+.decisions-option-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.decisions-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--codev-wv-fg, #e0e0e0);
+  min-width: 0;
+}
+
+.decisions-option-word {
+  font-family: var(--codev-wv-font-mono, monospace);
+  background: var(--codev-wv-bg-tertiary, #2a2a2a);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* The word and its colon stay together: "raised: raise the limit now". */
+.decisions-option-term {
+  white-space: nowrap;
+}
+
+.decisions-option-desc {
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  overflow-wrap: anywhere;
+}
+
+.decisions-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--codev-wv-status-active, #22c55e);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.decisions-ruling-text {
+  margin: 0;
+  padding: 6px 8px;
+  font-family: var(--codev-wv-font-mono, monospace);
+  font-size: 12px;
+  color: var(--codev-wv-fg, #e0e0e0);
+  background: var(--codev-wv-bg-tertiary, #2a2a2a);
+  border-left: 3px solid var(--codev-wv-accent, #3b82f6);
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.decisions-ruling-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+}
+
+.decisions-form {
+  margin-bottom: 8px;
+}
+
+/* The fieldset is there for the radio group's semantics; it draws no frame of its own. */
+.decisions-form .decisions-options {
+  border: none;
+  margin: 0 0 8px;
+  padding: 0;
+  min-width: 0;
+}
+
+.decisions-form legend {
+  padding: 0;
+}
+
+.decisions-choice {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.decisions-choice input {
+  margin: 0;
+  align-self: center;
+  accent-color: var(--codev-wv-accent, #3b82f6);
+}
+
+.decisions-options:disabled .decisions-choice {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.decisions-link-btn {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.decisions-held-pointer {
+  margin: 8px 0 0;
+}
+
+.decisions-held-pointer .decisions-link-btn {
+  color: inherit;
+  font-size: inherit;
+}
+
+.decisions-comment-label {
+  display: block;
+}
+
+.decisions-comment {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60px;
+  resize: vertical;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--codev-wv-fg, #e0e0e0);
+  background: var(--codev-wv-bg, #1a1a1a);
+  border: 1px solid var(--codev-wv-border, #333333);
+  border-radius: 4px;
+}
+
+.decisions-comment:focus {
+  outline: none;
+  border-color: var(--codev-wv-accent, #3b82f6);
+}
+
+.decisions-comment:read-only {
+  opacity: 0.6;
+}
+
+.decisions-form .decisions-notice,
+.decisions-form .decisions-error {
+  margin: 6px 0 0;
+}
+
+.decisions-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.decisions-submit-btn {
+  padding: 5px 14px;
+  font-size: 13px;
+  background: var(--codev-wv-accent, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.decisions-submit-btn:hover:not(:disabled) {
+  background: var(--codev-wv-accent-hover, #2563eb);
+}
+
+.decisions-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.decisions-held {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.decisions-held-card {
+  border-style: dashed;
+  border-color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.decisions-held-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--codev-wv-status-waiting, #eab308);
+}
+
+.decisions-held-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--codev-wv-fg, #e0e0e0);
+  margin: 4px 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.decisions-held-text {
+  user-select: text;
+}
+
+.decisions-discard-btn {
+  background: transparent;
+  border: 1px solid var(--codev-wv-border, #333333);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  cursor: pointer;
+}
+
+.decisions-discard-btn:hover {
+  background: var(--codev-wv-bg-hover, #333333);
+  color: var(--codev-wv-fg, #e0e0e0);
+}
+
+.decisions-ruled {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--codev-wv-border, #333333);
+}
+
+.decisions-ruled > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--codev-wv-fg-secondary, #a0a0a0);
+  padding: 4px 0;
+}
+
+.decisions-ruled-empty {
+  font-size: 12px;
+  color: var(--codev-wv-fg-muted, #666666);
+}
+
+@media (max-width: 768px) {
+  .decisions-content {
+    padding: 8px 12px;
+  }
+
+  .decisions-card {
+    padding: 8px 10px;
+  }
+
+  /* 16px keeps iOS from zooming the page when the comment box takes focus. */
+  .decisions-comment {
+    font-size: 16px;
+  }
+
+  .decisions-submit-btn {
+    padding: 8px 18px;
+    font-size: 14px;
+  }
+}

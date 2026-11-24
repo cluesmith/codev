@@ -4,6 +4,8 @@ import { App } from './components/App.js';
 // Spec 1819: MarkdownView's theme (selectors scoped to .codev-artifact-canvas*), imported
 // from the entry rather than a component so component tests don't need the built CSS.
 import '@cluesmith/codev-artifact-canvas/default-theme.css';
+// Spec 1963: the Work and Decisions views' styles, themed by the --codev-wv-* tokens index.css maps.
+import '@cluesmith/codev-workspace-views/styles.css';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(

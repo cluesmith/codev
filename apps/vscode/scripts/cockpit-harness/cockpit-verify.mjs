@@ -13,6 +13,8 @@
 //   windows    builder-worktree window, no-workspace window, Cockpit-only freshness
 //   reconnect  Not connected (isolated Tower stopped by PID) → reconnect (started again)
 //   requests   request count: Cockpit alone vs Workspace + Agents + Tower alone (scenario 21)
+//   dashboard  the browser dashboard's Work and Decisions tabs render, act and rule as before
+//              (scenario 20); with --baseline, styles and DOM identical to a run on main's build
 //
 // Every result is recorded in --out as { script, results: [{ name, ok, detail, shots }] }. Any
 // browser request to the owner's port fails the run.
@@ -1315,6 +1317,212 @@ SCRIPTS.requests = async (R, context, page) => {
     if (problems.length) throw new Error(`${problems.join('; ')}: ${JSON.stringify(table)}`);
     return JSON.stringify(table);
   });
+};
+
+// ---------------------------------------------------------------------------------------------
+// Dashboard regression (Phase 6, spec scenario 20): the browser dashboard's Work and Decisions
+// tabs, served by the isolated Tower, render and rule as before. Each run writes a snapshot of
+// every element's computed colours, type and box under the two views; with --baseline (a
+// snapshot from a run on main's build) the run fails on any difference.
+// ---------------------------------------------------------------------------------------------
+
+/** Style properties the snapshot records: colour, type and box model, never content-driven sizes. */
+const SNAPSHOT_PROPS = [
+  'color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+  'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'border-radius',
+  'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-transform',
+  'text-decoration-line', 'white-space', 'padding', 'margin', 'display', 'gap', 'flex-direction', 'align-items',
+  'justify-content', 'position', 'overflow-y', 'opacity', 'cursor', 'box-shadow', 'outline-color',
+];
+
+/** Every element under `root`, in document order: its path, tag, classes, own text (ages masked) and styles. */
+async function styleSnapshot(page, root) {
+  await page.mouse.move(0, 0);
+  return page.evaluate(({ root, props }) => {
+    const top = document.querySelector(root);
+    if (!top) throw new Error(`${root} is not rendered`);
+    const out = [];
+    const walk = (el, at) => {
+      const cs = getComputedStyle(el);
+      const style = {};
+      for (const p of props) style[p] = cs.getPropertyValue(p);
+      const text = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join('')
+        .trim().replace(/\d+[dhm]?(\s+\d+[dhm])?/g, 'N');
+      out.push({ at, tag: el.tagName.toLowerCase(), cls: el.getAttribute('class') ?? '', text, style });
+      [...el.children].forEach((child, i) => walk(child, `${at}>${i}`));
+    };
+    walk(top, root);
+    return out;
+  }, { root, props: SNAPSHOT_PROPS });
+}
+
+/** Differences between two snapshots of one view, as readable lines. */
+function snapshotDiff(name, before, after) {
+  const lines = [];
+  if (before.length !== after.length) lines.push(`${name}: ${before.length} elements before, ${after.length} after`);
+  for (let i = 0; i < Math.min(before.length, after.length); i++) {
+    const [b, a] = [before[i], after[i]];
+    for (const k of ['at', 'tag', 'cls', 'text']) if (b[k] !== a[k]) lines.push(`${name} ${b.at} ${k}: ${JSON.stringify(b[k])} → ${JSON.stringify(a[k])}`);
+    for (const p of SNAPSHOT_PROPS) if (b.style[p] !== a.style[p]) lines.push(`${name} ${b.at} <${b.tag} class="${b.cls}"> ${p}: ${b.style[p]} → ${a.style[p]}`);
+  }
+  return lines;
+}
+
+/** The isolated Tower's dashboard for a fixture workspace. */
+function dashboardUrl(R, ws) {
+  return `http://127.0.0.1:${R.opts['tower-port']}/workspace/${Buffer.from(path.join(R.opts.fixtures, ws)).toString('base64url')}/`;
+}
+
+/** The dashboard's content tab bar (Work, Decisions, builders, files); the architect strip has its own. */
+const CONTENT_TABS = '.tab-bar[aria-label="Content tabs"]';
+
+async function dashboardTab(page, label) {
+  await page.locator(`${CONTENT_TABS} [role="tab"]`, { hasText: label }).first().click();
+}
+
+async function activeDashboardTab(page) {
+  return (await page.locator(`${CONTENT_TABS} .tab-active .tab-label`).textContent())?.trim() ?? '';
+}
+
+async function contentTabLabels(page) {
+  return (await page.locator(`${CONTENT_TABS} .tab-label`).allTextContents()).map((t) => t.trim());
+}
+
+/** Run `action`, wait for the browser tab it opens, and return the URL that tab loaded. */
+async function popupUrl(context, action, timeout = 20_000) {
+  const [popup] = await Promise.all([context.waitForEvent('page', { timeout }), action()]);
+  const url = await waitFor('the new tab to navigate', async () => (popup.url() !== 'about:blank' ? popup.url() : null), 10_000);
+  await popup.close();
+  return url;
+}
+
+SCRIPTS.dashboard = async (R, context, page) => {
+  // Item links point at example.com: answer them here, so no request leaves the machine.
+  await context.route(/^https?:\/\/example\.com\//, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' }));
+  const snapshot = {};
+  const card = (id) => page.locator('.decisions-card', { has: page.locator('.decisions-item-id', { hasText: id }) });
+
+  await R.check('scenario 20: the dashboard Work tab renders', async () => {
+    // The overview Tower computed when VS Code first opened alpha (before the seed wrote its forge
+    // config) is cached with the forge concepts failed: drop it, and wait for one with every list.
+    const ws = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+    await R.tower('POST', `/workspace/${ws}/api/overview/refresh`);
+    await waitFor('alpha\'s overview with its forge lists', async () => {
+      const o = await R.overview('alpha');
+      return !o.errors && o.pendingPRs?.length && o.backlog?.length && o.recentlyClosed?.length;
+    }, 60_000);
+    await page.goto(dashboardUrl(R, 'alpha'));
+    await waitFor('three builder rows', async () => (await page.locator('.work-view .builder-table tbody tr').count()) === 3, 60_000);
+    const problems = [];
+    const ids = await page.locator('.builder-table .builder-col-id').allTextContents();
+    for (const id of ['#101', '#102', '#103']) if (!ids.some((t) => t.startsWith(id))) problems.push(`no builder row ${id}`);
+    if (await page.locator('.builder-table .builder-row-open').count() !== 3) problems.push('not three Open buttons');
+    for (const label of ['+ Shell', 'Refresh']) if (!await page.locator('.work-actions .work-btn', { hasText: label }).count()) problems.push(`no ${label} button`);
+    if (!await page.locator('.work-file-panel .work-file-panel-search').count()) problems.push('no collapsed Files panel with its search box');
+    if (!await page.locator('.work-view .tip-banner').count()) problems.push('no tip banner');
+    const attention = (await page.locator('.attention-rows .attention-row').allTextContents()).join(' | ');
+    if (!/#101.*spec review/.test(attention)) problems.push(`Needs Attention lacks #101's spec review: "${attention}"`);
+    const prRow = page.locator('a.attention-row', { hasText: '#301' });
+    if (await prRow.getAttribute('href').catch(() => null) !== 'https://example.com/fixture/pull/301') problems.push('Needs Attention lacks PR #301 as a link');
+    const backlog = (await page.locator('.backlog-rows .backlog-row').allTextContents()).join(' | ');
+    if (!/#401/.test(backlog) || !/#402/.test(backlog) || /#10[123]/.test(backlog)) problems.push(`Backlog is "${backlog}"`);
+    const b401 = page.locator('.backlog-row', { hasText: '#401' });
+    const artifacts = (await b401.locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(artifacts) !== JSON.stringify(['spec', 'plan'])) problems.push(`#401 offers ${JSON.stringify(artifacts)}`);
+    const closed = page.locator('.recently-closed-row', { hasText: '#399' });
+    const closedLinks = (await closed.locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(closedLinks) !== JSON.stringify(['review', 'PR'])) problems.push(`#399 offers ${JSON.stringify(closedLinks)}`);
+    if (problems.length) throw new Error(problems.join('; '));
+    snapshot.work = await styleSnapshot(page, '.work-view');
+    return { detail: `builders ${ids.join(', ')}; ${snapshot.work.length} elements`, shots: [await R.shot(page, 'work')] };
+  });
+
+  await R.check('scenario 20: the dashboard Decisions tab renders', async () => {
+    await dashboardTab(page, 'Decisions');
+    await waitFor('two decision cards', async () => (await page.locator('.decisions-card').count()) === 2, 30_000);
+    const image = card('main-1').locator('img[alt="Compact board"]');
+    await waitFor('the workspace image to load as an object URL', async () => (await image.getAttribute('src'))?.startsWith('blob:'), 20_000);
+    const problems = [];
+    const words = await card('main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
+    if (JSON.stringify(words) !== JSON.stringify(['compact', 'stacked', 'hold'])) problems.push(`main-1 offers ${JSON.stringify(words)}`);
+    if (!/Written under this item/.test(await card('web-1').textContent())) problems.push('web-1 does not show its written ruling');
+    if (!/2 open/.test(await page.locator('.decisions-count').textContent())) problems.push('the count is not "2 open"');
+    const link = card('main-1').locator('a', { hasText: 'https://example.com/fixture/main-1' });
+    if (await link.getAttribute('target') !== '_blank') problems.push('the http(s) link does not open in a new tab');
+    if (problems.length) throw new Error(problems.join('; '));
+    snapshot.decisions = await styleSnapshot(page, '.decisions-view');
+    return { detail: `main-1 offers ${words.join(' / ')}; image loaded; ${snapshot.decisions.length} elements`, shots: [await R.shot(page, 'decisions')] };
+  });
+
+  await R.check('scenario 20: a Decisions link and image open in a new tab', async () => {
+    const linkUrl = await popupUrl(context, () => card('main-1').locator('a', { hasText: 'https://example.com/fixture/main-1' }).click());
+    if (linkUrl !== 'https://example.com/fixture/main-1') throw new Error(`the link opened ${linkUrl}`);
+    const imageUrl = await popupUrl(context, () => card('main-1').locator('img[alt="Compact board"]').click());
+    if (!imageUrl.startsWith('blob:')) throw new Error(`the image opened ${imageUrl}`);
+    return `link → ${linkUrl}; image → a ${imageUrl.slice(0, 5)} page`;
+  });
+
+  await R.check('scenario 20: a ruling round-trips', async () => {
+    const main1 = card('main-1');
+    await main1.locator('input[type="radio"][value="stacked"]').check();
+    await main1.locator('textarea.decisions-comment').fill('Fixture comment from the dashboard.');
+    const formShot = await R.shot(page, 'decisions-draft');
+    await main1.locator('button.decisions-submit-btn').click();
+    await waitFor('main-1 to show the written ruling', async () => /Written under this item/.test(await main1.textContent()), 20_000);
+    const shown = (await main1.locator('.decisions-ruling-text').textContent()) ?? '';
+    const want = 'stacked\n\nFixture comment from the dashboard.';
+    if (shown !== want) throw new Error(`the card shows ${JSON.stringify(shown)}`);
+    const file = fs.readFileSync(path.join(R.opts.fixtures, 'alpha', 'codev/state/pending-decisions.md'), 'utf-8');
+    if (!file.includes(`**Your word:** \`compact\` / \`stacked\` / \`hold\`\n${want}\n`)) throw new Error('the file does not hold the ruling under main-1');
+    return { detail: 'Submit → Tower wrote the file → the card shows the written ruling', shots: [formShot, await R.shot(page, 'decisions-ruled')] };
+  });
+
+  await R.check('scenario 20: Work actions (Open, + Shell, Refresh, spec link, issue link)', async () => {
+    await dashboardTab(page, 'Work');
+    const problems = [];
+    await page.locator('.builder-row', { hasText: '#102' }).locator('.builder-row-open').click();
+    await page.waitForTimeout(1000);
+    const opened = await activeDashboardTab(page);
+    if (opened !== 'builder-spir-102') problems.push(`Open on #102 selected "${opened}"`);
+
+    await dashboardTab(page, 'Work');
+    const before = await contentTabLabels(page);
+    await page.locator('.work-actions .work-btn', { hasText: '+ Shell' }).click();
+    const shellTab = await waitFor('a new shell tab', async () => {
+      const added = (await contentTabLabels(page)).filter((t) => !before.includes(t));
+      return added.length === 1 ? added[0] : null;
+    }, 20_000).catch(() => { problems.push('+ Shell added no tab'); return null; });
+
+    await dashboardTab(page, 'Work');
+    const beforeSpec = await contentTabLabels(page);
+    await page.locator('.backlog-row', { hasText: '#401' }).locator('.backlog-artifact-link', { hasText: 'spec' }).click();
+    const specTab = await waitFor('a file tab for the spec', async () => {
+      const added = (await contentTabLabels(page)).filter((t) => !beforeSpec.includes(t));
+      return added.length === 1 ? added[0] : null;
+    }, 20_000).catch(() => { problems.push('the #401 spec link added no tab'); return null; });
+    if (specTab && !/401-fixture-backlog/.test(specTab)) problems.push(`the spec link opened "${specTab}"`);
+
+    await dashboardTab(page, 'Work');
+    const issueUrl = await popupUrl(context, () => page.locator('.backlog-row', { hasText: '#402' }).locator('a.backlog-row-main').click());
+    if (issueUrl !== 'https://example.com/fixture/issues/402') problems.push(`the #402 row opened ${issueUrl}`);
+
+    const from = R.towerRequests().length;
+    await page.locator('.work-actions .work-btn', { hasText: 'Refresh' }).click();
+    await page.waitForTimeout(1500);
+    if (!R.towerRequests().slice(from).some((r) => r.method === 'POST' && /\/api\/overview\/refresh$/.test((r.url ?? '').split('?')[0]))) problems.push('Refresh sent no POST …/api/overview/refresh');
+    if (problems.length) throw new Error(problems.join('; '));
+    return `Open → "${opened}"; + Shell → "${shellTab}"; spec → "${specTab}"; #402 → ${issueUrl}; Refresh → POST …/api/overview/refresh`;
+  });
+
+  fs.writeFileSync(path.join(R.opts.shots, 'dashboard-snapshot.json'), `${JSON.stringify(snapshot, null, 1)}\n`);
+  if (R.opts.baseline) {
+    await R.check('scenario 20: computed styles and DOM unchanged from the baseline', async () => {
+      const base = JSON.parse(fs.readFileSync(R.opts.baseline, 'utf-8'));
+      const diff = [...snapshotDiff('work', base.work ?? [], snapshot.work ?? []), ...snapshotDiff('decisions', base.decisions ?? [], snapshot.decisions ?? [])];
+      if (diff.length) throw new Error(`${diff.length} difference(s): ${diff.slice(0, 25).join(' | ')}`);
+      return `work ${snapshot.work.length} and decisions ${snapshot.decisions.length} elements identical to ${path.basename(R.opts.baseline)}`;
+    });
+  }
 };
 
 async function main() {

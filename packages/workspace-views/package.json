@@ -1,0 +1,37 @@
+{
+  "name": "@cluesmith/codev-workspace-views",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The Work and Decisions views, shared by the browser dashboard and the VS Code extension. Each host supplies their I/O through a host adapter and maps their theme tokens.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check-types": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "@cluesmith/codev-artifact-canvas": "workspace:*",
+    "@cluesmith/codev-sdk": "workspace:*",
+    "@cluesmith/codev-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^26.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "catalog:",
+    "vitest": "^4.0.0"
+  },
+  "license": "Apache-2.0"
+}

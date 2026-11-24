@@ -1,20 +1,22 @@
 /**
- * #1938: images in decision items. A workspace path is fetched with the key and shown as an object
- * URL, revoked on cleanup; an http(s) URL is left to the browser; anything else, and any refusal,
- * shows a note in place of the image. The browser itself never requests a workspace path.
+ * #1938: images in decision items. A workspace path is loaded through the host's `image` and shown
+ * as an object URL, revoked on cleanup; an http(s) URL is left to the browser; anything else, and
+ * any refusal, shows a note in place of the image. The browser itself never requests a workspace
+ * path. Clicking a loaded image hands it to the host's `showImage`.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
-import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
 import type { DecisionItem, DecisionsDocument } from '@cluesmith/codev-types';
-import type { DecisionsState } from '../src/hooks/useDecisions.js';
+import type { DecisionImageResult } from '../host.js';
+import type { DecisionsState } from '../hooks/useDecisions.js';
 
 const mockUseDecisions = vi.fn<(isActive: boolean) => { state: DecisionsState; applyDocument: () => void }>();
-vi.mock('../src/hooks/useDecisions.js', () => ({
-  useDecisions: (isActive: boolean) => mockUseDecisions(isActive),
+vi.mock('../hooks/useDecisions.js', () => ({
+  useDecisions: (_read: unknown, isActive: boolean) => mockUseDecisions(isActive),
 }));
 
-import { DecisionsView } from '../src/components/DecisionsView.js';
+import { DecisionsView } from '../components/DecisionsView.js';
+import { fakeDecisionsHost } from './fakeHost.js';
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
@@ -40,36 +42,29 @@ function makeDocument(item: Partial<DecisionItem>, ruledMarkdown = ''): Decision
   };
 }
 
+let host = fakeDecisionsHost();
+
 function show(item: Partial<DecisionItem>, ruledMarkdown = '') {
   mockUseDecisions.mockReturnValue({ state: { status: 'ready', document: makeDocument(item, ruledMarkdown) }, applyDocument: () => {} });
-  return render(<DecisionsView isActive />);
+  return render(<DecisionsView host={host} isActive />);
 }
 
-function imageResponse(): Response {
-  return new Response(PNG, { status: 200, headers: { 'Content-Type': 'image/png' } });
+function imageResult(): DecisionImageResult {
+  return { kind: 'image', blob: new Blob([PNG], { type: 'image/png' }) };
 }
 
-function refusalResponse(status: number, code: string, message: string): Response {
-  return new Response(JSON.stringify({ ok: false, code, message }), { status, headers: { 'Content-Type': 'application/json' } });
-}
-
-/** The `path` each image request asked for, in order. */
+/** The `path` each image load asked the host for, in order. */
 function requestedPaths(): string[] {
-  return fetchMock.mock.calls.map(([url]) => new URL(String(url), 'http://dashboard.test/').searchParams.get('path') ?? '');
+  return host.image.mock.calls.map(([path]) => path);
 }
 
-let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 let createObjectURL: ReturnType<typeof vi.fn<(blob: Blob) => string>>;
 let revokeObjectURL: ReturnType<typeof vi.fn<(url: string) => void>>;
 let nextUrl: number;
 
-type KeyedWindow = Window & { __CODEV_TOWER_KEY__?: string };
-
 beforeEach(() => {
-  // The key as Tower injects it into the dashboard shell.
-  (window as KeyedWindow).__CODEV_TOWER_KEY__ = 'the-key';
-  fetchMock = vi.fn<typeof fetch>(async () => imageResponse());
-  vi.stubGlobal('fetch', fetchMock);
+  host = fakeDecisionsHost();
+  host.image.mockImplementation(async () => imageResult());
   nextUrl = 0;
   createObjectURL = vi.fn(() => `blob:http://dashboard.test/${++nextUrl}`);
   revokeObjectURL = vi.fn();
@@ -80,26 +75,21 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   mockUseDecisions.mockReset();
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  delete (window as KeyedWindow).__CODEV_TOWER_KEY__;
 });
 
 describe('DecisionsView images (#1938)', () => {
-  it('fetches a workspace image with the key and shows it from an object URL', async () => {
-    let respond!: (res: Response) => void;
-    fetchMock.mockReturnValueOnce(new Promise(resolve => { respond = resolve; }));
+  it('loads a workspace image through the host and shows it from an object URL', async () => {
+    let respond!: (result: DecisionImageResult) => void;
+    host.image.mockReturnValueOnce(new Promise(resolve => { respond = resolve; }));
     show({ bodyMarkdown: '![Compact layout](decision-assets/web-4-compact.png)' });
 
-    // Until it loads, the browser has no source to request against the dashboard URL.
+    // Until it loads, the browser has no source to request against the page's URL.
     const image = screen.getByRole('img', { name: 'Compact layout' });
     expect(image).not.toHaveAttribute('src');
     expect(requestedPaths()).toEqual(['decision-assets/web-4-compact.png']);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toMatch(/api\/decisions\/image\?path=decision-assets%2Fweb-4-compact\.png$/);
-    expect(init?.headers).toEqual({ [TOWER_KEY_HEADER]: 'the-key' });
 
-    respond(imageResponse());
+    respond(imageResult());
     await waitFor(() => expect(image).toHaveAttribute('src', 'blob:http://dashboard.test/1'));
     expect(createObjectURL).toHaveBeenCalledOnce();
   });
@@ -139,7 +129,7 @@ describe('DecisionsView images (#1938)', () => {
 
   it('shows a refused image as not loaded: its alt text and its path, with the reason', async () => {
     const reason = 'The image ../../outside.png is outside the workspace, so it was not read.';
-    fetchMock.mockResolvedValueOnce(refusalResponse(400, 'outside-workspace', reason));
+    host.image.mockResolvedValueOnce({ kind: 'not-loaded', message: reason });
     const { container } = show({ bodyMarkdown: '![Escape](../../outside.png)' });
 
     const note = await screen.findByText('Image not loaded');
@@ -149,14 +139,11 @@ describe('DecisionsView images (#1938)', () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['a network failure', () => Promise.reject(new TypeError('Failed to fetch')), 'Could not reach Tower: Failed to fetch'],
-    ['a response that is not an image', () => Promise.resolve(new Response('<html>', { status: 200, headers: { 'Content-Type': 'text/html' } })), 'Unexpected response from Tower (HTTP 200)'],
-  ])('shows %s as not loaded', async (_what, respond, reason) => {
-    fetchMock.mockImplementationOnce(respond);
+  it('shows the reason the host gives for an image it could not load', async () => {
+    host.image.mockResolvedValueOnce({ kind: 'not-loaded', message: 'Could not reach Tower: Failed to fetch' });
     show({ bodyMarkdown: '![Shot](shot.png)' });
     const note = await screen.findByText('Image not loaded');
-    expect(note.parentElement).toHaveAttribute('title', reason);
+    expect(note.parentElement).toHaveAttribute('title', 'Could not reach Tower: Failed to fetch');
   });
 
   it('shows a file the browser cannot decode as not loaded, not as a broken image', async () => {
@@ -172,7 +159,7 @@ describe('DecisionsView images (#1938)', () => {
     const { container } = show({
       bodyMarkdown: '![inline](data:image/png;base64,iVBORw0KGgo=) ![ftp](ftp://example.com/x.png) ![relative](//example.com/x.png)',
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(host.image).not.toHaveBeenCalled();
     expect(container.querySelector('img')).toBeNull();
     const notes = screen.getAllByText('Image not loaded').map(label => label.parentElement?.textContent);
     expect(notes).toEqual([
@@ -185,7 +172,7 @@ describe('DecisionsView images (#1938)', () => {
   it('leaves an http(s) image to the browser, as before', () => {
     show({ bodyMarkdown: '![remote](https://example.com/shot.png)' });
     expect(screen.getByRole('img', { name: 'remote' })).toHaveAttribute('src', 'https://example.com/shot.png');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(host.image).not.toHaveBeenCalled();
   });
 
   it('revokes the object URL when the markdown changes and when the card goes', async () => {
@@ -193,7 +180,7 @@ describe('DecisionsView images (#1938)', () => {
     await waitFor(() => expect(screen.getByRole('img', { name: 'first' })).toHaveAttribute('src', 'blob:http://dashboard.test/1'));
 
     mockUseDecisions.mockReturnValue({ state: { status: 'ready', document: makeDocument({ bodyMarkdown: '![second](second.png)' }) }, applyDocument: () => {} });
-    rerender(<DecisionsView isActive />);
+    rerender(<DecisionsView host={host} isActive />);
     expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:http://dashboard.test/1');
     await waitFor(() => expect(screen.getByRole('img', { name: 'second' })).toHaveAttribute('src', 'blob:http://dashboard.test/2'));
 
@@ -210,66 +197,53 @@ describe('DecisionsView images (#1938)', () => {
 
     // A fresh document with the same item, as each poll or a draft keystroke re-renders the card.
     mockUseDecisions.mockReturnValue({ state: { status: 'ready', document: makeDocument({ bodyMarkdown }) }, applyDocument: () => {} });
-    rerender(<DecisionsView isActive />);
+    rerender(<DecisionsView host={host} isActive />);
     expect(screen.getByRole('img', { name: 'same' })).toHaveAttribute('src', 'blob:http://dashboard.test/1');
     expect(screen.getByText('guide').closest('a')).not.toHaveAttribute('href');
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(host.image).toHaveBeenCalledOnce();
     expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
-  it('abandons a load still in flight when the card goes', async () => {
-    let respond!: (res: Response) => void;
-    fetchMock.mockReturnValueOnce(new Promise(resolve => { respond = resolve; }));
+  it('abandons a load still in flight when the card goes, and ignores its late reply', async () => {
+    let respond!: (result: DecisionImageResult) => void;
+    host.image.mockReturnValueOnce(new Promise(resolve => { respond = resolve; }));
     const { unmount } = show({ bodyMarkdown: '![slow](slow.png)' });
-    const signal = fetchMock.mock.calls[0][1]?.signal;
+    const signal = host.image.mock.calls[0][1];
     unmount();
-    expect(signal?.aborted).toBe(true);
-    respond(imageResponse());
+    expect(signal.aborted).toBe(true);
+    respond(imageResult());
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
   describe('clicking an image', () => {
-    it('opens a loaded workspace image full size on a page that shows it through <img>', async () => {
-      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    it('hands a loaded workspace image to the host to show full size', async () => {
       show({ bodyMarkdown: '![Stacked](stacked.svg)' });
       const image = screen.getByRole('img', { name: 'Stacked' });
       await waitFor(() => expect(image).toHaveAttribute('src', 'blob:http://dashboard.test/1'));
 
       fireEvent.click(image);
-      expect(open).toHaveBeenCalledExactlyOnceWith('blob:http://dashboard.test/2', '_blank', 'noopener');
-      const page = createObjectURL.mock.calls[1][0];
-      expect(page.type).toBe('text/html');
-      // jsdom's Blob has no text().
-      const html = await new Promise<string>(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.readAsText(page);
-      });
-      expect(html).toMatch(/^<!doctype html>/);
-      expect(html).toContain('<img alt="Stacked" src="blob:http://dashboard.test/1">');
+      expect(host.showImage).toHaveBeenCalledExactlyOnceWith({ src: 'blob:http://dashboard.test/1', alt: 'Stacked' });
     });
 
-    it('opens an http(s) image itself', () => {
-      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    it('hands an http(s) image to the host as it is', () => {
       show({ bodyMarkdown: '![remote](https://example.com/shot.png)' });
       fireEvent.click(screen.getByRole('img', { name: 'remote' }));
-      expect(open).toHaveBeenCalledExactlyOnceWith('https://example.com/shot.png', '_blank', 'noopener');
+      expect(host.showImage).toHaveBeenCalledExactlyOnceWith({ src: 'https://example.com/shot.png', alt: 'remote' });
     });
 
     it('follows the link around an image instead', () => {
-      const open = vi.spyOn(window, 'open').mockReturnValue(null);
       show({ bodyMarkdown: '[![remote](https://example.com/shot.png)](https://example.com/page)' });
       fireEvent.click(screen.getByRole('img', { name: 'remote' }));
-      expect(open).toHaveBeenCalledExactlyOnceWith('https://example.com/page', '_blank', 'noopener');
+      expect(host.openExternal).toHaveBeenCalledExactlyOnceWith('https://example.com/page');
+      expect(host.showImage).not.toHaveBeenCalled();
     });
 
     it('does nothing for an image still loading', () => {
-      fetchMock.mockReturnValueOnce(new Promise(() => {}));
-      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      host.image.mockReturnValueOnce(new Promise(() => {}));
       show({ bodyMarkdown: '![pending](pending.png)' });
       fireEvent.click(screen.getByRole('img', { name: 'pending' }));
-      expect(open).not.toHaveBeenCalled();
+      expect(host.showImage).not.toHaveBeenCalled();
     });
   });
 });

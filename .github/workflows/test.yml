@@ -69,6 +69,12 @@ jobs:
         working-directory: packages/artifact-canvas
         run: pnpm test
 
+      # Spec 1963: the shared Work and Decisions views. Source-exported (no build step); its
+      # tests include the import-boundary guard, and check-types covers the tests as well.
+      - name: Type-check and test workspace-views package
+        working-directory: packages/workspace-views
+        run: pnpm check-types && pnpm test
+
       - name: Copy skeleton for unit tests
         working-directory: packages/codev
         run: pnpm copy-skeleton

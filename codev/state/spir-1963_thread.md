@@ -671,3 +671,59 @@ active workspace, including one with no decisions file.
 - A row whose architect is not in the overview roster gets its own context value, with no *Remove
   Architect*.
 - A config fetch that fails while connected holds `null` until the next drop signal.
+
+### Phase 6: workspace_views_package (2026-11-24)
+
+**Shape:** new private package `@cluesmith/codev-workspace-views` (`packages/workspace-views`),
+source-exported (`.` → `src/index.ts`, `./styles.css`), no build step. It holds the Work view (with
+BuilderCard, NeedsAttention, Backlog, RecentlyClosed), the Decisions view, `useDecisions` and the
+issue-key grammar. The dashboard keeps thin wrappers with the same names and props, so `App.tsx` is
+unchanged.
+
+**Host contract (`host.ts`), builder decisions:**
+- `WorkViewHost.overview` is a value (`OverviewState | null`), not a subscription: each host owns
+  its own polling. `null` is the loading gate, so the dashboard passes `null` until `useOverview`
+  has state, exactly as before.
+- Every Work action is optional, and its control renders only when the host provides it (Open,
+  + Shell, Refresh, the spec/plan/review links). `openBuilder` takes the `OverviewBuilder`, not an
+  id, because the dashboard's tab lookup (`findBuilderTab`) needs `roleId` and `issueId`.
+- The dashboard-only pieces are slots: `tip` (TipBanner), `openFilesShells`, and `filePanel` (a
+  render function given `{open, setOpen}`, so the root's `file-panel-open` class stays with Work).
+- An optional `architectCount` prop keeps the dashboard counting registered architects for the
+  attribution badge. Without it the view counts the overview's live architects.
+- Decisions: `read`, `rule`, `image(path, signal)` are required; `openExternal` and `showImage`
+  are optional. Without them a link or image click does nothing (it never navigates the page).
+  Work's own http(s) anchors stay native `<a href>`, as before.
+- The decisions result types moved into the package (they are its contract); `apps/web/lib/api.ts`
+  re-exports them.
+
+**Deviations from the plan's host sketch (interface detail; the plan's intent holds):**
+- Two host interfaces, `WorkViewHost` and `DecisionsViewHost`, not one `WorkspaceViewsHost` with
+  a nested `decisions`: each view takes only what it uses.
+- `overview` is a value, not a subscribe/refresh source (above). `refresh` is still an action.
+- `openBuilder(builder)`, not `openBuilder(id)`; `showImage({src, alt})`, not `showImage(src)`:
+  the dashboard's full-size page carries the image's alt, as before.
+- `architectCount`: the plan says it comes from `OverviewData.architects`. The view does that by
+  default. The spec's Assumptions accept the live-architect count for **VS Code**, and scenario 20
+  requires the dashboard unchanged, so the dashboard wrapper passes its `/api/state` count.
+
+**CSS:** the moved rules live in the package's `styles.css`, each colour and font a
+`var(--codev-wv-*, <the dashboard's value>)` token. The dashboard maps the chrome tokens to its own
+vars in `:root`. The tip banner, file panel and PR-row rules stay in `apps/web/src/index.css`.
+
+**Tests:** the eight moved test files run in the package against fake hosts (same case counts;
+the fetch- and `window.open`-level cases moved to a dashboard integration test,
+`apps/web/__tests__/DecisionsView.dashboard-host.test.tsx`, which renders the real wrapper, host
+and hook with only `fetch` and `window.open` faked). New package tests: import boundary, one
+copy of each component, and the Work view against fake hosts (absent actions hide controls, slots
+render only when passed). The package's `check-types` covers its tests, which flagged three old
+fixtures missing required fields (`area`, `reviewRequests`, `isDraft`); fixed.
+
+**Environment note:** locally (Node 26) the apps/web suite fails 10 Terminal/VirtualKeyboard/toolbar
+files with `localStorage ... getItem`, because Node's experimental `localStorage` global shadows
+jsdom's. With `NODE_OPTIONS=--no-experimental-webstorage` all 37 files pass. CI runs Node 20. Not
+caused by this branch: `getWebKey` is untouched.
+
+**Rendered proof (scenario 20):** the harness `dashboard` script, baseline run on the branch base's
+build, then on this build with `COCKPIT_BASELINE`. Evidence in
+`codev/projects/1963-vscode-alternative-layout-seco/verification-phase6/`.

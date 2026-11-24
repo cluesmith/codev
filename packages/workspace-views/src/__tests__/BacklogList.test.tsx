@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
-import { BacklogList } from '../src/components/BacklogList.js';
-import type { OverviewBacklogItem } from '../src/lib/api.js';
+import { BacklogList } from '../components/BacklogList.js';
+import type { OverviewBacklogItem } from '@cluesmith/codev-types';
 
 afterEach(() => {
   cleanup();
@@ -14,6 +14,7 @@ function makeItem(overrides: Partial<OverviewBacklogItem> = {}): OverviewBacklog
     url: 'https://github.com/org/repo/issues/1',
     type: 'project',
     priority: 'medium',
+    area: '',
     hasSpec: false,
     hasPlan: false,
     hasReview: false,

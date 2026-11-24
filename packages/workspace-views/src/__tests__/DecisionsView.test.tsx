@@ -7,14 +7,17 @@
 import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest';
 import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
 import type { DecisionItem, DecisionsDocument } from '@cluesmith/codev-types';
-import type { DecisionsState } from '../src/hooks/useDecisions.js';
+import type { DecisionsState } from '../hooks/useDecisions.js';
 
 const mockUseDecisions = vi.fn<(isActive: boolean) => { state: DecisionsState; applyDocument: () => void }>();
-vi.mock('../src/hooks/useDecisions.js', () => ({
-  useDecisions: (isActive: boolean) => mockUseDecisions(isActive),
+vi.mock('../hooks/useDecisions.js', () => ({
+  useDecisions: (_read: unknown, isActive: boolean) => mockUseDecisions(isActive),
 }));
 
-import { DecisionsView, STAMP_FORMAT, STAMP_TIME_FORMAT } from '../src/components/DecisionsView.js';
+import { DecisionsView, STAMP_FORMAT, STAMP_TIME_FORMAT } from '../components/DecisionsView.js';
+import { fakeDecisionsHost } from './fakeHost.js';
+
+let host = fakeDecisionsHost();
 
 /** The viewer's zone for every test here: neither the stamps' zone (PT) nor UTC. */
 const VIEWER_TZ = 'America/New_York';
@@ -48,7 +51,7 @@ function makeDocument(overrides: Partial<DecisionsDocument> = {}): DecisionsDocu
 
 function showState(state: DecisionsState) {
   mockUseDecisions.mockReturnValue({ state, applyDocument: () => {} });
-  return render(<DecisionsView isActive />);
+  return render(<DecisionsView host={host} isActive />);
 }
 
 function showItems(...items: DecisionItem[]) {
@@ -71,12 +74,13 @@ afterEach(() => {
   cleanup();
   mockUseDecisions.mockReset();
   vi.restoreAllMocks();
+  host = fakeDecisionsHost();
 });
 
 describe('DecisionsView shell', () => {
   it('passes isActive through to the polling hook', () => {
     mockUseDecisions.mockReturnValue({ state: { status: 'loading' }, applyDocument: () => {} });
-    render(<DecisionsView isActive={false} />);
+    render(<DecisionsView host={host} isActive={false} />);
     expect(mockUseDecisions).toHaveBeenCalledWith(false);
   });
 
@@ -366,8 +370,7 @@ describe('DecisionsView link handling', () => {
     ['https://example.com/pr/42', 'https://example.com/pr/42'],
     ['http://example.com/answer', 'http://example.com/answer'],
     ['https://example.com/released', 'https://example.com/released'],
-  ])('opens %s in a new browser tab without navigating the dashboard', (name, href) => {
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+  ])('opens %s through the host without navigating the page', (name, href) => {
     const before = window.location.href;
     showLinks();
     const link = screen.getByRole('link', { name });
@@ -376,19 +379,27 @@ describe('DecisionsView link handling', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     const notPrevented = fireEvent.click(link);
     expect(notPrevented).toBe(false);
-    expect(open).toHaveBeenCalledExactlyOnceWith(href, '_blank', 'noopener');
+    expect(host.openExternal).toHaveBeenCalledExactlyOnceWith(href);
     expect(window.location.href).toBe(before);
   });
 
   it('opens a link whose text is nested markup, matching the scheme case-insensitively', () => {
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     showLinks();
     fireEvent.click(screen.getByText('bold link'));
-    expect(open).toHaveBeenCalledExactlyOnceWith('HTTPS://example.com/bold', '_blank', 'noopener');
+    expect(host.openExternal).toHaveBeenCalledExactlyOnceWith('HTTPS://example.com/bold');
+  });
+
+  it('keeps an http(s) link inert, and the page in place, for a host without openExternal', () => {
+    const { openExternal: _dropped, ...withoutOpen } = host;
+    host = withoutOpen as typeof host;
+    const before = window.location.href;
+    showLinks();
+    const notPrevented = fireEvent.click(screen.getByRole('link', { name: 'https://example.com/pr/42' }));
+    expect(notPrevented).toBe(false);
+    expect(window.location.href).toBe(before);
   });
 
   it.each(['the tools', 'mail', 'top'])('makes the non-http(s) link "%s" inert', name => {
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const before = window.location.href;
     showLinks();
     // No href, so there is nothing for a middle-click, the context menu or the keyboard to open.
@@ -397,7 +408,7 @@ describe('DecisionsView link handling', () => {
     expect(screen.queryByRole('link', { name })).toBeNull();
     const notPrevented = fireEvent.click(anchor);
     expect(notPrevented).toBe(false);
-    expect(open).not.toHaveBeenCalled();
+    expect(host.openExternal).not.toHaveBeenCalled();
     expect(window.location.href).toBe(before);
   });
 
@@ -412,16 +423,16 @@ describe('DecisionsView link handling', () => {
       },
       applyDocument: () => {},
     });
-    rerender(<DecisionsView isActive />);
+    rerender(<DecisionsView host={host} isActive />);
     expect(screen.getByText('guide').closest('a')).not.toHaveAttribute('href');
     expect(screen.getByRole('link', { name: 'https://example.com/new' })).toHaveAttribute('target', '_blank');
   });
 
   it('leaves clicks that are not on a link alone', () => {
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     showLinks();
     const notPrevented = fireEvent.click(screen.getByRole('heading', { name: 'Q' }));
     expect(notPrevented).toBe(true);
-    expect(open).not.toHaveBeenCalled();
+    expect(host.openExternal).not.toHaveBeenCalled();
+    expect(host.showImage).not.toHaveBeenCalled();
   });
 });

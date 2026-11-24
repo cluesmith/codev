@@ -11,8 +11,8 @@ import { useCallback, useState } from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within, fireEvent, act } from '@testing-library/react';
 import type { DecisionItem, DecisionOption, DecisionsDocument, DecisionsRuleRequest } from '@cluesmith/codev-types';
-import type { DecisionsState } from '../src/hooks/useDecisions.js';
-import type { DecisionRulingResult } from '../src/lib/api.js';
+import type { DecisionsState } from '../hooks/useDecisions.js';
+import type { DecisionRulingResult } from '../host.js';
 
 let initialState: DecisionsState = { status: 'loading' };
 let pushState: (state: DecisionsState) => void = () => { throw new Error('DecisionsView is not rendered'); };
@@ -28,16 +28,17 @@ function useFakeDecisions() {
   return { state, applyDocument: apply };
 }
 
-vi.mock('../src/hooks/useDecisions.js', () => ({
+vi.mock('../hooks/useDecisions.js', () => ({
   useDecisions: () => useFakeDecisions(),
 }));
 
-const postDecisionRuling = vi.fn<(request: DecisionsRuleRequest) => Promise<DecisionRulingResult>>();
-vi.mock('../src/lib/api.js', () => ({
-  postDecisionRuling: (request: DecisionsRuleRequest) => postDecisionRuling(request),
-}));
+/** The host's `rule`: each test says how Tower answers. */
+const rule = vi.fn<(request: DecisionsRuleRequest) => Promise<DecisionRulingResult>>();
 
-import { DecisionsView } from '../src/components/DecisionsView.js';
+import { DecisionsView } from '../components/DecisionsView.js';
+import { fakeDecisionsHost } from './fakeHost.js';
+
+const host = { ...fakeDecisionsHost(), rule: (request: DecisionsRuleRequest) => rule(request) };
 
 const OPTIONS: DecisionOption[] = [
   { word: 'accept', description: 'merge as is', recommended: true },
@@ -70,7 +71,7 @@ const TIMEOUT = makeItem('ops-3', 'Raise the e2e timeout?');
 
 function show(doc: DecisionsDocument) {
   initialState = { status: 'ready', document: doc };
-  return render(<DecisionsView isActive />);
+  return render(<DecisionsView host={host} isActive />);
 }
 
 function push(state: DecisionsState) {
@@ -122,13 +123,13 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-  postDecisionRuling.mockResolvedValue({ kind: 'error', message: 'not stubbed' });
+  rule.mockResolvedValue({ kind: 'error', message: 'not stubbed' });
 });
 
 afterEach(() => {
   cleanup();
   applyDocument.mockReset();
-  postDecisionRuling.mockReset();
+  rule.mockReset();
 });
 
 describe('writable cards', () => {
@@ -235,8 +236,8 @@ describe('drafts', () => {
     const { rerender } = show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'hold');
     type(MERGE.question, 'later');
-    rerender(<DecisionsView isActive={false} />);
-    rerender(<DecisionsView isActive />);
+    rerender(<DecisionsView host={host} isActive={false} />);
+    rerender(<DecisionsView host={host} isActive />);
     expect(radio(MERGE.question, 'hold')).toBeChecked();
     expect(commentBox(MERGE.question)).toHaveValue('later');
   });
@@ -393,8 +394,8 @@ describe('submit', () => {
     if (word) choose(MERGE.question, word);
     if (comment) type(MERGE.question, comment);
     await submit(MERGE.question);
-    expect(postDecisionRuling).toHaveBeenCalledExactlyOnceWith({ id: 'main-12', fingerprint: 'fp-main-12', ...expected });
-    const sent = postDecisionRuling.mock.calls[0][0];
+    expect(rule).toHaveBeenCalledExactlyOnceWith({ id: 'main-12', fingerprint: 'fp-main-12', ...expected });
+    const sent = rule.mock.calls[0][0];
     expect(Object.keys(sent).filter(key => sent[key as keyof DecisionsRuleRequest] !== undefined).sort())
       .toEqual(['fingerprint', 'id', ...Object.keys(expected)].sort());
   });
@@ -404,12 +405,12 @@ describe('submit', () => {
     choose(MERGE.question, 'accept');
     pushDocument(makeDocument('v2', { ...MERGE, bodyMarkdown: '- **Fix:** reworded.', fingerprint: 'fp-reworded' }));
     await submit(MERGE.question);
-    expect(postDecisionRuling).toHaveBeenCalledExactlyOnceWith({ id: 'main-12', fingerprint: 'fp-reworded', word: 'accept' });
+    expect(rule).toHaveBeenCalledExactlyOnceWith({ id: 'main-12', fingerprint: 'fp-reworded', word: 'accept' });
   });
 
   it('locks the card while the submit is in flight', async () => {
     const reply = deferred<DecisionRulingResult>();
-    postDecisionRuling.mockReturnValue(reply.promise);
+    rule.mockReturnValue(reply.promise);
     show(makeDocument('v1', MERGE, TIMEOUT));
     choose(MERGE.question, 'accept');
     type(MERGE.question, 'ship it');
@@ -421,7 +422,7 @@ describe('submit', () => {
     expect(within(card(MERGE.question)).getByRole('button', { name: 'Clear choice' })).toBeDisabled();
     expect(commentBox(MERGE.question)).toHaveAttribute('readonly');
     fireEvent.click(submitButton(MERGE.question));
-    expect(postDecisionRuling).toHaveBeenCalledTimes(1);
+    expect(rule).toHaveBeenCalledTimes(1);
 
     type(TIMEOUT.question, 'other cards stay usable');
     expect(submitButton(TIMEOUT.question)).toBeEnabled();
@@ -433,7 +434,7 @@ describe('submit', () => {
 
   it('renders the returned document at once and clears the draft on success', async () => {
     const ruled = makeDocument('v2', { ...MERGE, currentRuling: 'accept\n\nship it', writable: false, fingerprint: 'fp-ruled' });
-    postDecisionRuling.mockResolvedValue({ kind: 'document', document: ruled });
+    rule.mockResolvedValue({ kind: 'document', document: ruled });
     show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'accept');
     type(MERGE.question, 'ship it');
@@ -458,7 +459,7 @@ describe('submit', () => {
     ['a transport failure', { kind: 'error', message: 'Could not reach Tower: Failed to fetch' }],
     ['an unexpected response', { kind: 'error', message: 'Unexpected response from Tower (HTTP 401)' }],
   ] as const)('shows %s on the card and keeps the draft', async (_, result) => {
-    postDecisionRuling.mockResolvedValue(result);
+    rule.mockResolvedValue(result);
     show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'rework');
     type(MERGE.question, 'the tests first');
@@ -473,7 +474,7 @@ describe('submit', () => {
   });
 
   it('shows a thrown send on the card and unlocks it, keeping the draft', async () => {
-    postDecisionRuling.mockRejectedValue(new Error('localStorage is not available'));
+    rule.mockRejectedValue(new Error('localStorage is not available'));
     show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'accept');
     type(MERGE.question, 'ship it');
@@ -491,8 +492,8 @@ describe('submit', () => {
 
   it('clears the last refusal when the owner submits again', async () => {
     const reply = deferred<DecisionRulingResult>();
-    postDecisionRuling.mockResolvedValueOnce({ kind: 'refused', code: 'item-changed', message: 'changed' });
-    postDecisionRuling.mockReturnValueOnce(reply.promise);
+    rule.mockResolvedValueOnce({ kind: 'refused', code: 'item-changed', message: 'changed' });
+    rule.mockReturnValueOnce(reply.promise);
     show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'accept');
     await submit(MERGE.question);
@@ -504,7 +505,7 @@ describe('submit', () => {
 
   it('does not hold a draft whose own write a poll shows before the reply lands', async () => {
     const reply = deferred<DecisionRulingResult>();
-    postDecisionRuling.mockReturnValue(reply.promise);
+    rule.mockReturnValue(reply.promise);
     const ruled = makeDocument('v2', { ...MERGE, currentRuling: 'accept', writable: false });
     show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'accept');
@@ -520,7 +521,7 @@ describe('submit', () => {
 
   it('holds the draft when the write is refused because the item was ruled meanwhile', async () => {
     const reply = deferred<DecisionRulingResult>();
-    postDecisionRuling.mockReturnValue(reply.promise);
+    rule.mockReturnValue(reply.promise);
     show(makeDocument('v1', MERGE));
     choose(MERGE.question, 'accept');
     type(MERGE.question, 'ship it');
@@ -540,13 +541,13 @@ describe('question round-trip', () => {
     const asked = makeDocument('v2', {
       ...MERGE, currentRuling: 'why a new tool? Don\'t we have existing tools?', writable: false, fingerprint: 'fp-asked',
     });
-    postDecisionRuling.mockResolvedValue({ kind: 'document', document: asked });
+    rule.mockResolvedValue({ kind: 'document', document: asked });
     show(makeDocument('v1', MERGE));
     type(MERGE.question, 'why a new tool? Don\'t we have existing tools?');
 
     await submit(MERGE.question);
 
-    expect(postDecisionRuling).toHaveBeenCalledExactlyOnceWith({
+    expect(rule).toHaveBeenCalledExactlyOnceWith({
       id: 'main-12', fingerprint: 'fp-main-12', comment: 'why a new tool? Don\'t we have existing tools?',
     });
     let c = card(MERGE.question);
@@ -573,6 +574,6 @@ describe('question round-trip', () => {
 
     choose(MERGE.question, 'accept');
     await submit(MERGE.question);
-    expect(postDecisionRuling).toHaveBeenLastCalledWith({ id: 'main-12', fingerprint: 'fp-answered', word: 'accept' });
+    expect(rule).toHaveBeenLastCalledWith({ id: 'main-12', fingerprint: 'fp-answered', word: 'accept' });
   });
 });

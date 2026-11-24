@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchDecisions } from '../lib/api.js';
-import type { DecisionsDocument, DecisionsFetchResult } from '../lib/api.js';
+import type { DecisionsDocument } from '@cluesmith/codev-types';
+import type { DecisionsFetchResult, DecisionsViewHost } from '../host.js';
 
-/** How often the open, visible Decisions tab re-reads the file. */
+/** How often the open, visible Decisions view re-reads the file. */
 export const DECISIONS_POLL_MS = 2000;
 
 /**
@@ -44,11 +44,11 @@ function pageVisible(): boolean {
 }
 
 /**
- * Spec 1819: the decisions document, kept current while the tab is active and the
- * page is visible.
+ * Spec 1819: the decisions document, read through the host's `read` and kept current
+ * while the view is active and the page is visible.
  *
- * - Fetches on activation and when the page becomes visible again, then every
- *   `DECISIONS_POLL_MS`; stops while the tab is inactive or the page hidden.
+ * - Reads on activation and when the page becomes visible again, then every
+ *   `DECISIONS_POLL_MS`; stops while the view is inactive or the page hidden.
  * - Never overlaps fetches: a tick while one is in flight is skipped.
  * - Never regresses: every fetch start and every `applyDocument` (the document a
  *   successful write returns) takes a new generation, and a response is applied
@@ -57,7 +57,7 @@ function pageVisible(): boolean {
  * - An unchanged `version` leaves the state object as it was, so React bails out
  *   of the update and nothing below re-renders.
  */
-export function useDecisions(isActive: boolean) {
+export function useDecisions(read: DecisionsViewHost['read'], isActive: boolean) {
   const [state, setState] = useState<DecisionsState>({ status: 'loading' });
   const [visible, setVisible] = useState(pageVisible);
   const generation = useRef(0);
@@ -74,14 +74,14 @@ export function useDecisions(isActive: boolean) {
     inFlight.current = true;
     const fetchGeneration = ++generation.current;
     try {
-      const result = await fetchDecisions();
+      const result = await read();
       if (fetchGeneration === generation.current) {
         setState(prev => nextState(prev, result));
       }
     } finally {
       inFlight.current = false;
     }
-  }, []);
+  }, [read]);
 
   useEffect(() => {
     if (!isActive || !visible) return;

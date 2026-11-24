@@ -1,5 +1,5 @@
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
-import type { OverviewPR, OverviewBuilder, ArchitectState } from '../lib/api.js';
+import type { OverviewPR, OverviewBuilder, ArchitectState } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
 
 interface NeedsAttentionListProps {

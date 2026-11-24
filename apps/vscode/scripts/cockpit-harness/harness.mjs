@@ -16,7 +16,8 @@
 //
 // Inputs (environment): COCKPIT_SCRATCH (the session scratchpad), COCKPIT_TOWER_PORT,
 // COCKPIT_WEB_PORT; optional CODEV_AGENT_FARM_DIR / SHELLPER_SOCKET_DIR overrides (still gated);
-// COCKPIT_VSCODE=serve-web (default) | ide-server, the latter with COCKPIT_IDE_SERVER_BIN.
+// COCKPIT_VSCODE=serve-web (default) | ide-server, the latter with COCKPIT_IDE_SERVER_BIN;
+// COCKPIT_BASELINE, a snapshot file `verify dashboard` compares against.
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -863,6 +864,7 @@ async function cmdVerify(script) {
     path.join(HERE, 'cockpit-verify.mjs'), script, '--url-template', workbenchUrlFor(L, st, '__QUERY__'), '--fixtures', fixturesDir(st),
     '--profile', L.browserProfile, '--shots', L.shots, '--out', out, '--owner-port', String(OWNER_TOWER_PORT),
     '--stub-log', L.stubLog, '--request-log', L.requestLog, '--tower-port', String(st.towerPort),
+    ...(process.env.COCKPIT_BASELINE ? ['--baseline', path.resolve(process.env.COCKPIT_BASELINE)] : []),
   ], {
     env: childEnv(L, 'workbench', {
       PLAYWRIGHT_BROWSERS_PATH: PLAYWRIGHT_BROWSERS,

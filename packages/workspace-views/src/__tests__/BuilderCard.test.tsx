@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
-import { BuilderCard } from '../src/components/BuilderCard.js';
-import type { OverviewBuilder } from '../src/lib/api.js';
+import { BuilderCard } from '../components/BuilderCard.js';
+import type { OverviewBuilder } from '@cluesmith/codev-types';
 import type { ServedAgentState } from '@cluesmith/codev-types';
 
 afterEach(() => {
@@ -30,6 +30,7 @@ function makeBuilder(overrides: Partial<OverviewBuilder> = {}): OverviewBuilder 
     lastDataAt: null,
     spawnedByArchitect: null,
     prReady: false,
+    area: '',
     ...overrides,
   };
 }

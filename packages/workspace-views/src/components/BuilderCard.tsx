@@ -1,5 +1,5 @@
 import { agentAttentionState, describeNeedsInput, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import type { OverviewBuilder } from '../lib/api.js';
+import type { OverviewBuilder } from '@cluesmith/codev-types';
 import { issueRef } from '../lib/issueIds.js';
 
 interface BuilderCardProps {

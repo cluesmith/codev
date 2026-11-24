@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildItems } from '../src/components/NeedsAttentionList.js';
-import type { OverviewPR, OverviewBuilder, ArchitectState } from '../src/lib/api.js';
+import { buildItems } from '../components/NeedsAttentionList.js';
+import type { OverviewPR, OverviewBuilder, ArchitectState } from '@cluesmith/codev-types';
 import type { ServedAgentState } from '@cluesmith/codev-types';
 
 function makePR(overrides: Partial<OverviewPR> = {}): OverviewPR {
@@ -11,6 +11,8 @@ function makePR(overrides: Partial<OverviewPR> = {}): OverviewPR {
     reviewStatus: 'REVIEW_REQUIRED',
     linkedIssue: '42',
     createdAt: new Date('2026-01-01T00:00:00Z').toISOString(),
+    reviewRequests: [],
+    isDraft: false,
     ...overrides,
   };
 }
@@ -37,6 +39,7 @@ function makeBuilder(overrides: Partial<OverviewBuilder> = {}): OverviewBuilder 
     lastDataAt: null,
     spawnedByArchitect: 'main',
     prReady: false,
+    area: '',
     ...overrides,
   };
 }
