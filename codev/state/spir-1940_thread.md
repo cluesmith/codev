@@ -1111,3 +1111,26 @@ the first step of the job. The other seven jobs on that head were green.
      it.
   3. Test both against a stub of the old shapes: a 404, and a database at schema 19.
 - **Phase 6 order** (architect): build, push, tell them when GitHub is green.
+
+## 2026-11-24 — phase 5 COMPLETE (round 1: codex APPROVE, claude APPROVE)
+
+- Round 1: both lanes approve, no blocking issue; no commit of phase 5 went unreviewed. Porch
+  advanced to phase 6 (`27f497f75`). No code changed after the reviewed head `6462b2563`.
+- One `porch done` in phase 5, with the one-time tests skip (ruling main-38) after GitHub was
+  green on `6462b2563`.
+- Claude's four non-blocking notes:
+  1. **For the review document:** the listing resolves every agent's address through the real
+     resolvers, and each resolve reads the name table again: about one small query per agent. It
+     is the price of the listing being the resolver's answer; say so, so that nobody later makes
+     it faster by copying the permission rules into the listing.
+  2. **For the review document:** two STOPPED workspaces that share a directory name are each
+     listed with that name as their address name, though the name would be ambiguous once both
+     run. Both lines read `not running` and list no agents, so no address is printed that fails.
+  3. **Fix in the first commit of phase 6:** the text listing keeps a path and a reason to one
+     printable line but prints `addressName`, an agent's name and its address as they came. All
+     three come from checked sources today; make the rule the same for every field.
+  4. whoami's reason for a failed read of the name table is one message for every cause. The
+     architect's second defect covers it: the first commit of phase 6 rewrites that message.
+- **First commit of phase 6**, in full: the architect's two defects (the 404 from an older Tower
+  in `afx workspace list`; whoami's advice when the database has not been migrated), each tested
+  against the old shape (a 404; a database at schema 19), and note 3 above.
