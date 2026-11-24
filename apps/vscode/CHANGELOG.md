@@ -1,5 +1,17 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Native Windows.** On Windows 11 without WSL, the extension starts Tower and spawns builders through the Codev command-line tools with no console window flashing up, and the Tower view recognises this window's workspace whatever the drive letter's case. Needs the matching Codev release installed natively; see the project's Windows notes for setup (#1658, PR #1859).
+- **No console windows flash on Windows, and the Team view refreshes less often.** Every process the extension starts on Windows is hidden, and the Team view fetches on Tower events only while it is visible and at most every 30 seconds (#1919, PR #1932).
+- **Node.js 22 is the minimum.** The install walkthrough now asks for Node.js 22 or newer, matching the Codev release it installs (#1944, PR #1962).
+
+### Fixes
+
+- **On Windows, the extension never runs a `codev`, `afx` or `porch` found in the workspace folder.** A command-line tool that is not on `PATH` is refused rather than looked up in the current folder, and Spawn Builder says "afx was not found on PATH" instead of failing with an unhandled error (#1911, PR #1948).
+
 ## [3.3.6] - 2026-10-29
 
 ### What's new
