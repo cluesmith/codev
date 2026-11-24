@@ -21,8 +21,12 @@ Every screenshot here was read with OCR, and none shows a machine's shell prompt
 
 ## The final-head run
 
-The second commit on this branch replaces `verification-phase9/verify-arrange.json` and its 19
-`arrange-*` screenshots. They now hold the `verify arrange` run on the PR's final head
-`2780caa05297c4d027beb203836edb24b78818fe`, with the vsix built at that commit: 19/19, the shell-prompt check included
-(2026-11-24T16:49Z). The first commit holds the same check names from the run on the same
-extension code before the merge from main.
+The third commit on this branch replaces `verification-phase9/verify-arrange.json` and its 19
+`arrange-*` screenshots. They now hold the `verify arrange` run on the PR's head `c79b1c7e113ec6ab7a830970c3a3bf36831ab024`, with
+the vsix built at that commit. The server was VS Code 1.147.0 serve-web (commit
+`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`). The run passed 19/19, the shell-prompt check
+included, with no request to the owner's port (2026-11-24T17:41Z). The tripwire stayed clean. It
+is the harness's new tripwire, which stops the run on a hit.
+
+The second commit holds the same checks run on `2780caa05`, before the integration-review commits.
+VS Code 1.138.0 and 1.128 have no evidence here: those runs await the owner (see the PR).
