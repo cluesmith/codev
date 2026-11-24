@@ -343,3 +343,41 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   unkept inside path blocks) → Phase 7 docs; note 3: cleanup's dirty notice still counts a non-ignored spawn link
   (same class as main-36, informational, outside the plan's scoped cleanup edit) → asked the architect whether to
   fix in this PR (needs a read-only helper cleanup can import); note 4 → Phase 7 docs.
+- Iteration 3 FORCE-ADVANCED by porch (safety ceiling, 927795193); porch moved to docs_guidance (68eef5795).
+  Architect (18:43): fix claude iter3 note 3 as Phase 7's FIRST commit, so it is reviewed.
+
+## Phase 7 — docs_guidance (2026-11-24)
+- Merged origin/main (32 commits: v3.3.8 release, #1962 Node 22 floor) as 7f2737b07: no conflicts.
+- Windows run 45462452355 (a1ccc442b, first Windows run on this branch) FAILED 9 tests, the same 9 in Targeted,
+  Unit Node 22 and Unit Node 24; 8939 others passed. All in commands/check, one cause, fixture-side: the fixture
+  root was fs.realpathSync(os.tmpdir()…), which keeps the runner's 8.3 short name C:\Users\RUNNER~1\…, while the
+  code reports git's long path (runneradmin). Fix: realpathSync.native in helpers/git-fixture.ts + 3 assertions.
+- Architect asked whether a USER can produce two spellings of one directory. Audited every comparison: none compares
+  a raw cwd or config path with a git-reported path. cwd only starts git (roots come from git) or resolves a path
+  argument that resolveTarget then realPath()s; main-checkout / lookup comparisons are realPath on both sides; the
+  spawn-link test is comparablePath on both sides (copy / hard link compare bytes / dev+ino); insideTarget likewise.
+  ONE raw comparison found and fixed: the builder id for a PATH argument compared two git-listed spellings as they
+  stand (git 2.50 lists real paths for every worktree, checked, so not user-reachable today; effect cosmetic).
+  New tests on every platform (junction on Windows), helper `linkedSpelling()`: check worktree by id / relative /
+  absolute link path / '.' and check pr from worktree and main, all through a symlinked parent under the raw
+  os.tmpdir() spelling, equal the real-path reports. Mutation check: a raw compare in isSpawnMade, or dropping
+  realPath on the path argument, each fails the new test. Architect accepted (18:56).
+- First commit f93aa60e1: isSpawnMade/linkAt/realPath/comparablePath moved into agent-farm/lib/builder-scaffold.ts
+  (now read-only node:fs; imports auditor holds a pure module's node:fs names to the read-only list); cleanup's
+  hasUncommittedChanges(worktree, mainRoot) uses it: a spawn symlink, hard link or unchanged copy that git does
+  not ignore is not counted, a changed copy is. Targeted 977/977, build, both tsc, tmp-residue OK. Windows
+  re-dispatched on f93aa60e1 (run 45465468867).
+- Docs (second commit): architect role (both trees) — `codev check pr` first in Integration review (mechanics vs
+  consult's content; size/to-read feed the risk table), re-run before a merge word with its verdict line in PRFT
+  Testing, new "Closing the loop" section (check deploy after merges, check worktree before afx cleanup;
+  REMOVABLE = no data lost, NOT builder finished). risk-triage Step 1 = `codev check pr`. workflow-reference box.
+  codev.md (both): full `codev check` section with real samples (#1965 CLEAR, #1958 draft/running, deploy
+  1972 1962 unconfigured, deploy 1962 1965 with a scratch-HOME check.deploy, worktree air-1938 and bugfix-1956),
+  config table, `:(glob)` pathspecs, writes (objects only), trust boundary (own concept overrides, user merge
+  drivers), JSON with the shipped deltas from the spec's schema: pr.baseTip and worktree.baseRef/baseTip
+  nullable; commits.unsafe; ignored.links/scaffold; checks.lastCodeCommit null; head.relation (+ behindPr,
+  originBranchSha, originAheadOfPr); forge.reviewDecision; linked-issue.references. overview.md rows; codev skill
+  x4 (+ hashes regenerated); forge skill x2 (commit-checks, workflow-runs); arch.md Core Components §9.
+- Fixed in place: risk-triage's `gh pr diff --stat` does not exist (gh pr diff has no --stat) — Step 1's raw
+  commands now `gh pr view <N> --json additions,deletions,changedFiles` + `gh pr diff <N> --name-only`, and the
+  worked examples use `git diff --stat origin/main...origin/<branch>`, which prints the diffstat they show.

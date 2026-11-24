@@ -22,6 +22,8 @@ Forge concept commands decouple codev from direct `gh` CLI calls. Each GitHub op
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` (optional) | View PR details (JSON or text) |
 | `pr-diff` | `CODEV_PR_NUMBER`, `CODEV_DIFF_NAME_ONLY` (optional) | Get PR diff |
 | `auth-status` | — | Check forge authentication status |
+| `commit-checks` | `CODEV_COMMIT_SHA` | Check results on one commit (JSON array `[{name, state, url?, workflow?}]`; `state` is `pass`, `fail`, `pending`, `skipped` or `neutral`). Read-only, used by `codev check` |
+| `workflow-runs` | `CODEV_WORKFLOW`, `CODEV_BRANCH` | Runs of one workflow on one branch, newest first (JSON array `[{headSha, status, conclusion, url, createdAt}]`). Read-only, used by `codev check deploy` |
 
 ## Configuration
 
@@ -44,6 +46,8 @@ In `.codev/config.json`:
 ### Providers
 
 Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`), `linear` (Linear API), `jira` (Jira Cloud via `acli`). `linear` and `jira` are hybrid: they serve the issue concepts only, and every PR concept falls through to the `gh` default. Jira takes `jira-site` and `jira-project` keys; issue ids are work item keys (`ENG-123`).
+
+`commit-checks` and `workflow-runs` are served by `github` (and by `linear` and `jira`, which use the github default for PR concepts). `gitlab` and `gitea` disable both, so `codev check` there reports `not run: commit-checks unavailable on gitlab` instead of calling `gh`; set an override to enable them.
 
 **Note:** Non-GitHub presets are best-effort. Output schemas may differ from GitHub's JSON contracts. Non-conforming JSON returns `null` — consumers handle this gracefully. Override individual concepts if a preset doesn't match your CLI version.
 

@@ -49,6 +49,9 @@ This installs all five commands globally: `codev`, `afx`, `porch`, `consult`, an
 | `codev doctor` | Check system dependencies |
 | `codev update` | Update codev templates and protocols |
 | `codev import <source>` | AI-assisted protocol import from other projects |
+| `codev check pr <N>` | Read-only merge readiness of a PR: head, state, mergeability, trial merge, CI on the code, attribution, watched files, size, files to read |
+| `codev check deploy <N>...` | Read-only: whether merged PRs reached the deploy branch and the latest green deploy run |
+| `codev check worktree <id\|path>` | Read-only: whether removing a builder worktree would lose data, and whether its PR is finished |
 
 See [codev.md](codev.md) for full documentation.
 

@@ -48,6 +48,14 @@ its own authority.
 
 ## Integration review — depth matched to risk
 
+**Run `codev check pr <N>` first.** One read-only command collects what you would otherwise
+gather by hand: the exact head, state and forge mergeability, a trial merge into the live base,
+CI on the code (not only on the porch-state commits above it), attribution lines, watched
+files, the linked issue, the size, and the files a person still has to read. Its `size` and
+`to read` lines feed the risk table below. A blocker it names (a conflict, failing or missing
+checks, an unpushed head) comes first: a model review of a PR that cannot merge is premature.
+`consult --type integration` reviews the content; `codev check pr` checks the mechanics.
+
 Assess before choosing depth. **Highest single factor wins**: if lines, file count, subsystem
 or cross-cutting scope puts it in a tier, the whole PR is in that tier.
 
@@ -73,11 +81,34 @@ dev-approval — lead with **Problem · Root Cause · Fix · Testing**, unprompt
 tier. Verify the root cause yourself: a builder's summary is evidence, not ground truth. The
 human should be able to answer from your message without opening the diff.
 
+For a merge word or a `pr` gate, run `codev check pr <N>` again just before you write, and put
+its verdict line in the **Testing** paragraph. A `CLEAR` from an older head says nothing about
+the commit the human is asked to merge.
+
 ### The owner decisions file
 
 A workspace may collect every ask for the human's word in `codev/state/pending-decisions.md`,
 the dashboard's **Decisions** tab, with the architect `main` as hub and only editor. When the
 owner asks to use decisions, run `afx decisions init` and follow `codev/resources/decision-protocol.md`.
+
+## Closing the loop
+
+After a PR merges, two more read-only checks:
+
+- **`codev check deploy <N>`** where the project deploys: is the merge commit on the deploy
+  branch (`check.deploy.branch`, else the PR's base) and, with `check.deploy.workflow` set,
+  inside the latest green run of that workflow? Without a deploy workflow it reports CI on the
+  merge commit. Run it before telling anyone a change is live.
+- **`codev check worktree <builder-id>`** before `afx cleanup`: would removing the worktree and
+  its local branch lose data? **`REMOVABLE` means no data would be lost, not that the builder is
+  finished.** A PR still open is reported on its own line (`OPEN: builder not finished`) and
+  makes the exit code 1 without changing the verdict word. `REMOVABLE AFTER KEEPING N FILES`
+  names the keep-list files to copy out first, or to keep with `afx cleanup --keep-ignored`;
+  `NOT REMOVABLE` names what would be lost.
+
+The three `codev check` commands never merge, push, comment, delete or move a ref. Each prints
+its verdict first, takes `--json`, and exits 0 when clear, 1 when something needs attention (a
+check that could not run counts) and 2 when the command itself failed.
 
 ## UX verification
 
