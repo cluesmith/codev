@@ -136,6 +136,49 @@ message: "Hello"
     expect(tasks[0].cwd).toBeUndefined();
   });
 
+  // Spec 1940: cron is unattended and is no agent a peer could have granted. A task aimed
+  // at another Tower is refused when its file is loaded, with the task named.
+  describe('a target that is an afx:// address', () => {
+    const TASK = (target: string) => `
+name: Nightly Report
+schedule: "@daily"
+command: echo hi
+message: "Report"
+target: "${target}"
+`;
+
+    it('is refused when the task file is loaded, naming the task', () => {
+      const ws = createTestWorkspace();
+      const log = vi.fn();
+      initCron(makeMockDeps({ log }));
+      writeTaskFile(ws, 'report.yaml', TASK('afx://devvm/codev:architect'));
+      writeTaskFile(ws, 'local.yaml', TASK('codev-cloud:architect:tunnel').replace('Nightly Report', 'Local Report'));
+
+      const tasks = loadWorkspaceTasks(ws);
+
+      expect(tasks.map((t) => t.name)).toEqual(['Local Report']);
+      expect(tasks[0].target).toBe('codev-cloud:architect:tunnel');
+      const warnings = log.mock.calls.filter(([level]) => level === 'WARN').map(([, msg]) => msg as string);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("Skipping task 'Nightly Report' (report.yaml)");
+      expect(warnings[0]).toContain('Cross-Tower messaging is not available');
+    });
+
+    it('is refused with an owner in it and in any letter case', () => {
+      const ws = createTestWorkspace();
+      writeTaskFile(ws, 'a.yaml', TASK('afx://sam@studio/codev:architect:data'));
+      writeTaskFile(ws, 'b.yaml', TASK('AFX://DevVM/codev:builder-spir-1940').replace('Nightly Report', 'Other'));
+      expect(loadWorkspaceTasks(ws)).toEqual([]);
+    });
+
+    it('keeps every local form, the new named-architect form included', () => {
+      const ws = createTestWorkspace();
+      const targets = ['architect', 'architect:review', 'codev-cloud:architect', 'codev-cloud:architect:tunnel', 'builder-42', 'codev:42'];
+      targets.forEach((target, i) => writeTaskFile(ws, `t${i}.yaml`, TASK(target).replace('Nightly Report', `Task ${i}`)));
+      expect(loadWorkspaceTasks(ws).map((t) => t.target).sort()).toEqual([...targets].sort());
+    });
+  });
+
   it('respects explicit field values', () => {
     const ws = createTestWorkspace();
     writeTaskFile(ws, 'task.yaml', `

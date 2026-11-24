@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -307,6 +307,29 @@ function extractTowerError(text: string): string {
   }
 }
 
+/**
+ * The machine-readable code of a Tower error body (`{ error: 'REFUSED', message }`), when
+ * it has one. {@link extractTowerError} folds the code into the text for people; a caller
+ * that must act on WHICH failure it was reads this, and never matches the text.
+ */
+function extractTowerErrorCode(text: string): string | undefined {
+  try {
+    const json = JSON.parse(text) as { error?: unknown };
+    return typeof json.error === 'string' ? json.error : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True for the answer a Tower gives to a route it does not have: its catch-all 404, which
+ * is plain text and so carries no code. Asked only of routes whose own 404s carry one
+ * (or that never answer 404), where it means the Tower is older than this client.
+ */
+function isUnknownRoute(result: { status: number; errorCode?: string }): boolean {
+  return result.status === 404 && result.errorCode === undefined;
+}
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -334,7 +357,7 @@ export class TowerClient {
   async request<T>(
     path: string,
     options: RequestInit = {}
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; connectionRefused?: boolean }> {
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; errorCode?: string; connectionRefused?: boolean }> {
     try {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = {
@@ -354,7 +377,10 @@ export class TowerClient {
       if (!response.ok) {
         const text = await response.text();
         const error = extractTowerError(text);
-        return { ok: false, status: response.status, error };
+        const errorCode = extractTowerErrorCode(text);
+        return errorCode === undefined
+          ? { ok: false, status: response.status, error }
+          : { ok: false, status: response.status, error, errorCode };
       }
 
       if (response.status === 204) {
@@ -529,6 +555,58 @@ export class TowerClient {
       stopped: result.data?.stopped,
       error: result.data?.error,
     };
+  }
+
+  /**
+   * Set a workspace's explicit address name, or clear it with `null` (Spec 1940). A refusal
+   * carries Tower's reason in `error` and its code (`INVALID_NAME`, `RESERVED_NAME`,
+   * `NAME_TAKEN`, `NOT_FOUND`) in `errorCode`. `unknownRoute` is set when the Tower has no
+   * such route at all: it is older than this client.
+   */
+  async setWorkspaceAddressName(
+    workspacePath: string,
+    name: string | null,
+  ): Promise<
+    | { ok: true; result: SetWorkspaceAddressNameResponse }
+    | { ok: false; error: string; errorCode?: string; unknownRoute?: true }
+  > {
+    const encoded = encodeWorkspacePath(workspacePath);
+    const body: SetWorkspaceAddressNameRequest = { name };
+    const result = await this.request<SetWorkspaceAddressNameResponse>(
+      `/api/workspaces/${encoded}/address-name`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!result.ok || result.data === undefined) {
+      const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
+      if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+      return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+    }
+    return { ok: true, result: result.data };
+  }
+
+  /**
+   * Every workspace on this Tower and its agents, as addresses for `caller` (Spec 1940):
+   * the caller's workspace and sender id, as `sendMessage` gives them. A caller that
+   * gives neither is treated as a sender outside every workspace. `unknownRoute` is set
+   * when the Tower has no address book at all: it is older than this client.
+   */
+  async getAddressBook(
+    caller: { workspace?: string; from?: string } = {},
+  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string; unknownRoute?: true }> {
+    const query = new URLSearchParams();
+    if (caller.workspace !== undefined) query.set('workspace', caller.workspace);
+    if (caller.from !== undefined) query.set('from', caller.from);
+    const text = query.toString();
+    const result = await this.request<AddressBookResponse>(`/api/address-book${text === '' ? '' : `?${text}`}`);
+    if (!result.ok || result.data === undefined) {
+      const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
+      return isUnknownRoute(result) ? { ...failure, unknownRoute: true } : failure;
+    }
+    return { ok: true, result: result.data };
   }
 
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {
@@ -836,6 +914,14 @@ export class TowerClient {
     deferred?: boolean;
     error?: string;
     /**
+     * Spec 1940: Tower's code for a failed send, when it gave one, so a caller can tell the
+     * failures apart without matching {@link error}'s text: `MALFORMED_ADDRESS` (the text
+     * is not an address), `REFUSED` (this sender may not name that recipient),
+     * `CROSS_TOWER_UNAVAILABLE` (an `afx://` address), and the older `NOT_FOUND`,
+     * `AMBIGUOUS` and `INVALID_PARAMS`. Absent when Tower could not be reached.
+     */
+    errorCode?: string;
+    /**
      * Spec 1313 mailbox-first delivery. `delivered` = written to the PTY now;
      * `held` = persisted to the durable mailbox and awaiting a clean prompt
      * (`reason` says why: `busy` | `no-profile` | `no-live-pty`), with `mailboxId`
@@ -939,7 +1025,8 @@ export class TowerClient {
     );
 
     if (!result.ok) {
-      return { ok: false, error: result.error, connectionRefused: result.connectionRefused };
+      const failure = { ok: false, error: result.error, connectionRefused: result.connectionRefused };
+      return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
     }
 
     return {

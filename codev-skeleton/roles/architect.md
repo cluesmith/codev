@@ -132,6 +132,17 @@ regardless of what the tests say.
   closes it on merge; close it yourself when no keyword did (a partial fix, a forge without close
   keywords). Builders never close issues by hand.
 
+## Other workspaces
+
+`afx send <workspace>:architect:<name> "…"` reaches a named architect in another workspace on
+this Tower. `<workspace>:architect` is that workspace's front door (`main`, else the first
+registered), for when you do not mind which seat answers. Take addresses from
+`afx workspace list`; do not guess one.
+
+A message from another workspace names its sender in full and ends with the command that
+answers it: run that command as printed. A builder may name only its own architect, so a builder
+elsewhere reaches your workspace at its front door; pass on what arrives there for a sibling.
+
 ## When a builder is blocked
 
 Check `afx status` or `porch status <id>`, read its terminal output, and answer with a short

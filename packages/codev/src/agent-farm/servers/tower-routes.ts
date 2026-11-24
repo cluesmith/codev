@@ -28,8 +28,15 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage } from '@cluesmith/codev-types';
-import { getArchitectByName, getBuilders, setArchitectByName } from '../state.js';
+import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import {
+  getArchitectByName,
+  getBuilders,
+  setArchitectByName,
+  getRegisteredWorkspaces,
+  setWorkspaceAddressName,
+} from '../state.js';
+import { isSameWorkspace, validateProposedName, workspaceAddressName } from '../utils/workspace-address.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
@@ -62,13 +69,26 @@ import { handleDecisionsGet, handleDecisionsImage, handleDecisionsRule } from '.
 import { decisionsFilePresent } from './decisions/file.js';
 import { hasTeam, loadTeamMembers, loadMessages, type TeamMember, type TeamMessage } from '../../lib/team.js';
 import { fetchTeamGitHubData, type TeamMemberGitHubData } from '../../lib/team-github.js';
-import { resolveTarget, resolveAgentInRegistry, broadcastMessage, isResolveError, type ResolveResult } from './tower-messages.js';
+import {
+  parseTarget,
+  resolveTarget,
+  resolveAgentInRegistry,
+  broadcastMessage,
+  isResolveError,
+  crossWorkspaceOrigin,
+  type MessageRecipient,
+  type ResolveError,
+  type ResolveResult,
+  type SenderContext,
+} from './tower-messages.js';
+import { addressBook } from './tower-address-book.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import {
   formatArchitectMessage,
   formatArchitectToBuilderMessage,
   formatBuilderMessage,
+  formatCrossWorkspaceMessage,
   formatUserViaVsCodeMessage,
   formatUserViaDecisionsTabMessage,
   isSafeSenderId,
@@ -245,6 +265,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'POST /api/stop':       (req, res) => handleStopInstance(req, res),
   'POST /api/send':       (req, res, _url, ctx) => handleSend(req, res, ctx),
   'GET /api/inbox':       (_req, res, url) => handleInboxList(res, url),
+  'GET /api/address-book': (_req, res, url) => handleAddressBook(res, url),
   'GET /api/cron/tasks':  (_req, res, url) => handleCronList(res, url),
   'GET /':                (_req, res, _url, ctx) => handleDashboard(res, ctx),
   'GET /index.html':      (_req, res, _url, ctx) => handleDashboard(res, ctx),
@@ -461,6 +482,12 @@ export async function handleRequest(
     const workspaceApiMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/(activate|deactivate|status)$/);
     if (workspaceApiMatch) {
       return await handleWorkspaceAction(req, res, ctx, workspaceApiMatch);
+    }
+
+    // Workspace API: PUT /api/workspaces/:encodedPath/address-name (Spec 1940)
+    const addressNameMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/address-name$/);
+    if (addressNameMatch) {
+      return await handleSetWorkspaceAddressName(req, res, addressNameMatch);
     }
 
     // Workspace API: /api/workspaces/:encodedPath/architects (Spec 755 — multi-architect)
@@ -908,6 +935,120 @@ async function handleRemoveArchitect(
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: false, error: result.error }));
   }
+}
+
+/**
+ * PUT /api/workspaces/:encodedPath/address-name (Spec 1940)
+ * Body: { name: string | null }
+ *
+ * Gives a registered workspace its explicit address name, or clears it with `null`. The
+ * workspace need not be running. The rules are `utils/workspace-address.ts`'s; a refused
+ * name comes back with the reason: 400 `INVALID_NAME` / `RESERVED_NAME`, 409 `NAME_TAKEN`,
+ * 404 `NOT_FOUND` for a workspace Tower has no row for. The change takes effect on the
+ * next address resolved: nothing caches a name.
+ */
+async function handleSetWorkspaceAddressName(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  match: RegExpMatchArray,
+): Promise<void> {
+  if (req.method !== 'PUT') {
+    return sendJson(res, 405, { error: 'Method not allowed' });
+  }
+
+  let workspacePath: string;
+  try {
+    workspacePath = decodeWorkspacePath(match[1]);
+    if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
+      throw new Error('Invalid path');
+    }
+    workspacePath = workspaceKey(normalizeWorkspacePath(workspacePath));
+  } catch {
+    return sendJson(res, 400, { error: 'INVALID_PARAMS', message: 'Invalid workspace path encoding' });
+  }
+
+  let body: unknown;
+  try {
+    body = await parseJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { error: 'INVALID_PARAMS', message: 'Invalid JSON body' });
+  }
+  const proposed = (body as { name?: unknown } | null)?.name;
+  if (proposed !== null && typeof proposed !== 'string') {
+    return sendJson(res, 400, {
+      error: 'INVALID_PARAMS',
+      message: 'Body must be { "name": <string> } to set a name or { "name": null } to clear it.',
+    });
+  }
+
+  const active = [...getWorkspaceTerminals().keys()];
+  const registered = getRegisteredWorkspaces();
+  if (!registered.some((w) => isSameWorkspace(w.workspacePath, workspacePath))) {
+    return sendJson(res, 404, {
+      error: 'NOT_FOUND',
+      message: `Workspace ${workspacePath} is not registered with Tower. Start it once first: afx workspace start`,
+    });
+  }
+
+  let explicitName: string | null = null;
+  if (proposed !== null) {
+    const checked = validateProposedName(proposed, workspacePath, registered, active);
+    if (!checked.ok) {
+      return sendJson(res, checked.code === 'NAME_TAKEN' ? 409 : 400, { error: checked.code, message: checked.message });
+    }
+    explicitName = checked.name;
+  }
+  // Validation above is the rule; these two are what is left when the table disagrees with
+  // it (a row stored under another spelling of this path, which only Windows can have and
+  // boot canonicalization removes). Either way nothing was stored, and the caller is told.
+  let stored: boolean;
+  try {
+    stored = setWorkspaceAddressName(workspacePath, explicitName);
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
+    return sendJson(res, 409, {
+      error: 'NAME_TAKEN',
+      message: `'${explicitName}' is already the name of another workspace.`,
+    });
+  }
+  if (!stored) {
+    return sendJson(res, 500, {
+      error: 'INTERNAL_ERROR',
+      message: `The name was not stored: Tower has no row for ${workspacePath} under that spelling of its path.`,
+    });
+  }
+
+  const own = workspaceAddressName(workspacePath, getRegisteredWorkspaces(), active);
+  const response: SetWorkspaceAddressNameResponse =
+    own.name === null
+      ? { explicitName, addressName: null, unaddressableReason: own.reason }
+      : { explicitName, addressName: own.name };
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(response));
+}
+
+/**
+ * GET /api/address-book?workspace=<path>&from=<id> (Spec 1940)
+ *
+ * Every workspace on this Tower and its agents, as addresses for the caller the query
+ * names: `workspace` and `from` are what `POST /api/send` takes as the sender's, and both
+ * are optional. The answer is `tower-address-book.ts`'s; this only reads the query. `from`
+ * is held to the rule `/api/send` holds it to, since it is the same identity.
+ */
+function handleAddressBook(res: http.ServerResponse, url: URL): void {
+  const from = url.searchParams.get('from') ?? undefined;
+  if (from !== undefined && !isSafeSenderId(from)) {
+    return sendJson(res, 400, {
+      error: 'INVALID_PARAMS',
+      message:
+        'Invalid "from" parameter: a sender identity must be 1-128 characters of ' +
+        '[A-Za-z0-9._:-] (no whitespace, brackets or newlines).',
+    });
+  }
+  const workspace = url.searchParams.get('workspace') || undefined;
+  const book: AddressBookResponse = addressBook({ id: from, workspace });
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(book));
 }
 
 async function handleWorkspaceAction(
@@ -1862,6 +2003,29 @@ function architectNameForTerminal(workspacePath: string, terminalId: string): st
 }
 
 /**
+ * Answer a send whose address did not resolve. One mapping for every send path: 409 for
+ * an ambiguous name, 400 for text that is not an address, for one that needs a workspace
+ * the request did not give, and for one that names a Tower; 403 for a recipient this
+ * sender may not name; 404 for a recipient that does not exist. `NO_CONTEXT` keeps its
+ * older wire name, `INVALID_PARAMS`.
+ */
+const RESOLVE_ERROR_STATUS: Record<ResolveError['code'], number> = {
+  AMBIGUOUS: 409,
+  NO_CONTEXT: 400,
+  MALFORMED_ADDRESS: 400,
+  CROSS_TOWER_UNAVAILABLE: 400,
+  REFUSED: 403,
+  NOT_FOUND: 404,
+};
+
+function sendResolveError(res: http.ServerResponse, err: ResolveError): void {
+  sendJson(res, RESOLVE_ERROR_STATUS[err.code], {
+    error: err.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : err.code,
+    message: err.message,
+  });
+}
+
+/**
  * The canonical mailbox identity of a live-resolved target: architect targets are
  * stored under their SPECIFIC architect name (reverse-mapped from the terminal),
  * everything else under its resolved agent id.
@@ -1872,25 +2036,62 @@ function liveTargetIdentity(result: ResolveResult): { toAgent: string; isArchite
 }
 
 /**
+ * What `handleSend` records as the sender's workspace when the caller gave neither
+ * `fromWorkspace` nor `workspace`. To a frame it means what an absent value would: Tower
+ * does not know where the message came from, so it does not say it came from elsewhere.
+ */
+const UNKNOWN_SENDER_WORKSPACE = 'unknown';
+
+/**
+ * Senders that are not agents: Tower's own cron and the two UIs that relay the owner's
+ * word. None has an address to reply to, so each keeps its own frame whatever workspace the
+ * recipient is in.
+ */
+const NON_AGENT_SENDERS: ReadonlySet<string> = new Set([CRON_SENDER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER]);
+
+/**
+ * Who a frame is from (Spec 1940). `workspace` is REQUIRED by the type so that no path can
+ * format a message without saying where it came from: a path that left it out would give a
+ * cross-workspace message a same-workspace header on that path only. It is the sender's
+ * workspace path, or {@link UNKNOWN_SENDER_WORKSPACE}.
+ */
+interface FrameSender {
+  /** The sender's local id, as `/api/send`'s `from` carries it; absent for an unattributed send. */
+  id: string | undefined;
+  workspace: string;
+}
+
+/**
  * Format a message per sender/target — preserves the pre-1313 formatting rules.
  *
- * #1574: `toAgent` is the CANONICAL recipient the mailbox row is keyed on (the
+ * #1574: `recipient.agent` is the CANONICAL recipient the mailbox row is keyed on (the
  * architect reverse-map for architect targets, the resolved agent id otherwise),
  * so the header a recipient reads names the same identity the row was addressed
  * to. Passing anything else here would make the frame attest to a fiction.
  *
- * #1478: `from` is the SENDER, and it is threaded on the any → builder path too —
+ * #1478: `sender.id` is the SENDER, and it is threaded on the any → builder path too —
  * that branch used to discard it, so an `architect:<name>` origin reached the
  * builder's composer as a bare `ARCHITECT INSTRUCTION`. The two are complementary:
  * #1574 answers "was this addressed to me?", #1478 answers "who sent it?".
+ *
+ * Spec 1940: a message from an agent in ANOTHER workspace gets the cross-workspace frame,
+ * with the sender's qualified address and a reply command. Everything else, which is every
+ * send inside one workspace, runs the code below it exactly as before.
  */
 function formatMessageForTarget(
-  isArchitectTarget: boolean,
-  from: string | undefined,
-  toAgent: string,
+  recipient: MessageRecipient,
+  sender: FrameSender,
   message: string,
   raw: boolean,
 ): string {
+  const { agent: toAgent, isArchitect: isArchitectTarget } = recipient;
+  const from = sender.id;
+
+  if (!raw && from !== undefined && !NON_AGENT_SENDERS.has(from) && sender.workspace !== UNKNOWN_SENDER_WORKSPACE) {
+    const origin = crossWorkspaceOrigin({ id: from, workspace: sender.workspace }, recipient);
+    if (origin !== null) return formatCrossWorkspaceMessage(origin, toAgent, isArchitectTarget, message);
+  }
+
   // #1494: a human's approval relayed by the VS Code extension gets its own
   // header, so the architect can tell it from a peer-architect instruction.
   if (isArchitectTarget && from === VSCODE_USER_SENDER) return formatUserViaVsCodeMessage(toAgent, message, undefined, raw);
@@ -1936,7 +2137,15 @@ export async function deliverCronMessage(
     supersedeKey: task.name,
   };
 
-  const live = resolveTarget(task.target, task.workspacePath);
+  // Cron is not an agent: it has a workspace to read the address in, and no sender id.
+  const sender: SenderContext = { workspace: task.workspacePath };
+  const address = parseTarget(task.target);
+  if (isResolveError(address)) {
+    log('WARN', `Cron '${task.name}': target '${task.target}' is not an address (${address.message}) — message not delivered`);
+    return { outcome: 'unresolved', reason: null, detail: null, mailboxId: null };
+  }
+
+  const live = resolveTarget(address, sender);
   if (!isResolveError(live)) {
     const { toAgent } = liveTargetIdentity(live);
     return deliverCronMail(ports, db, {
@@ -1952,7 +2161,7 @@ export async function deliverCronMessage(
   // live PTY (Tower restarting, builder between respawns) — hold its mail so a
   // respawn drains it, instead of the old blind drop-with-WARN (decision 9).
   if (live.code === 'NOT_FOUND') {
-    const reg = resolveAgentInRegistry(task.target, task.workspacePath);
+    const reg = resolveAgentInRegistry(address, sender);
     if (!isResolveError(reg)) {
       return deliverCronMail(ports, db, {
         ...base,
@@ -1990,7 +2199,13 @@ async function notifyHubOfRuling(workspacePath: string, message: string, log: Ro
     workspacePath,
     toAgent,
     body: message,
-    formattedMessage: formatMessageForTarget(true, DECISIONS_TAB_SENDER, toAgent, message, false),
+    // Tower's own notice to this workspace's `main`: no sending agent, and the same workspace.
+    formattedMessage: formatMessageForTarget(
+      { workspacePath, agent: toAgent, isArchitect: true },
+      { id: DECISIONS_TAB_SENDER, workspace: workspacePath },
+      message,
+      false,
+    ),
     fromAgent: DECISIONS_TAB_SENDER,
     fromWorkspace: workspacePath,
   });
@@ -2073,8 +2288,10 @@ function logCeilingExpired(
 
 /** Inputs for a delayed (`--delay`) send, captured from the parsed request. */
 interface DelayedSendParams {
-  to: string;
-  workspace: string | undefined;
+  /** The recipient, already parsed. */
+  address: AgentAddress;
+  /** Who is asking: the sender's id and workspace, as the immediate path passes them. */
+  sender: SenderContext;
   from: string | undefined;
   message: string;
   raw: boolean;
@@ -2116,7 +2333,7 @@ function handleDelayedSend(
   db: ReturnType<typeof getGlobalDb>,
   params: DelayedSendParams,
 ): void {
-  const { to, workspace, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace } = params;
+  const { address, sender, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace } = params;
   const now = Date.now();
   const notBefore = now + deliverAfter * 1000;
 
@@ -2126,7 +2343,7 @@ function handleDelayedSend(
   let isArchitectTarget: boolean;
   let terminalId: string | null;
 
-  const live = resolveTarget(to, workspace, from);
+  const live = resolveTarget(address, sender);
   if (!isResolveError(live)) {
     const identity = liveTargetIdentity(live);
     workspacePath = live.workspacePath;
@@ -2134,11 +2351,9 @@ function handleDelayedSend(
     isArchitectTarget = identity.isArchitectTarget;
     terminalId = live.terminalId;
   } else if (live.code === 'NOT_FOUND') {
-    const reg = resolveAgentInRegistry(to, workspace, from);
+    const reg = resolveAgentInRegistry(address, sender);
     if (isResolveError(reg)) {
-      const statusCode = reg.code === 'AMBIGUOUS' ? 409 : reg.code === 'NO_CONTEXT' ? 400 : 404;
-      const errorCode = reg.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : reg.code;
-      sendJson(res, statusCode, { error: errorCode, message: reg.message });
+      sendResolveError(res, reg);
       return;
     }
     workspacePath = reg.workspacePath;
@@ -2146,13 +2361,16 @@ function handleDelayedSend(
     isArchitectTarget = reg.kind === 'architect';
     terminalId = null;
   } else {
-    const statusCode = live.code === 'AMBIGUOUS' ? 409 : live.code === 'NO_CONTEXT' ? 400 : 404;
-    const errorCode = live.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : live.code;
-    sendJson(res, statusCode, { error: errorCode, message: live.message });
+    sendResolveError(res, live);
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
+  const formattedMessage = formatMessageForTarget(
+    { workspacePath, agent: toAgent, isArchitect: isArchitectTarget },
+    { id: from, workspace: senderWorkspace },
+    message,
+    raw,
+  );
 
   // Persist NOW, at request time, with the due time. reason=null → SCHEDULED, not stuck.
   const row = enqueueMailbox(db, {
@@ -2342,7 +2560,23 @@ async function handleSend(
   }
 
   const db = getGlobalDb();
-  const senderWorkspace = fromWorkspace ?? workspace ?? 'unknown';
+  const senderWorkspace = fromWorkspace ?? workspace ?? UNKNOWN_SENDER_WORKSPACE;
+  // Who every frame built below is from. One value, so no path can frame the message as
+  // coming from somewhere the others do not.
+  const frameSender: FrameSender = { id: from, workspace: senderWorkspace };
+
+  // Spec 1940: the address is read once, here, by the one shared parser, and every path
+  // below resolves the structured form. Text that is not an address is refused before
+  // anything is resolved or stored, with the shape that was expected.
+  const address = parseTarget(to);
+  if (isResolveError(address)) {
+    sendResolveError(res, address);
+    return;
+  }
+  // Who is asking. `workspace` is where the sender reads addresses from, which is its own
+  // workspace; `fromWorkspace` says the same for provenance and stands in when the first
+  // is absent.
+  const sender: SenderContext = { id: from, workspace: workspace ?? fromWorkspace };
 
   // Spec 1313 round 3: a delayed send (`--delay`) is RESOLVED, authorized, formatted, and
   // PERSISTED here at REQUEST time, then deferred — it does NOT require a live session now,
@@ -2352,15 +2586,15 @@ async function handleSend(
   // makes the delay durable across a Tower restart.
   if (deliverAfter !== undefined) {
     handleDelayedSend(res, ctx, db, {
-      to, workspace, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace,
+      address, sender, from, message, raw, noEnter, interrupt, deliverAfter, senderWorkspace,
     });
     return;
   }
 
   // Resolve the target address against LIVE terminals.
-  // Spec 755: pass `from` so architect resolution is sender-affinity-aware
+  // Spec 755: the sender is passed so architect resolution is sender-affinity-aware
   // when the sender is a builder. Non-builder senders see unchanged behavior.
-  const result = resolveTarget(to, workspace, from);
+  const result = resolveTarget(address, sender);
 
   // --- Resolution failed against live terminals ---
   if (isResolveError(result)) {
@@ -2369,7 +2603,7 @@ async function handleSend(
     // its mail instead of 404ing. escape/interrupt act on a live session only, so
     // an unresolved target keeps the original error for them.
     if (result.code === 'NOT_FOUND' && !escape && !interrupt) {
-      const reg = resolveAgentInRegistry(to, workspace, from);
+      const reg = resolveAgentInRegistry(address, sender);
       if (!isResolveError(reg)) {
         holdAndRespond(
           res,
@@ -2378,7 +2612,12 @@ async function handleSend(
             workspacePath: reg.workspacePath,
             toAgent: reg.agent,
             body: message,
-            formattedMessage: formatMessageForTarget(reg.kind === 'architect', from, reg.agent, message, raw),
+            formattedMessage: formatMessageForTarget(
+              { workspacePath: reg.workspacePath, agent: reg.agent, isArchitect: reg.kind === 'architect' },
+              frameSender,
+              message,
+              raw,
+            ),
             fromAgent: from ?? null,
             fromWorkspace: senderWorkspace,
             noEnter,
@@ -2394,10 +2633,7 @@ async function handleSend(
       }
       // else: fall through to the original live-resolution error below.
     }
-    const statusCode = result.code === 'AMBIGUOUS' ? 409 : result.code === 'NO_CONTEXT' ? 400 : 404;
-    // Map NO_CONTEXT to INVALID_PARAMS per plan's error contract
-    const errorCode = result.code === 'NO_CONTEXT' ? 'INVALID_PARAMS' : result.code;
-    sendJson(res, statusCode, { error: errorCode, message: result.message });
+    sendResolveError(res, result);
     return;
   }
 
@@ -2405,6 +2641,7 @@ async function handleSend(
   const manager = getTerminalManager();
   const session = manager.getSession(result.terminalId);
   const { toAgent, isArchitectTarget } = liveTargetIdentity(result);
+  const recipient: MessageRecipient = { workspacePath: result.workspacePath, agent: toAgent, isArchitect: isArchitectTarget };
 
   // Dead session: the routing entry resolved but the PTY is gone (exited > 30s).
   // Hold a normal message; escape/interrupt need a live session → original 404.
@@ -2423,7 +2660,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
+        formattedMessage: formatMessageForTarget(recipient, frameSender, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -2454,7 +2691,7 @@ async function handleSend(
         workspacePath: result.workspacePath,
         toAgent,
         body: message,
-        formattedMessage: formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw),
+        formattedMessage: formatMessageForTarget(recipient, frameSender, message, raw),
         fromAgent: from ?? null,
         fromWorkspace: senderWorkspace,
         noEnter,
@@ -2504,7 +2741,7 @@ async function handleSend(
     return;
   }
 
-  const formattedMessage = formatMessageForTarget(isArchitectTarget, from, toAgent, message, raw);
+  const formattedMessage = formatMessageForTarget(recipient, frameSender, message, raw);
 
   // NB: `--delay` (deliverAfter) is handled earlier by handleDelayedSend, before this
   // immediate-path block — a delayed send is resolved + persisted at request time and does
