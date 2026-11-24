@@ -921,3 +921,157 @@ head is the full check.
   `porch done`. Carried into phase 5: the lazy front door (note 1), the `NAME_TAKEN` wording
   for a shared basename and the comment on which name wins (phase 3), `afx whoami` and the
   listing through the naming module with `getRegisteredWorkspaces(db)` on a read-only handle.
+
+## 2026-11-24 — phase 5 built: the address book, `afx workspace list`, the whoami address
+
+Resumed after a context refresh at the phase boundary.
+
+**First commit, `47aedc3ef`: the lazy front door** (phase 4 reviewer's note). `crossWorkspaceOrigin`
+resolves the front door only when the sender's own address is refused. A test pins it by counting
+reads of the name table: one for an architect recipient, two for a builder.
+
+**What exists now.**
+
+- `GET /api/address-book?workspace=<path>&from=<id>` (`servers/tower-address-book.ts`, the handler
+  in `tower-routes.ts`, the type in `codev-types`, `TowerClient.getAddressBook` in the SDK). Every
+  workspace Tower has registered: the running ones with their architects, builders and shells, then
+  the ones not running. Each agent has an address, `live`, `sendable`, and `reachThrough` when the
+  caller may not name it.
+- `afx workspace list [--json]` (`commands/workspace-list.ts`). It says who is asking exactly as
+  `afx send` says who is sending. Its output for the spec's sample is the spec's sample, character
+  for character.
+- `afx whoami` prints `address: <address>` as its last line, and `address` in `--json`. When there
+  is none: `address: none (<reason>)`, and `addressUnavailable` in `--json`. Lines before it and
+  exit codes are as they were.
+- `printableAddressName` in the naming module: the address name, refused when it is a directory name
+  outside the component rule. The reply footer (phase 4), the listing and whoami all use it, so one
+  rule decides what is ever printed as an address.
+
+**Decisions I made, for the review to check:**
+
+1. **`sendable` is the resolver's answer, not a second copy of its rules.** The plan says the field
+   "comes from the phase 2 permission check, asked as the caller". I do ask that check
+   (`refusalToAddress`), and it decides whether a way in is shown. But `sendable` itself is found by
+   writing the address as text, reading it back with the shared parser and resolving it as the
+   caller, live terminals then the registry, as the send route does; it is true only if that reaches
+   the agent on that line. Two cases the permission check alone gets wrong, both tested: a shell
+   whose id is the tail of a builder's id (the address reaches the builder), and two registered
+   builders whose ids differ only in letter case.
+2. **`live` is the send route's own test**: the session exists and is writable. Found by the
+   real-Tower run below: my first version read the terminal map and called an agent `live` whose
+   mail the send route then held as `no-live-pty`.
+3. **A workspace with no usable name.** Its agents have `address: null` and are printed in
+   brackets with `no address`, except for the caller's own workspace, where the short form
+   (`architect:review`) is given and is checked the same way.
+4. **A directory name outside the component rule** (a space, a capital the file system kept is
+   lower-cased and fine; a colon, a leading dot) is listed as having no address name, with
+   `afx workspace name <name>`. The resolver still matches such a name, as before; it is only never
+   printed as an address, which is the rule phase 4 set for frames.
+5. **A workspace that is not running is listed with no agents.** Nothing sent to it resolves, so
+   listing its registry rows as addresses would print lines that fail.
+6. **The way in.** For a builder, an architect in another workspace shows that workspace's front
+   door (`reach through codev-cloud:architect`, the plan's example). Another architect in its OWN
+   workspace shows `reach through architect`, its own architect. The way in is itself resolved as
+   the caller and left out when it reaches nobody.
+7. **whoami and "running".** The naming rules need to know which workspaces are running, and only
+   Tower holds that list. whoami reads `terminal_sessions` from global.db on its read-only handle
+   (a workspace with a terminal row is counted as running) and counts the caller's own workspace as
+   running. Tower writes those rows when it starts a terminal and deletes them when the workspace
+   stops, so the two agree except in the moment between. I chose this over "every registered
+   workspace counts as running", which would deny an address for ever to a workspace that shares a
+   directory name with a stale row. **The architect should confirm this reading.**
+8. **whoami with no address**: no fallback to the directory name. global.db unreadable, a database
+   from before migration v20, or a workspace with no usable name each give `address: none (why)`.
+   Identity and exit code are unaffected, as for the `workspace` line.
+9. **The carried phase 3 notes.** `NAME_TAKEN` for an unnamed workspace's directory name now reads
+   "is the directory name of the workspace X, which has no name of its own. Choose another name, or
+   first give that workspace one by running `afx workspace name <name>` in it", true whether or not
+   the two share the name. `everyWorkspace` carries the comment on which name wins when two rows
+   spell one directory, and two tests pin it.
+
+**Known boundaries (for the review):**
+
+- The listing reads the name table once and resolves each address against the table as it is at
+  that moment. A rename in between gives lines marked not sendable, never a wrong `sendable`
+  (tested).
+- On this machine global.db has 52 registered workspaces and 12 running. The not-running ones are
+  one line each, after the running ones.
+- `--json` is Tower's response as it came. Paths and reasons in the text output have control
+  characters replaced, so a path cannot forge a line of the listing.
+
+**Tests.** `spec-1940-address-book.test.ts` (new, 34: the table for an architect and a builder; six
+callers each fed back through the real resolvers; liveness; unusable names; addresses that would
+reach another agent). `tower-routes.test.ts` (+10: the route as an architect and as a builder, every
+listed address then SENT through `POST /api/send` as that caller, stored for the agent it was
+printed for, or refused with the way in accepted). `workspace-list.test.ts` (new, 16).
+`spec-1134-whoami.test.ts` (+15; three existing exact-output assertions gained the added line).
+`workspace-address.test.ts` (+12). `spec-1940-reply-footer.test.ts` (+1). SDK
+`tower-client-address-book.test.ts` (new, 4). Twenty-four mutations of the new code each fail a
+test; two survived at first and each got a test.
+
+**Checked on a real Tower** (a one-off e2e file, not committed: phase 6 owns the kept one). Built
+Tower on an isolated port and directory; three workspaces, two of them directories called `codev`.
+The listing is `GET /api/address-book` printed by `formatAddressBook`; each `send` is
+`POST /api/send` as that caller; `afx whoami` is the built CLI run in the workspace against that
+Tower's database. The architects there run `bash` and take no input, which is why they read
+`no live terminal`; the builder is an inert `sh`.
+
+```
+$ afx workspace list        # as architect:main in <tmp>/a/codev, two directories called codev
+(no address name)    <tmp>/a/codev
+  no address name: it shares the directory name 'codev' with <tmp>/b/codev; give it a name of its own: afx workspace name <name>
+  architect:main                no live terminal
+  architect:review              no live terminal
+(no address name)    <tmp>/b/codev
+  no address name: it shares the directory name 'codev' with <tmp>/a/codev; give it a name of its own: afx workspace name <name>
+  (architect:main)              no live terminal    no address
+codev-cloud          <tmp>/codev-cloud
+  codev-cloud:architect:main    no live terminal
+  codev-cloud:builder-spir-7    live
+$ afx whoami                # architect review in <tmp>/a/codev
+address: none (this workspace has no address name: it shares the directory name 'codev' with <tmp>/b/codev; give it a name of its own: afx workspace name <name>)
+$ afx workspace name one    # in <tmp>/a/codev
+$ afx workspace list        # as architect:review in <tmp>/a/codev (now `one`)
+one            <tmp>/a/codev
+  one:architect:main            no live terminal
+  one:architect:review          no live terminal
+codev          <tmp>/b/codev
+  codev:architect:main          no live terminal
+codev-cloud    <tmp>/codev-cloud
+  codev-cloud:architect:main    no live terminal
+  codev-cloud:builder-spir-7    live
+  send one:architect:main -> 200 resolvedTo=main held(no-live-pty)
+  send one:architect:review -> 200 resolvedTo=review held(no-live-pty)
+  send codev:architect:main -> 200 resolvedTo=main held(no-live-pty)
+  send codev-cloud:architect:main -> 200 resolvedTo=main held(no-live-pty)
+  send codev-cloud:builder-spir-7 -> 200 resolvedTo=builder-spir-7 held(no-profile)
+$ afx workspace list        # as builder-spir-7 in <tmp>/codev-cloud
+one            <tmp>/a/codev
+  one:architect:main            no live terminal    reach through one:architect
+  one:architect:review          no live terminal    reach through one:architect
+codev          <tmp>/b/codev
+  codev:architect:main          no live terminal    reach through codev:architect
+codev-cloud    <tmp>/codev-cloud
+  codev-cloud:architect:main    no live terminal
+  codev-cloud:builder-spir-7    live
+  send one:architect:main -> 403 REFUSED          send one:architect -> 200 resolvedTo=main
+  send one:architect:review -> 403 REFUSED        send one:architect -> 200 resolvedTo=main
+  send codev:architect:main -> 403 REFUSED        send codev:architect -> 200 resolvedTo=main
+  send codev-cloud:architect:main -> 200 resolvedTo=main
+  send codev-cloud:builder-spir-7 -> 200 resolvedTo=builder-spir-7
+$ afx whoami                # architect review in <tmp>/a/codev
+address: one:architect:review          send from <tmp>/codev-cloud -> 200 resolvedTo=review
+$ afx whoami                # architect main in <tmp>/b/codev
+address: codev:architect:main          send from <tmp>/codev-cloud -> 200 resolvedTo=main
+$ afx whoami                # architect main in <tmp>/codev-cloud
+address: codev-cloud:architect:main    send from <tmp>/a/codev -> 200 resolvedTo=main
+```
+
+(The whoami lines above show only the `address:` line; the three lines before it were as today.)
+The test also asserted, for each send, that "held for want of a terminal" and `live: false` in the
+listing are the same fact. Teardown deactivated all three workspaces and asserted that no process
+naming that Tower's socket directory survived: passed.
+
+**A fifth bare `cd`.** In one command of this phase I wrote `cd packages/codev && python3 …` with
+no parentheses. The next command was `cd` back to the worktree root; nothing was written or staged
+from the wrong directory.
