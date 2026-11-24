@@ -36,3 +36,17 @@ Fix plan (~250 LOC with tests, fits BUGFIX):
 
 `overriddenChecks` on `runPhaseChecks` is never passed by any caller. Noted, left alone: it is about
 artifact checks, not output.
+
+## 2026-11-23 — fix built, draft PR #1964
+
+Fix and test commits pushed (c0cc478cb, c49ccc5f9). Seven new tests; six fail against the old
+`checks.ts`. Targeted runs: 8 files, 90/90; `tsc --noEmit` clean; `pnpm build` clean. End-to-end with
+the built CLI in a scratch workspace and with a real failing vitest test under `npm test`: the tail
+names the test and ends with the log path, and `git status` stays clean.
+
+Surprise worth knowing: the POSIX launcher collapses runs of whitespace in a check's command
+(`posixCollapseWhitespace`), so an `echo "FAIL  x"` in a check prints `FAIL x`. The test strings use
+single spaces for that reason.
+
+Draft PR #1964 opened so CI runs the full suite; Windows on-demand run 45303921745 dispatched.
+Holding before `porch done` (fix phase's `tests` check is the full local suite) per architect rule 2.
