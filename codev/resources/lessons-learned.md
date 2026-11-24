@@ -357,6 +357,17 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
   The detector was checked against all 110 committed shots: it flagged exactly the 12.
 
+- [From #1963] **Rendered evidence belongs on a never-merged evidence branch, not in the PR's
+  tree.**
+  - Screenshots, results JSON and DOM snapshots committed per phase made every claim checkable.
+  - They also put 15 MB, with 114 PNGs, into one project folder. All of `codev/projects` on main
+    is 4.8 MB with no PNG.
+  - With every retake, they added 23.5 MB of blobs to a 68 MB pack.
+
+  Push evidence to an orphan branch (`evidence/<builder-id>`; plumbing, no checkout). Commit only
+  an index to the PR branch: each check, its pass count, and permalinks pinned to the evidence
+  commit's SHA. Decide this before the first harness run: blobs already pushed stay in history.
+
 - [From #1915] A test's cleanup that kills every pid it recorded can kill an unrelated process: Windows reuses pids quickly, and the recorded process is often long dead by `afterAll`. Kill a recorded pid only if the live process with that pid was created no later than the recording (`__tests__/helpers/tracked-pids.ts`). This matters more than it looks because vitest 4 ignores `poolOptions.forks.singleFork`, so test files run in parallel workers: one file's cleanup ran inside another file's assertion window and is the likely killer of a CIM-created Tower in tower-lifecycle.windows Phase 4(b).
 
 - [From #1595] Harness hook semantics are claims to measure in a real session, not to read from docs. Two spikes and full unit coverage still missed that Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the turn's background task runs (it flipped a working agent to idle), and that an approved permission fires no hook at all (#1851). Both surfaced only in Phase 8's scripted real-session run with permissions in `default` mode: the operator's `auto` mode never raises a prompt, so a verification run must set the mode it means to test.

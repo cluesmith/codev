@@ -89,17 +89,26 @@ Decisions render identically, apart from two intended fixes in the shared views.
 - [x] **`contributes-*` tests cover the additions; existing ones pass unmodified apart from
   additions** (Phases 4, 5, 7–9). `worktree-window-1809.test.ts` and `cockpit-wiring.test.ts`
   follow the generalised wiring, as the criterion allows.
-- [x] **Verified by rendering, with screenshots in the PR** (Phases 5, 7, 8, 9). Evidence is
-  committed under `codev/projects/1963-vscode-alternative-layout-seco/verification-*`, and the PR
-  embeds the button, the hierarchy and the split.
+- [x] **Verified by rendering, with screenshots in the PR** (Phases 5, 7, 8, 9).
+  - The evidence is on the never-merged branch `evidence/spir-1963`.
+  - `codev/projects/1963-vscode-alternative-layout-seco/verification.md` indexes every check with
+    its pass count and SHA permalinks: 127/127.
+  - The PR embeds the button, the hierarchy, both panels and the split, by permalink.
 - [x] **Lint, type-check and the full suites pass** (every phase).
   - apps/vscode: 133 files, 1818 tests, 1 Windows-only skip.
   - packages/workspace-views: 197 tests. packages/sdk: 227 tests.
   - apps/web: 37 files, 459 tests. Locally this needs `NODE_OPTIONS=--no-experimental-webstorage`,
     because Node 26's `localStorage` shadows jsdom's; CI runs Node 20.
   - Lint shows only the 2 existing `curly` warnings.
-  - The `vscode-test` Electron suite (`src/test/`) is type-checked, but no workflow runs it, and it
-    was not run locally.
+  - After the merge from main (3.3.8): apps/vscode has 133 files, with 1820 tests passing and 1
+    Windows-only skip; workspace-views passes 197.
+  - The `vscode-test` Electron suite (`src/test/`) was not run.
+    - It is a pre-existing suite, and this PR does not touch it.
+    - No workflow runs it on main.
+    - Open issue #1765 says it cannot launch recent VS Code on macOS.
+
+    The spec's "full `apps/vscode` suites" criterion is met by the vitest suite (architect ruling,
+    PR review iteration 1).
 
 ## Deviations from Plan
 
@@ -197,6 +206,7 @@ literals needed the new field.
   - The ten in `verification-increment1/` (`actions-*`, `reconnect-*`) were replaced by runs on
     the final code, with the two scripts' JSON. The folder's README says which files those are.
   - The two in `verification-phase9/` were replaced with the rest of that folder.
+  - Both folders then moved to the evidence branch, as the next item describes.
   - History was not rewritten. The old shots stay in the branch history, and the architect has
     told the owner.
 
@@ -206,9 +216,21 @@ literals needed the new field.
     `requests` 5/5, `actions` 28/28, `reconnect` 4/4.
   - Then `verify arrange` 19/19 on its own `start`.
 
-  The evidence is in `verification-phase9/`, and in `verification-increment1/` for `actions` and
-  `reconnect`. As the architect directed, `verify arrange` runs again on the final head after the
-  last commit, with the one Windows dispatch, and the gate message reports both.
+  This evidence is in `verification-phase9/`, and in `verification-increment1/` for `actions`
+  and `reconnect`, on the evidence branch. As the architect directed, `verify arrange` runs again
+  on the final head after the last commit, with the one Windows dispatch, and the gate message
+  reports both. That run's evidence goes only to the evidence branch.
+- **Evidence out of the tree** (architect ruling, PR review iteration 1).
+  - The architect measured the branch:
+    - +66,052 lines in 299 files; without `codev/projects`, +26,674 in 147.
+    - `codev/projects/1963-*` held 15 MB, with 114 PNGs. All of `codev/projects` on main is 4.8 MB,
+      with no PNG.
+    - Counting every retake, the branch added 23.5 MB of evidence blobs to a 68 MB pack.
+  - The evidence (screenshots, results JSON, the four dashboard snapshots, the spike's PNGs) now
+    lives on the orphan branch `evidence/spir-1963`, which is never merged.
+  - The PR branch keeps `verification.md`, an index of every check with SHA permalinks, and the
+    spike's text files.
+  - The old blobs stay in this branch's history. Scrubbing them before merge is the owner's call.
 
 ## Consultation Feedback
 
@@ -599,12 +621,15 @@ review is the first to see it.*
   fixes went untested by the harness until the review phase.
 - Put the contrast scan into the first rendered theme check, instead of adding it after a reviewer
   saw faint text.
+- Push rendered evidence to a separate evidence branch from the first harness run, rather than
+  into the PR's tree.
 
 ### Methodology Improvements
 
-- **Commit evidence.** Rendered-evidence directories committed per phase, with their JSON results,
-  made each phase's claims checkable by reviewers and the architect. The pattern is worth making the
-  default for UI specs.
+- **Keep evidence, not in the tree.** Rendered evidence per phase, with its JSON results, made each
+  phase's claims checkable by reviewers and the architect. Committed into the PR's tree, though, it
+  would have added 15 MB of PNGs and snapshots to main, against 4.8 MB for all of `codev/projects`.
+  Push it to a never-merged evidence branch, and commit only an index with SHA permalinks.
 - **Refresh boundaries.** Porch recorded the `arrange_cockpit` refresh boundary as acknowledged when
   `porch next` was called a second time, before the refresh had actually run (noted in the thread).
   A boundary should not count as acknowledged until the refresh has been done.
@@ -648,6 +673,9 @@ review is the first to see it.*
 - Routed: **cold**, *Security*: VS Code's webview script opens any clicked anchor with an `href`
   through VS Code's own opener. It listens on the window and ignores `defaultPrevented`, so a host
   allowlist needs the click stopped before it bubbles.
+- Routed: **cold**, *Testing*: rendered evidence belongs on a never-merged evidence branch, with
+  only an index of SHA permalinks in the PR's tree. In the tree it put 15 MB of evidence into one
+  project folder.
 - Routed: **cold**, *Testing*: screenshots bound for a public repo need a neutral shell prompt in
   the harness HOME and an OCR gate that fails the run. A one-off fix of the noticed shot left 11
   more.

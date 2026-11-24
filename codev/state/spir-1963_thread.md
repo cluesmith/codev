@@ -1160,3 +1160,26 @@ run.
     exactly those 12 of the 110 committed shots.
   - **Replaced:** the ten `verification-increment1` actions/reconnect shots, by final-code runs.
   - **Not done:** no history rewrite. That is the owner's call, and the architect has told them.
+- **PR consultation, iteration 1:** codex REQUEST_CHANGES, claude APPROVE.
+  - The architect's rulings (16:39Z):
+    - **Electron suite = A.** It is pre-existing and untouched, no workflow runs it, and #1765
+      says it cannot launch recent VS Code on macOS. The vitest suite meets the criterion.
+    - **Merge main:** a merge commit, no rebase.
+    - **Claude's three code points:** fixed in place.
+    - **Dormant rebuttal:** agreed.
+    - **Evidence out of the tree.**
+  - Fixed in `69aa91e3d`:
+    - the Decisions bridge no longer forwards a raw transport error, which can name Tower's port;
+    - arrange throws when there is no terminal manager;
+    - `SingleWebviewPanel.dispose()` drops the panel's listeners.
+  - Merge commit `f331978a7`: main at 3.3.8. CHANGELOG and lessons-learned conflicts kept both
+    sides.
+  - After the merge, apps/vscode has 1820 tests passing, with 1 skip. The one failure was a
+    wiring source test that pinned the old optional call; it was updated in `98a7c2c17`.
+- **Evidence branch:**
+  - `evidence/spir-1963` is an orphan commit `1d5cc1e40`, built with plumbing from HEAD's blobs
+    (temp index, `commit-tree`; no checkout or worktree) and pushed.
+  - The PR branch drops the five `verification-*/` folders and the six spike PNGs. It gains
+    `verification.md`, generated from the results JSON: 127/127 checks, with SHA permalinks.
+  - From here, no evidence binaries go to `builder/spir-1963`. The final `verify arrange` goes
+    only to the evidence branch.
