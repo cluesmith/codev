@@ -104,6 +104,21 @@ describe('WorkView — loading and data', () => {
     expect(screen.getByText('No active builders')).toBeInTheDocument();
     expect(screen.getByText('Nothing needs attention')).toBeInTheDocument();
   });
+
+  it('shows each section loading under an error that came before any overview, never empty', () => {
+    // VS Code before it has connected, or the dashboard's failed first read: no section may claim
+    // the workspace is empty.
+    show(fakeWorkHost({ overview: { data: null, error: 'Not connected to Tower.' } }));
+    expect(screen.getByText('Failed to load overview: Not connected to Tower.')).toBeInTheDocument();
+    expect(screen.getAllByText('Loading...')).toHaveLength(3);
+    for (const section of ['Builders', 'Needs Attention', 'Backlog']) {
+      expect(screen.getByRole('heading', { name: section })).toBeInTheDocument();
+    }
+    expect(screen.queryByText('No active builders')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nothing needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('No open issues')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
 });
 
 describe('WorkView — controls follow the host\'s actions', () => {

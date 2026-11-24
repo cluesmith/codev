@@ -59,6 +59,12 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
   // Spec 823: count once outside the render loop so each BuilderCard receives a stable prop. With
   // no architects counted, `architectCount > 1` is false and no attribution span renders.
   const attributionCount = architectCount ?? overview?.architects?.length ?? 0;
+  // An error before any overview (VS Code not connected yet, or the dashboard's first read
+  // failed): each section says it is still loading under the error, since an empty section would
+  // claim the workspace has no builders or issues. With no error, a first read in flight keeps the
+  // dashboard's empty sections, as before.
+  const loading = overview === null && Boolean(overviewError);
+  const sectionLoading = <p className="work-empty work-section-loading">Loading...</p>;
 
   return (
     <div className={`work-view ${panelOpen ? 'file-panel-open' : ''}`}>
@@ -103,7 +109,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
                 ))}
               </tbody>
             </table>
-          ) : (
+          ) : loading ? sectionLoading : (
             <p className="work-empty">No active builders</p>
           )}
         </section>
@@ -122,7 +128,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
           <h3 className="work-section-title">Needs Attention</h3>
           {overview?.errors?.prs ? (
             <p className="work-unavailable">{overview.errors.prs}</p>
-          ) : (
+          ) : loading ? sectionLoading : (
             <NeedsAttentionList
               prs={overview?.pendingPRs ?? []}
               builders={overview?.builders ?? []}
@@ -137,7 +143,7 @@ export function WorkView({ host, slots = {}, architectCount }: WorkViewProps) {
           <h3 className="work-section-title">Backlog</h3>
           {overview?.errors?.issues ? (
             <p className="work-unavailable">{overview.errors.issues}</p>
-          ) : (
+          ) : loading ? sectionLoading : (
             <BacklogList items={overview?.backlog ?? []} onOpenArtifact={openArtifact} onOpenExternal={openExternal} />
           )}
         </section>

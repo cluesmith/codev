@@ -253,8 +253,9 @@ describe('what the Work view is shown', () => {
   it.each<[string, OverviewData | null, ConnectionState, unknown]>([
     ['loading while connecting', null, 'connecting', null],
     ['loading while connected, before the first overview', null, 'connected', null],
-    ['the notice with nothing to keep while disconnected', null, 'disconnected', { data: null, error: NOT_CONNECTED_MESSAGE }],
-    ['the notice with nothing to keep while reconnecting', null, 'reconnecting', { data: null, error: NOT_CONNECTED_MESSAGE }],
+    // With nothing to keep, the view shows the notice over sections that say they are loading.
+    ['the notice, nothing kept, while disconnected', null, 'disconnected', { data: null, error: NOT_CONNECTED_MESSAGE }],
+    ['the notice, nothing kept, while reconnecting', null, 'reconnecting', { data: null, error: NOT_CONNECTED_MESSAGE }],
     ['the overview while connected', DATA, 'connected', { data: DATA, error: null }],
     ['the last overview under the notice while reconnecting', DATA, 'reconnecting', { data: DATA, error: NOT_CONNECTED_MESSAGE }],
     ['the last overview under the notice while disconnected', DATA, 'disconnected', { data: DATA, error: NOT_CONNECTED_MESSAGE }],
@@ -399,6 +400,25 @@ describe('artifact links open a workspace file, and nothing outside it', () => {
     await panels[0].send({ type: 'work/open-artifact', path });
     await vi.waitFor(() => expect(actions.warn).toHaveBeenCalledWith(`Codev: ${path} was not opened: it is outside this workspace.`));
     expect(actions.openFile).not.toHaveBeenCalled();
+  });
+
+  it('drops a refusal that lands after the panel closed: no toast', async () => {
+    const { manager, actions, log } = setup({ root });
+    manager.show();
+    const sent = panels[0].send({ type: 'work/open-artifact', path: '../outside.md' });
+    panels[0].dispose();
+    await sent;
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('did not open ../outside.md: outside-workspace.')));
+    expect(actions.warn).not.toHaveBeenCalled();
+    expect(actions.openFile).not.toHaveBeenCalled();
+  });
+
+  it('logs an editor that would not open, rather than leaving an unhandled rejection', async () => {
+    const { manager, actions, log } = setup({ root });
+    actions.openFile.mockRejectedValueOnce(new Error('the file went away'));
+    manager.show();
+    await panels[0].send({ type: 'work/open-artifact', path: 'codev/specs/1963-cockpit.md' });
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith('Work panel: a message from its webview failed: the file went away'));
   });
 
   it('says a missing file was not found', async () => {

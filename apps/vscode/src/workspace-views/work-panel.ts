@@ -165,6 +165,8 @@ class WorkPanelSession extends PanelSession<WorkHostMessage> {
       return;
     }
     this.log(`did not open ${requested}: ${resolved.reason}.`);
+    // A refusal that lands after the panel closed is dropped: no toast for a panel that is gone.
+    if (this.closed) { return; }
     actions.warn(resolved.reason === 'not-found'
       ? `Codev: ${requested} was not found in this workspace.`
       : `Codev: ${requested} was not opened: it is outside this workspace.`);

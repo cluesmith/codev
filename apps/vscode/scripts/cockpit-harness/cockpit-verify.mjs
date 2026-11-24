@@ -2291,7 +2291,30 @@ SCRIPTS.work = async (R, context, page) => {
         range.selectNodeContents(cell);
         return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
       });
+      // How much of a typical title shows: a copy of the first row (not React's) carrying a
+      // 44-character title, measured character by character against the cell's text box.
+      const TYPICAL = 'VS Code alternative layout: a second Cockpit';
+      const row = document.querySelector('.builder-table tbody .builder-row');
+      const probe = row.cloneNode(true);
+      const cell = probe.querySelector('.builder-col-title');
+      cell.textContent = TYPICAL;
+      row.parentElement.appendChild(probe);
+      const text = cell.firstChild;
+      const style = getComputedStyle(cell);
+      const edge = cell.getBoundingClientRect().right - parseFloat(style.paddingRight);
+      const range = document.createRange();
+      let fits = 0;
+      for (let i = 0; i < TYPICAL.length; i++) {
+        range.setStart(text, i);
+        range.setEnd(text, i + 1);
+        if (range.getBoundingClientRect().right > edge + 0.5) break;
+        fits++;
+      }
+      probe.remove();
+      // When the title is cut, the ellipsis takes the place of about one character.
+      const titleShown = fits === TYPICAL.length ? fits : Math.max(0, fits - 1);
       return {
+        titleShown,
         stateLines,
         width: Math.round(content.clientWidth),
         sideways: content.scrollWidth - content.clientWidth,
@@ -2303,11 +2326,11 @@ SCRIPTS.work = async (R, context, page) => {
         overlaps,
       };
     });
-    if (fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length || fit.stateLines.some((n) => n !== 1)) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
+    if (fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length || fit.stateLines.some((n) => n !== 1) || fit.titleShown < 20) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
     const shots = [await R.shot(page, 'both-panels-dark')];
     await setTheme(page, 'Light Modern');
     shots.push(await R.shot(page, 'both-panels-light'));
-    return { detail: `active tabs by group ${JSON.stringify(groups)}; alpha, beta and gamma expanded to their Decisions entries; Work at ${fit.width} px: no sideways scroll, each state on one line, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}, no label overlaps`, shots };
+    return { detail: `active tabs by group ${JSON.stringify(groups)}; alpha, beta and gamma expanded to their Decisions entries; Work at ${fit.width} px: no sideways scroll, a typical 44-character title shows ${fit.titleShown} characters, each state on one line, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}, no label overlaps`, shots };
   });
 
   await R.check('the panel is restored after a window reload', async () => {

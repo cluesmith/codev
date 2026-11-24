@@ -155,9 +155,9 @@ summary:focus-visible {
  * Narrow panels. The dashboard's Work view fills a browser page; in VS Code it is often a
  * half-width editor group, beside Decisions. There the builders table's fixed columns overran the
  * panel, cutting off each row's Open button, and a backlog row's reviewer and assignee labels ran
- * over its spec / plan links (found rendered at about 470 px). These rules are VS
- * Code's own, so the dashboard keeps its layout: as the panel narrows, the secondary columns and
- * labels go first, and the issue, title, state and Open always fit.
+ * over its spec / plan links (found rendered at about 470 px). These rules are VS Code's own, so
+ * the dashboard keeps its layout: as the panel narrows, the secondary columns and labels go first,
+ * then each builder row takes two lines, and the issue, title, state and Open always fit.
  */
 .work-view {
   container: work-view / inline-size;
@@ -172,27 +172,90 @@ summary:focus-visible {
   }
 }
 
+/*
+ * Under 600 px (Work in a half-width group) a builder row is two lines: the issue, the title and
+ * Open on the first, the state under the title. On one line the state or the title had to give:
+ * the state wrapped to three lines, or the title shrank to four characters (both found rendered at
+ * about 470 px), and the title is what is read. The row becomes a grid, so the card (its fill,
+ * border and status stripe) moves from the cells to the row. The column headings no longer head
+ * columns: they are hidden from view, kept for screen readers.
+ */
 @container work-view (max-width: 600px) {
-  .builder-table thead th:nth-child(4),
   .builder-col-progress {
     display: none;
   }
 
-  /* The state stays on one line ("Blocked: spec review" wrapped to three beside a short title);
-     the title takes what is left, and ellipsizes. */
-  .builder-col-state {
-    width: auto;
+  .builder-table,
+  .builder-table tbody {
+    display: block;
   }
 
-  .builder-col-title {
-    width: auto;
+  .builder-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
-}
 
-/* Only a very narrow panel wraps the state, rather than scroll sideways. */
-@container work-view (max-width: 400px) {
-  .builder-col-state {
+  .builder-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "id title actions"
+      ". state actions";
+    align-items: center;
+    margin-bottom: 4px;
+    background: var(--codev-wv-bg-secondary);
+    border: 1px solid var(--codev-wv-border);
+    border-radius: 8px;
+  }
+
+  .builder-row:hover {
+    border-color: var(--codev-wv-accent);
+  }
+
+  /* After the hover rule, so the status stripe keeps its colour under the pointer. */
+  .builder-row.builder-row--blocked {
+    border-left: 3px solid var(--codev-wv-status-waiting);
+  }
+
+  .builder-row.builder-row--dead {
+    border-left: 3px solid var(--codev-wv-status-error);
+  }
+
+  .builder-row td,
+  .builder-row td:first-child,
+  .builder-row td:last-child {
+    background: none;
+    border: none;
+    border-radius: 0;
+  }
+
+  .builder-row .builder-col-id {
+    grid-area: id;
+    padding-bottom: 0;
+  }
+
+  .builder-row .builder-col-title {
+    grid-area: title;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    padding-bottom: 0;
+  }
+
+  .builder-row .builder-col-state {
+    grid-area: state;
+    width: auto;
     white-space: normal;
+    padding-top: 2px;
+  }
+
+  .builder-row .builder-col-actions {
+    grid-area: actions;
+    width: auto;
   }
 }
 

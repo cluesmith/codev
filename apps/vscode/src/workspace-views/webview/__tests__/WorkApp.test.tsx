@@ -3,7 +3,8 @@
  * Spec 1963 scenarios 10 and 17 (webview side): the Work panel's UI, fed through its store as the
  * extension host's `work/overview` messages feed it.
  * - Loading until the first overview; then builders, Needs Attention, Backlog and Recently Closed;
- *   the last overview stays under the not-connected notice.
+ *   the last overview stays under the not-connected notice, and with none yet the sections say
+ *   they are loading under it.
  * - Every kept control is a message to the extension host: *Open*, *+ Shell*, *Refresh*, a
  *   *spec* / *plan* / *review* link, and an issue or PR link, which the webview does not follow.
  * - The affordances VS Code drops (Open Files & Shells, the file panel, the tip of the day) are
@@ -118,6 +119,16 @@ describe('what the Work panel shows', () => {
     expect(screen.getByText('Cockpit layout')).toBeTruthy();
     push({ type: 'work/overview', overview: { data: DATA, error: null } });
     expect(screen.queryByText(/Not connected to Tower/)).toBeNull();
+  });
+
+  it('before any overview, shows the not-connected notice over sections that are loading, none empty', () => {
+    const { push } = mount();
+    push({ type: 'work/overview', overview: { data: null, error: 'Not connected to Tower.' } });
+    expect(screen.getByText('Failed to load overview: Not connected to Tower.')).toBeTruthy();
+    expect(screen.getAllByText('Loading...')).toHaveLength(3);
+    expect(screen.queryByText('No active builders')).toBeNull();
+    expect(screen.queryByText('Nothing needs attention')).toBeNull();
+    expect(screen.queryByText('No open issues')).toBeNull();
   });
 
   it('renders none of the dropped dashboard affordances', () => {

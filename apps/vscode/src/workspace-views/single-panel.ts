@@ -134,7 +134,12 @@ export abstract class PanelSession<HostMessage> {
     private readonly logLine: (line: string) => void,
   ) {
     this.track(
-      panel.webview.onDidReceiveMessage((message: unknown) => { void this.onMessage(message); }),
+      // A handler that throws (an editor that would not open) is logged, never an unhandled rejection.
+      panel.webview.onDidReceiveMessage((message: unknown) => {
+        this.onMessage(message).catch((err: unknown) => {
+          this.log(`a message from its webview failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }),
       panel.onDidDispose(() => {
         this.disposed = true;
         for (const subscription of this.subscriptions) { subscription.dispose(); }
@@ -144,6 +149,11 @@ export abstract class PanelSession<HostMessage> {
 
   /** Answer one message from the webview. Messages are untrusted: act only on what a guard accepts. */
   protected abstract onMessage(message: unknown): Promise<void>;
+
+  /** Whether the panel has closed: work that finishes after that drops its result. */
+  protected get closed(): boolean {
+    return this.disposed;
+  }
 
   /** Keep `subscriptions` until the panel closes. */
   protected track(...subscriptions: vscode.Disposable[]): void {
