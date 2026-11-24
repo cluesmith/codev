@@ -82,7 +82,7 @@ class MockShellperClient extends EventEmitter implements IShellperClient {
 }
 
 // Mock node-pty so PtySession doesn't need it
-vi.mock('node-pty', () => ({
+vi.mock('../node-pty-loader.js', () => ({ loadNodePty: () => ({
   spawn: vi.fn(() => ({
     pid: 12345,
     onData: vi.fn(),
@@ -91,7 +91,7 @@ vi.mock('node-pty', () => ({
     resize: vi.fn(),
     kill: vi.fn(),
   })),
-}));
+}) }));
 
 function makeConfig(overrides?: Partial<PtySessionConfig>): PtySessionConfig {
   return {

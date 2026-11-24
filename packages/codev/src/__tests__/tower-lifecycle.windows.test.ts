@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -37,7 +38,8 @@ const testWorkspaces = path.join(os.homedir(), '.agent-farm', 'test-workspaces')
 fs.mkdirSync(testWorkspaces, { recursive: true });
 const workDir = fs.mkdtempSync(path.join(testWorkspaces, 'codev-1658-tower-'));
 const stubScript = path.join(workDir, 'stub.cjs');
-const leftovers: number[] = [];
+// Killed in afterAll only if each pid still belongs to the process recorded (#1915).
+const leftovers = trackedPids();
 const helpers: WindowsJobHelper[] = [];
 
 /** A builder stub: prints a banner, then echoes each input line back. */
@@ -61,15 +63,9 @@ interface IsolatedTower {
   env: NodeJS.ProcessEnv;
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const helper of helpers) helper.stop();
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {
@@ -99,9 +95,21 @@ async function isolatedTower(): Promise<IsolatedTower> {
   return { stateDir, port, env };
 }
 
+/**
+ * #1915: run from inside a codev session, `tower start` keeps the session marker,
+ * so afx creates Tower the supported way (through CIM, outside the session's
+ * job); a Tower started plainly there would be in the job and refuse to run.
+ * Every other command keeps the marker-free environment.
+ */
+function towerStartEnv(args: string[]): NodeJS.ProcessEnv {
+  const marker = process.env.CODEV_SHELLPER_SESSION;
+  if (args[0] !== 'tower' || args[1] !== 'start' || !marker) return {};
+  return { CODEV_SHELLPER_SESSION: marker };
+}
+
 function afxRun(tower: IsolatedTower, args: string[], extraEnv: NodeJS.ProcessEnv = {}): { code: number | null; output: string } {
   const r = spawnSync(process.execPath, [afx, ...args, '--port', String(tower.port)], {
-    env: { ...tower.env, ...extraEnv },
+    env: { ...tower.env, ...towerStartEnv(args), ...extraEnv },
     encoding: 'utf8',
     windowsHide: true,
     timeout: 120_000,

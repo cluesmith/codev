@@ -14,17 +14,19 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { WindowsJobHelper, sessionJobName } from '../lib/platform/windows/job-objects.js';
+import { WindowsJobHelper, sessionJobName, type JobResult } from '../lib/platform/windows/job-objects.js';
 import { listProcessCensus } from '../agent-farm/servers/process-census.js';
+import { resolveGitBash } from '../lib/platform/windows/git-bash.js';
 
 const onWindows = process.platform === 'win32';
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-job-'));
-const leftovers: number[] = [];
+const leftovers = trackedPids();
 const helpers: WindowsJobHelper[] = [];
 
 /**
@@ -46,15 +48,9 @@ if (role === 'orphan') {
 setInterval(() => {}, 1000);
 `);
 
-afterAll(() => {
+afterAll(async () => {
   for (const helper of helpers) helper.stop();
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {
@@ -105,6 +101,22 @@ function idleProcess(): ChildProcess {
 
 const jobName = () => sessionJobName(`test-${crypto.randomUUID()}`);
 
+/**
+ * #1915: terminate a job only after checking that neither this test worker nor
+ * its parent is a member. A terminate that reached the worker would kill it
+ * ("Worker exited unexpectedly"); this makes that case fail loudly instead.
+ */
+async function terminateChecked(helper: WindowsJobHelper, name: string, rootPid: number): Promise<JobResult> {
+  for (const [label, pid] of [['worker', process.pid], ['parent', process.ppid]] as const) {
+    const membership = await helper.inJob(name, pid);
+    console.log(`JOB-WORKER-CHECK ${label}=${pid} found=${membership.found} member=${membership.member} ok=${membership.ok}`);
+    if (membership.ok && membership.member === true) {
+      throw new Error(`the test ${label} (pid ${pid}) is a member of job ${name}; terminating it would kill the ${label}`);
+    }
+  }
+  return helper.terminate(name, rootPid);
+}
+
 describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
   it('cost gate: cold start and warm assign round trip', async () => {
     const coldStarted = Date.now();
@@ -154,7 +166,7 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     if (!second.assigned) expect(second.reason).toMatch(/already exists/);
 
     // The latecomer's teardown names the same job, which is not its own.
-    expect(await helper.terminate(name, latecomer.pid!)).toEqual({ ok: true, found: true, member: false });
+    expect(await terminateChecked(helper, name, latecomer.pid!)).toEqual({ ok: true, found: true, member: false });
     await new Promise((r) => setTimeout(r, 1000));
     expect(alive(owner.pid!)).toBe(true);
   }, 60_000);
@@ -197,12 +209,44 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(leaf).toBeDefined();
     expect(census.some((entry) => entry.pid === leaf!.ppid)).toBe(false);
 
-    expect(await helper.terminate(name, root.pid!)).toEqual({ ok: true, found: true, member: true });
+    expect(await terminateChecked(helper, name, root.pid!)).toEqual({ ok: true, found: true, member: true });
 
     expect(await waitFor(() => !alive(root.pid!) && !alive(pids.get('leaf')!) && !alive(pids.get('orphan')!), 10_000)).toBe(true);
     // libuv never requests CREATE_BREAKAWAY_FROM_JOB, so a Node detached child
     // stays in the job and ends with it (no setsid parity; architect ruling).
     expect(await waitFor(() => !alive(pids.get('leaf-detached')!), 10_000)).toBe(true);
+  }, 90_000);
+
+  it('#1915: a native program started by Git Bash stays in the session job and ends with it', async () => {
+    // The MSYS runtime asks for breakaway on every native program it starts. While session
+    // jobs allowed it, this node (and so an agent and every tool call) left the job.
+    const helper = newHelper();
+    const name = jobName();
+    const pidFile = path.join(workDir, `msys-${crypto.randomUUID()}.txt`);
+    const gate = path.join(workDir, `gate-${crypto.randomUUID()}`);
+    const bash = resolveGitBash().path;
+    const node = process.execPath.replace(/\\/g, '/');
+    const script = `"${node}" "${treeScript.replace(/\\/g, '/')}" msys-leaf "${pidFile.replace(/\\/g, '/')}" & sleep 600`;
+    const root = spawn(process.execPath, ['-e', `
+      const fs = require('fs');
+      const { spawn } = require('child_process');
+      const wait = setInterval(() => {
+        if (!fs.existsSync(${JSON.stringify(gate)})) return;
+        clearInterval(wait);
+        spawn(${JSON.stringify(bash)}, ['-c', ${JSON.stringify(script)}], { stdio: 'ignore', windowsHide: true });
+      }, 50);
+      setInterval(() => {}, 1000);
+    `], { stdio: 'ignore', detached: true, windowsHide: true });
+    leftovers.push(root.pid!);
+    expect(await helper.assign(name, root.pid!)).toEqual({ assigned: true });
+    fs.writeFileSync(gate, '');
+
+    expect(await waitFor(() => readPids(pidFile).has('msys-leaf'), 30_000)).toBe(true);
+    const leafPid = readPids(pidFile).get('msys-leaf')!;
+    leftovers.push(leafPid);
+
+    expect(await terminateChecked(helper, name, root.pid!)).toEqual({ ok: true, found: true, member: true });
+    expect(await waitFor(() => !alive(root.pid!) && !alive(leafPid), 10_000)).toBe(true);
   }, 90_000);
 
   it('a CIM Win32_Process.Create launch from inside a session job escapes it', async () => {
@@ -230,7 +274,7 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     const leafPid = readPids(pidFile).get('cim-leaf')!;
     leftovers.push(leafPid);
 
-    expect(await helper.terminate(name, root.pid!)).toEqual({ ok: true, found: true, member: true });
+    expect(await terminateChecked(helper, name, root.pid!)).toEqual({ ok: true, found: true, member: true });
     expect(await waitFor(() => !alive(root.pid!), 10_000)).toBe(true);
     // Created by the WMI provider host, so never in the caller's job.
     await new Promise((r) => setTimeout(r, 1000));
@@ -247,12 +291,12 @@ describe.skipIf(!onWindows)('per-session job objects (native Windows)', () => {
     expect(alive(child.pid!)).toBe(true);
 
     const next = newHelper();
-    expect(await next.terminate(name, child.pid!)).toEqual({ ok: true, found: true, member: true });
+    expect(await terminateChecked(next, name, child.pid!)).toEqual({ ok: true, found: true, member: true });
     expect(await waitFor(() => !alive(child.pid!), 10_000)).toBe(true);
   }, 60_000);
 
   it('terminate of an unknown job reports found:false', async () => {
     const helper = newHelper();
-    expect(await helper.terminate(jobName(), process.pid)).toEqual({ ok: true, found: false });
+    expect(await terminateChecked(helper, jobName(), process.pid)).toEqual({ ok: true, found: false });
   }, 60_000);
 });

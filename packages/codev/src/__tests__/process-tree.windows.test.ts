@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
+import { trackedPids } from './helpers/tracked-pids.js';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -32,7 +33,8 @@ const GIT_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe';
 const shellperScript = fileURLToPath(new URL('../../dist/terminal/shellper-main.js', import.meta.url));
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-1658-tree-'));
 const treeScript = path.join(workDir, 'tree.cjs');
-const leftovers: number[] = [];
+// Killed in afterAll only if each pid still belongs to the process recorded (#1915).
+const leftovers = trackedPids();
 
 /**
  * Each process appends its pid to the pid file, then:
@@ -72,14 +74,8 @@ if (role === 'root') {
 setInterval(() => {}, 1000);
 `);
 
-afterAll(() => {
-  for (const pid of leftovers) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone
-    }
-  }
+afterAll(async () => {
+  await leftovers.killSurvivors();
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
   } catch {

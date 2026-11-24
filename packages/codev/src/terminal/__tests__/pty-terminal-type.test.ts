@@ -13,11 +13,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 const spawned = vi.hoisted(() => ({ calls: [] as Array<{ name: string; env: Record<string, string> }> }));
-vi.mock('node-pty', () => ({
-  spawn: (_file: string, _args: string[], opts: { name: string; env: Record<string, string> }) => {
-    spawned.calls.push({ name: opts.name, env: opts.env });
-    return { pid: 1, onData: () => {}, onExit: () => {}, write: () => {}, resize: () => {}, kill: () => {} };
-  },
+vi.mock('../node-pty-loader.js', () => ({
+  loadNodePty: () => ({
+    spawn: (_file: string, _args: string[], opts: { name: string; env: Record<string, string> }) => {
+      spawned.calls.push({ name: opts.name, env: opts.env });
+      return { pid: 1, onData: () => {}, onExit: () => {}, write: () => {}, resize: () => {}, kill: () => {} };
+    },
+  }),
 }));
 vi.mock('../../lib/pty-command.js', () => ({
   ptyCommand: (file: string, args: string[]) => ({ file, args }),
