@@ -398,7 +398,7 @@ For projects with parallelizable components, Codev includes the Architect-Builde
 
 After installing `@cluesmith/codev` via npm, ensure these dependencies are installed:
 
-- **Node.js** 18+ (includes node-pty for terminal sessions)
+- **Node.js** 22+ (includes node-pty for terminal sessions)
 - **git** 2.5+ (with worktree support)
 
 Check with:

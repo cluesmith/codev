@@ -170,7 +170,7 @@ describe('doctor command', () => {
       vi.mocked(spawnSync).mockImplementation((cmd: string, args?: string[]) => {
         const arg = args?.[0] || '';
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -190,6 +190,39 @@ describe('doctor command', () => {
       const { doctor } = await import('../commands/doctor.js');
       const result = await doctor();
       expect(result).toBe(0);
+    });
+
+    it('fails on Node 20, below the Node 22 floor (#1944)', async () => {
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (cmd.includes('which')) return Buffer.from('/usr/bin/command');
+        if (cmd.includes('gh auth status')) return Buffer.from('Logged in');
+        return Buffer.from('');
+      });
+      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+        const responses: Record<string, string> = {
+          'node': 'v20.18.0',
+          'tmux': 'tmux 3.4',
+          'git': 'git version 2.40.0',
+          'claude': '1.0.0',
+          'gemini': '0.1.0',
+          'codex': '0.60.0',
+        };
+        const out = responses[cmd] || 'working';
+        return { status: 0, stdout: out, stderr: '', signal: null, output: [null, out, ''], pid: 0 };
+      });
+
+      const { doctor } = await import('../commands/doctor.js');
+      const result = await doctor();
+      expect(result).toBe(1);
+      const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
+      expect(printed).toContain('need >= 22.0.0');
+      // A too-old Node gets an upgrade command, not just the minimum (an install hint like
+      // `brew install node` does not upgrade an existing install).
+      if (process.platform === 'darwin') {
+        expect(printed).toContain('upgrade: brew upgrade node');
+      } else {
+        expect(printed).toContain('upgrade: curl -fsSL https://deb.nodesource.com/setup_22.x');
+      }
     });
 
     it('prints no Windows prerequisites section on POSIX (Spec 1658: POSIX output unchanged)', async () => {
@@ -290,7 +323,7 @@ describe('doctor command', () => {
 
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
         };
@@ -335,7 +368,7 @@ describe('doctor command', () => {
 
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'git': 'git version 2.40.0',
         };
         return {
@@ -377,7 +410,7 @@ describe('doctor command', () => {
 
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'git': 'git version 2.40.0',
         };
         return {
@@ -432,7 +465,7 @@ describe('doctor command', () => {
         return Buffer.from('');
       });
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
-        const responses: Record<string, string> = { node: 'v20.0.0', git: 'git version 2.40.0' };
+        const responses: Record<string, string> = { node: 'v22.0.0', git: 'git version 2.40.0' };
         return {
           status: 0, stdout: responses[cmd] || 'working', stderr: '', signal: null,
           output: [null, responses[cmd] || 'working', ''], pid: 0,
@@ -550,7 +583,7 @@ describe('doctor command', () => {
 
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -610,7 +643,7 @@ describe('doctor command', () => {
 
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -676,7 +709,7 @@ describe('doctor command', () => {
           };
         }
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -766,7 +799,7 @@ describe('doctor command', () => {
           };
         }
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -834,7 +867,7 @@ describe('doctor command', () => {
       });
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          node: 'v20.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0',
+          node: 'v22.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0',
           claude: '1.0.0', codex: '0.60.0',
         };
         return {
@@ -978,7 +1011,7 @@ describe('doctor command', () => {
       });
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          node: 'v20.0.0', git: 'git version 2.40.0', claude: '1.0.0',
+          node: 'v22.0.0', git: 'git version 2.40.0', claude: '1.0.0',
         };
         return {
           status: 0, stdout: responses[cmd] || 'working', stderr: '',
@@ -1080,7 +1113,7 @@ describe('doctor command', () => {
         }
 
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -1176,7 +1209,7 @@ describe('doctor command', () => {
       });
       vi.mocked(spawnSync).mockImplementation((cmd: string) => ({
         status: 0,
-        stdout: cmd === 'node' ? 'v20.0.0' : cmd === 'git' ? 'git version 2.40.0' : 'working',
+        stdout: cmd === 'node' ? 'v22.0.0' : cmd === 'git' ? 'git version 2.40.0' : 'working',
         stderr: '',
         signal: null,
         output: [null, 'working', ''],
@@ -1228,7 +1261,7 @@ describe('doctor command', () => {
         }
 
         const responses: Record<string, string> = {
-          'node': 'v20.0.0',
+          'node': 'v22.0.0',
           'tmux': 'tmux 3.4',
           'git': 'git version 2.40.0',
           'claude': '1.0.0',
@@ -1324,7 +1357,7 @@ describe('doctor command', () => {
       });
       vi.mocked(spawnSync).mockImplementation((cmd: string) => {
         const responses: Record<string, string> = {
-          node: 'v20.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0', codex: '0.60.0',
+          node: 'v22.0.0', tmux: 'tmux 3.4', git: 'git version 2.40.0', codex: '0.60.0',
         };
         const stdout = responses[cmd] || 'working';
         return { status: 0, stdout, stderr: '', signal: null, output: [null, stdout, ''], pid: 0 };

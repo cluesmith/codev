@@ -47,13 +47,13 @@ describe('a better-sqlite3 binding that cannot load', () => {
     } catch (err) {
       caught = err as Error;
     }
-    expect(caught?.message).toContain('native Windows needs Node.js 22 or 24');
+    expect(caught?.message).toContain('native Windows needs Node.js 22 (LTS)');
     expect((caught?.cause as Error).message).toBe(LOAD_ERROR);
   });
 
   it('Windows: afx whoami fails with the supported-versions message instead of degrading', () => {
     forceHostPlatform('win32');
-    expect(() => resolveIdentity({ CODEV_ARCHITECT_NAME: 'main' })).toThrow('native Windows needs Node.js 22 or 24');
+    expect(() => resolveIdentity({ CODEV_ARCHITECT_NAME: 'main' })).toThrow('native Windows needs Node.js 22 (LTS)');
   });
 
   it('POSIX: afx whoami keeps its degrade path (no database, identity from the env)', () => {

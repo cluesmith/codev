@@ -15,7 +15,8 @@
  * Node ABIs (`process.versions.modules`) for which better-sqlite3 ships a
  * win32 prebuilt binary: Node 22 (127), 24 (137), 25 (141) and 26 (147), as
  * measured for better-sqlite3 12.10 (Spec 1658 audit, fact 1.1). Update this
- * list when the dependency adds prebuilds.
+ * list when the dependency adds prebuilds. Broader than the tested set: CI
+ * tests Node 22 only (#1944).
  */
 export const WINDOWS_PREBUILD_NODE_ABIS = ['127', '137', '141', '147'];
 
@@ -23,14 +24,14 @@ export const WINDOWS_PREBUILD_NODE_ABIS = ['127', '137', '141', '147'];
 export const WINDOWS_PREBUILD_ARCHES = ['x64', 'arm64'];
 
 /** The Node versions Codev documents and tests on native Windows. */
-export const SUPPORTED_WINDOWS_NODE = 'Node.js 22 or 24 (LTS), x64 or arm64';
+export const SUPPORTED_WINDOWS_NODE = 'Node.js 22 (LTS), x64 or arm64';
 
 /** The message printed whenever native Windows cannot use the prebuilt binaries. */
 export function unsupportedWindowsNodeMessage(nodeVersion, arch) {
   return [
     `@cluesmith/codev: native Windows needs ${SUPPORTED_WINDOWS_NODE}.`,
     `This is Node.js ${nodeVersion} (win32-${arch}), which has no prebuilt binary for Codev's native dependencies, and Codev does not compile them from source.`,
-    'Install Node.js 22 or 24 (for example: winget install OpenJS.NodeJS.LTS), then run the install again. WSL 2 is the other supported way to run Codev on Windows.',
+    'Install Node.js 22 (for example: winget install OpenJS.NodeJS.22), then run the install again. WSL 2 is the other supported way to run Codev on Windows.',
   ].join('\n');
 }
 
