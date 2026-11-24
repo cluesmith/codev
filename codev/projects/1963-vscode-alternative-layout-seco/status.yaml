@@ -20,17 +20,17 @@ plan_phases:
     status: complete
   - id: workspace_views_package
     title: Shared Work/Decisions package; dashboard moved onto it unchanged
-    status: in_progress
+    status: complete
   - id: decisions_panel
     title: Decisions panel in VS Code, its host bridge, and the hierarchy's Decisions entry
-    status: pending
+    status: in_progress
   - id: work_panel
     title: Work panel in VS Code, increment-2 verification
     status: pending
   - id: arrange_cockpit
     title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
     status: pending
-current_plan_phase: workspace_views_package
+current_plan_phase: decisions_panel
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: verification_harness
@@ -84,7 +84,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-workspace_views_package-iter1-claude.txt
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T11:45:04.169Z'
+updated_at: '2026-11-24T11:48:47.217Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-24T06:55:50.288Z'
@@ -104,3 +104,5 @@ context_refreshes:
   - boundary: plan-phase:workspace_views_package
     at: '2026-11-24T11:06:37.798Z'
     acknowledged_at: '2026-11-24T11:07:42.974Z'
+  - boundary: plan-phase:decisions_panel
+    at: '2026-11-24T11:48:47.217Z'
