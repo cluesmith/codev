@@ -202,3 +202,36 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   attention via `head` anyway); (3) ok `state` in the header (deliberate); (4) `lastCodeCommit: null` widens the
   spec's details type for the all-porch-only branch; (5) `checkCi` tests `check.skip` itself (so a skip makes no
   forge call) and `applySkips` repeats it — worth a one-line comment when next touching pr.ts.
+
+## Phase 5 — check_deploy
+- Built: `codev check deploy <N>… [--json]` (deploy.ts) with `merged`, `on-branch`, `deploy-run`, `merge-checks`;
+  registered in index.ts. Tests: check-deploy.test.ts (stub git, POSIX; the parsers run everywhere),
+  check-deploy-readonly.test.ts (real repos, every platform), CLI cases in check-cli.test.ts. Helpers:
+  prViewOverride gained `answerFor`/`failFor` (per PR number); new helpers/deploy-fixture.ts (merged PRs, a
+  `workflow-runs` override); expectDeployReportShape.
+- Choices to note in the review:
+  - 15a: the unread PR's `merged` reason is the forge's own words (`pr-view failed: GraphQL: Could not resolve to
+    a PullRequest with the number of 99999. …`), not a literal "PR not found": telling not-found from any other
+    failure would mean parsing provider-specific stderr. The verdict line says `#99999 not read`; the checks that
+    need the PR say `the PR could not be read`.
+  - Unmerged PR: `merged` attention (`OPEN: not merged`); the checks that need the merge commit are not run
+    (`the PR is not merged (OPEN)`). A preset without `mergeCommit` → `merged` not run, naming the field.
+  - JSON order follows DEPLOY_CHECK_IDS; the human lines follow the spec sample (on branch, merge checks, then
+    deploy run, so an `off` line comes last). An ok `merged` reads in the PR's title line, like an ok head/state.
+  - `deploy run` lines carry the run's date on attention too (the sample shows it only on the ok line).
+  - ls-remote and workflow-runs run once per branch per command, however many PRs. Repeated PR numbers are
+    reported once.
+  - `check.skip` is tested before each check runs, so a skipped check asks neither git nor the forge.
+  - No end-of-run re-read (the spec asks for none in deploy; a deploy branch moving during the run only moves
+    forward). `workflow-runs` order is trusted as the contract says (newest first), not re-sorted.
+  - `merge checks` with no runs is attention, as `checks` is in pr; a project without CI on its base declares
+    `check.skip: ["merge-checks"]`.
+- LIVE RUNS (worktree build, 2026-11-24):
+  - From the main checkout, nothing configured: `check deploy 1959 1955` → `CLEAR  #1959, #1955 on main; checks
+    on the merge commits passed` (both `merge checks 8 passed`), 4 s, exit 0. `check deploy 1959 99999 1965` →
+    `ATTENTION  #99999 not read; #1965 not merged`, exit 1. Main's refs (md5 of for-each-ref) and FETCH_HEAD (md5)
+    identical before and after.
+  - Scratch clone (session scratchpad, origin = git@github.com:cluesmith/codev.git, its own
+    .codev/config.local.json `check.deploy: {branch: main, workflow: test.yml}`): `check deploy 1959 1955 1954
+    99999` → three `ok on main` + `ok deploy run latest green test.yml run (2026-11-24 00:54, 77e2d82) contains …`,
+    #99999 not read, exit 1, 7 s; `--json` matches DeployReport. Clone refs unchanged, no FETCH_HEAD written.
