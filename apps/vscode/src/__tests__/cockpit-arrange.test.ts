@@ -11,10 +11,12 @@
  * - `moveEditorToFirstGroup` moves the active editor; `terminal.moveToEditor` moves the panel's
  *   active terminal into the active group;
  * - revealing a webview panel in another group lands it there as a preview tab (VS Code 1.147.0's
- *   `revealWebview` opens it unpinned); a new panel opens pinned; `keepEditor` keeps the active one.
+ *   `revealWebview` opens it unpinned); a new panel opens pinned; `keepEditor` keeps the active one;
+ * - a panel's tab restored by a reload is not revived until shown: showing the panel opens a new one
+ *   and then closes the restored tab, as `SinglePanel.show()` does.
  *
- * Nothing in the fake can close an editor: every editor that existed before an arrange must exist
- * after it, in the same state.
+ * Nothing in the fake can close a user's editor: every one that existed before an arrange must
+ * exist after it, in the same state. Only a panel's own restored tab is ever closed.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -177,6 +179,12 @@ class FakeEditorArea {
       .sort((a, b) => a.label.localeCompare(b.label));
   }
 
+  /** Close a panel's restored tab (only `FakeCockpitPanel.show()` does). */
+  closeRestored(item: Item): void {
+    const group = this.groups.find(candidate => candidate.items.includes(item))!;
+    this.remove(group, item);
+  }
+
   private remove(group: Group, item: Item): void {
     group.items = group.items.filter(candidate => candidate !== item);
     if (group.active === item) { group.active = group.items.at(-1); }
@@ -234,14 +242,20 @@ class FakeCockpitPanel {
     return area.tabGroups.all.find(group => group.viewColumn === column)?.tabs
       .find(tab => (tab as { label: string }).label === this.title) as never;
   }
+  get tabs() {
+    return area.tabGroups.all.flatMap(group => group.tabs).filter(tab => (tab as { label: string }).label === this.title) as never[];
+  }
   show(placement?: { viewColumn: number; preserveFocus: boolean }) {
-    const column = placement?.viewColumn ?? 1;
     if (!this.current) {
+      const restored = this.restoredItems();
+      const column = placement?.viewColumn ?? (restored[0] ? area.groups.findIndex(group => group.items.includes(restored[0])) + 1 : 1);
       this.current = new FakeWebviewPanel(this.title);
       this.created++;
       area.open({ kind: 'webview', panel: this.current, preview: false }, column);
+      for (const item of restored) { area.closeRestored(item); }
       return;
     }
+    const column = placement?.viewColumn ?? 1;
     const item = area.groups.flatMap(group => group.items).find(i => i.kind === 'webview' && i.panel === this.current)!;
     if (item.kind === 'webview' && this.current.viewColumn !== column) { item.preview = true; }
     area.moveTo(item, column, !(placement?.preserveFocus ?? false));
@@ -250,6 +264,12 @@ class FakeCockpitPanel {
   get preview() { return (this.tab as { isPreview?: boolean } | undefined)?.isPreview; }
   /** Open the panel in a group before the arrange, as a user would have. */
   openIn(column: number) { this.show({ viewColumn: column, preserveFocus: false }); }
+  /** A tab of this panel restored by a reload, in `column`, that VS Code has not revived yet. */
+  restoreIn(column: number) { area.open({ kind: 'webview', panel: new FakeWebviewPanel(this.title), preview: false }, column); }
+  private restoredItems(): Item[] {
+    return area.groups.flatMap(group => group.items)
+      .filter(item => item.kind === 'webview' && item.panel.title === this.title && item.panel !== this.current);
+  }
 }
 
 const MAIN: ResolvableArchitect = { name: 'main', terminalId: 't-main' };
@@ -464,15 +484,36 @@ describe('Arrange Cockpit: the architect', () => {
     area.open(text('b.ts'), 2);
     seedArchitect();
     const before = area.snapshot();
+    vi.useFakeTimers();
 
-    await expect(arrangeCockpit(deps)).resolves.toBe(false);
+    const result = arrangeCockpit(deps);
+    await vi.advanceTimersByTimeAsync(6000);
 
+    await expect(result).resolves.toBe(false);
     expect(openArchitect).toHaveBeenCalledTimes(1);
     expect(showErrorMessage).toHaveBeenCalledWith(
       'Codev: Arrange Cockpit stopped: another terminal is also named "Codev: Architect", so the architect\'s tab cannot be told apart from it; rename or close that terminal and arrange again.',
     );
     expect(area.snapshot()).toEqual(before);
     expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('a namesake VS Code is still closing (a stale session reopened) is waited out, and the arrange goes on', async () => {
+    const { deps, seedArchitect, terminals } = setup();
+    area.open(text('a.ts'), 1);
+    const closing = new FakeTerminal('Codev: Architect');
+    area.panelTerminals.push(closing);
+    const architect = seedArchitect(2);
+    vi.useFakeTimers();
+    setTimeout(() => { area.panelTerminals = area.panelTerminals.filter(t => t !== closing); }, 200);
+
+    const result = arrangeCockpit(deps);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(result).resolves.toBe(true);
+    expect(showErrorMessage).not.toHaveBeenCalled();
+    expect(area.snapshot().groups[0]).toEqual({ tabs: ['a.ts', 'Codev: Architect'], active: 'Codev: Architect' });
+    expect(terminals.get('main')).toBe(architect);
   });
 
   it('the automatic arrange reads the roster quietly (no error toast nobody asked for); the command does not', async () => {
@@ -517,6 +558,21 @@ describe('Arrange Cockpit: the architect', () => {
     await arrangeCockpit(deps);
 
     expect(executeCommand).toHaveBeenCalledWith('workbench.action.newGroupLeft');
+    expect(area.snapshot().groups).toEqual([
+      { tabs: [], active: null },
+      { tabs: ['Work'], active: 'Work' },
+      { tabs: ['Decisions'], active: 'Decisions' },
+    ]);
+  });
+
+  it('counts a restored Work tab VS Code has not revived as the Cockpit\'s own: the left column is still kept', async () => {
+    const { deps, work } = setup({ roster: undefined });
+    work.restoreIn(1);
+
+    await expect(arrangeCockpit(deps)).resolves.toBe(true);
+
+    expect(executeCommand).toHaveBeenCalledWith('workbench.action.newGroupLeft');
+    expect(work.created).toBe(1);
     expect(area.snapshot().groups).toEqual([
       { tabs: [], active: null },
       { tabs: ['Work'], active: 'Work' },

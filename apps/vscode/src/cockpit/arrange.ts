@@ -64,6 +64,8 @@ export interface CockpitPanel {
   readonly panel: vscode.WebviewPanel | undefined;
   /** The open panel's editor tab. */
   readonly tab: vscode.Tab | undefined;
+  /** Every tab of this kind: the open panel's, and any restored by a reload and not yet revived. */
+  readonly tabs: readonly vscode.Tab[];
 }
 
 /** Who asked: the command (palette, title bar), or the Cockpit's first show in a window. */
@@ -158,8 +160,11 @@ async function placeArchitect(deps: ArrangeCockpitDeps, trigger: ArrangeTrigger)
   const terminal = deps.architectTerminal(name);
   // None: the terminal manager did not open one (too many terminals, no workspace) and said why.
   if (!terminal) { return undefined; }
-  // Its tab is found by label, which only this terminal may carry (see the module comment).
-  if (vscode.window.terminals.some(other => other !== terminal && other.name === terminal.name)) {
+  // Its tab is found by label, which only this terminal may carry (see the module comment). A
+  // terminal just disposed (a stale session reopened) stays listed until VS Code confirms it closed,
+  // so a namesake is given the settle bound to go before arrange refuses.
+  const namesake = () => vscode.window.terminals.some(other => other !== terminal && other.name === terminal.name);
+  if (namesake() && !(await until(() => !namesake()))) {
     throw new Error(`another terminal is also named "${terminal.name}", so the architect's tab cannot be told apart from it; rename or close that terminal and arrange again`);
   }
 
@@ -193,9 +198,11 @@ async function placeArchitect(deps: ArrangeCockpitDeps, trigger: ArrangeTrigger)
 async function keepLeftColumn(deps: ArrangeCockpitDeps): Promise<void> {
   const first = vscode.window.tabGroups.all.find(group => group.viewColumn === vscode.ViewColumn.One);
   if (!first || first.tabs.length === 0) { return; }
-  const panelsInFirst = [deps.work.panel, deps.decisions.panel]
-    .filter(panel => panel?.viewColumn === vscode.ViewColumn.One).length;
-  if (first.tabs.length !== panelsInFirst) { return; }
+  // By tab, not live panel: a tab restored by a reload and not yet revived is the Cockpit's too, and
+  // is closed once its panel opens, which would empty the group.
+  const panelTabsInFirst = [...deps.work.tabs, ...deps.decisions.tabs]
+    .filter(tab => tab.group.viewColumn === vscode.ViewColumn.One).length;
+  if (first.tabs.length !== panelTabsInFirst) { return; }
   const groups = vscode.window.tabGroups.all.length;
   await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
   await vscode.commands.executeCommand('workbench.action.newGroupLeft');
@@ -239,9 +246,15 @@ function isTerminalTab(tab: vscode.Tab | undefined, terminal: vscode.Terminal): 
 
 /** Wait until `condition` holds, or fail naming `what` did not happen. */
 async function settle(condition: () => boolean, what: string): Promise<void> {
+  if (!(await until(condition))) { throw new Error(`timed out waiting for ${what}`); }
+}
+
+/** Whether `condition` holds within the settle bound. */
+async function until(condition: () => boolean): Promise<boolean> {
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
   while (!condition()) {
-    if (Date.now() >= deadline) { throw new Error(`timed out waiting for ${what}`); }
+    if (Date.now() >= deadline) { return false; }
     await new Promise(resolve => setTimeout(resolve, SETTLE_POLL_MS));
   }
+  return true;
 }

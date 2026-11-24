@@ -1124,3 +1124,13 @@ run.
   - Claude note 1: the automatic arrange with Tower down showed an error toast nobody asked for. It
     now reads the roster quietly and logs. Note 2: the empty-left-group branch is named in the PR
     as unit-tested only. Note 4 (25 ms polling): kept.
+- **Phase 9 review, iteration 2:** codex APPROVE, claude APPROVE with two non-blocking findings.
+  Both were real and are fixed in place after the approvals, so the PR review is the first to see
+  them. Each new test fails on the previous `arrange.ts`.
+  - A namesake terminal still being closed (the stale-session path disposes and reopens under the
+    same name; 1.147.0 drops it from `window.terminals` only on `$acceptTerminalClosed`) is now
+    waited out within the settle bound before arrange refuses.
+  - `keepLeftColumn` counts the Cockpit's *tabs* (live or restored), not live panels. A restored,
+    unrevived Work tab alone in group 1 used to let group 1 close and time the arrange out.
+  - Disputed, with the 1.147.0 bundle as evidence: a column beyond the last group opens every
+    missing group up to it (under 9), so the fake's `groupAt()` is right.

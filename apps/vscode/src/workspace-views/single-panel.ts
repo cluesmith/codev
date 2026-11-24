@@ -88,7 +88,7 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
       }
       return;
     }
-    const restored = this.kindTabs();
+    const restored = this.tabs;
     const panel = vscode.window.createWebviewPanel(
       this.kind.viewType,
       this.kind.title,
@@ -107,7 +107,7 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
   /** The open panel's editor tab: whether it is a preview tab, and whether it is active. */
   get tab(): vscode.Tab | undefined {
     const column = this.current?.viewColumn;
-    return column === undefined ? undefined : this.kindTabs().find(tab => tab.group.viewColumn === column);
+    return column === undefined ? undefined : this.tabs.find(tab => tab.group.viewColumn === column);
   }
 
   /** Whether the panel is open and on screen. */
@@ -134,7 +134,7 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
   }
 
   /** Every editor tab of this kind: the open panel's, and any restored one not yet revived. */
-  private kindTabs(): vscode.Tab[] {
+  get tabs(): vscode.Tab[] {
     return vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => isPanelTab(tab, this.kind.viewType));
   }
 
