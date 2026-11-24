@@ -24,8 +24,10 @@ Challenges, and Owner Decisions 5).
 
 ## Owner Decisions
 
-These are the owner's to make at the `pr` gate. Each is described where it is cited.
-1. **The dormant window** (Spec Compliance, Deviations). A dormant window is the marketplace
+These are the owner's to make at the `pr` gate. Each is described where it is cited. The owner
+ruled on 1-4 on 2026-11-24 (recorded on PR #1971); 5 is open.
+1. **The dormant window** (Spec Compliance, Deviations). **Ruled: accepted as built**, and the spec
+   now states the dormant behaviour. A dormant window is the marketplace
    extension in plain VS Code, in a folder with no Codev project. It shows *Not connected to Tower*
    and does not list the fleet, as #1144's inertness rule asks. This is the architect's option A.
    The alternatives:
@@ -33,10 +35,13 @@ These are the owner's to make at the `pr` gate. Each is described where it is ci
    - connect on a click.
 
    Whichever is chosen, the architect records it durably.
-2. **The wording "Failed to load overview: Not connected to Tower."** It is the dashboard's
+2. **The wording "Failed to load overview: Not connected to Tower."** **Ruled: accepted as
+   built.** It is the dashboard's
    template, kept for parity, and in VS Code it can show before any load (Consultation Feedback,
    work_panel).
-3. **The old evidence blobs in this branch's history.**
+3. **The old evidence blobs in this branch's history.** **Ruled: scrub them.** The owner approved
+   rewriting this branch's and the evidence branch's history to remove the verification binaries,
+   with the architect's procedure. The PR body records when it was done.
    - The rendered evidence now lives on the never-merged `evidence/spir-1963` branch (Deviations,
      review phase).
    - The PR branch's history still holds the earlier screenshots and snapshots, including the ten
@@ -44,6 +49,7 @@ These are the owner's to make at the `pr` gate. Each is described where it is ci
    - A `--merge` brings that history into main.
    - Whether to scrub it before merge is the owner's call. Nothing has been prepared.
 4. **The two Light Modern texts at 4.3:1**: above the 3:1 floor, below 4.5:1, and named in the PR.
+   **Ruled: accepted as built.**
 5. **Whether the ide-server runs (1.138.0 and 1.128) may happen.** The tripwire incident below
    happened in that mode while the owner was away, so a retry is his call (the architect's ruling).
    The harness fixes are in, with their self-tests. Until he rules, both versions are unverified.
@@ -107,12 +113,14 @@ These are the owner's to make at the `pr` gate. Each is described where it is ci
   identical to a run on the branch base's build. Two intended changes in the shared views also
   reach the dashboard (see Deviations).
 - [x] **No React component in two copies** (Phase 6, `one-copy.test.ts`).
-- [ ] **Builder-worktree and no-workspace windows** (Phases 4, 5, 7–9). *Partly met.*
+- [x] **Builder-worktree and no-workspace windows** (Phases 4, 5, 7–9). Met as amended by the
+  owner's ruling of 2026-11-24.
   - The builder-worktree window and the Codev IDE's no-workspace window behave as specified.
   - **Deviation:** a *dormant* window shows *Not connected to Tower* and does not list the fleet.
     A dormant window is the marketplace extension in plain VS Code, in a folder with no Codev
     project. This is the architect's ruling (option A), which keeps issue #1144's
-    dormant-window inertness, and the owner decides at the PR gate.
+    dormant-window inertness. The owner accepted it on 2026-11-24, and the spec's criterion now
+    states it.
 - [x] **The Decisions entry opens or reveals the single panel without arranging; empty state with no
   file** (Phase 7).
 - [x] **Light, dark and high-contrast themes, with a live theme switch** (Phases 7, 8). Every visible

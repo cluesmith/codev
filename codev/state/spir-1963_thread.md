@@ -1215,3 +1215,19 @@ run.
       launch canary on a throwaway port proves the profile applies.
   - **Self-tests:** `selftest tripwire settings sandbox` passed 17/17, with no Tower and no IDE
     server. The tripwire killed a stand-in tree, including a detached grandchild, in 463 ms.
+- **Final head before the owner (17:45Z):** `c79b1c7e1`.
+  - `verify arrange` passed 19/19 on 1.147.0 serve-web.
+  - Windows run 45450646100 succeeded, and CI's 8 checks passed.
+  - **Evidence slip.** My glob put 11 stale `arrange-*` shots, five of them showing the host
+    prompt, into evidence commit `af31122e6`. Corrective commit: `871ed5a5e`. Evidence files are
+    now picked by the names in the run's JSON.
+- **Owner rulings at the PR gate (relayed 18:19Z; the gate is NOT approved):**
+  - **Accepted as built:** the dormant window, the "Failed to load overview" wording, and the
+    Light Modern 4.3:1 texts. The spec's no-workspace criterion and its footprint lines now state
+    the dormant behaviour.
+  - **History scrub approved by the owner.** It follows the architect's procedure:
+    - the evidence branch is rewound to `a749cdd67`, with one clean commit on top;
+    - a backup bundle of both tips is kept, local only;
+    - `builder/spir-1963` is rewritten in a fresh clone, removing only the evidence paths;
+    - every check passes before `--force-with-lease`;
+    - the worktree moves onto the new history with `reset --soft`.
