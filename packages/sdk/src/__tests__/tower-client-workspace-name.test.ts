@@ -83,6 +83,16 @@ describe('TowerClient.setWorkspaceAddressName', () => {
     expect(outcome).toEqual({ ok: false, error: `${message} (${code})`, errorCode: code });
   });
 
+  it('marks the answer of a Tower from before workspace names: its plain-text 404 for a route it does not have', async () => {
+    towerAnswering(404, 'Not found');
+
+    expect(await new TowerClient().setWorkspaceAddressName(WORKSPACE, 'work')).toEqual({
+      ok: false,
+      error: 'Not found',
+      unknownRoute: true,
+    });
+  });
+
   it('reports a Tower that is not running, with no code', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:4100'); }));
 

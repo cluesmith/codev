@@ -12,6 +12,7 @@ import type { AddressBookAgent, AddressBookResponse, AddressBookWorkspace } from
 import { logger } from '../utils/logger.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { architectSenderId, detectCurrentBuilderId, detectWorkspaceRoot } from './send.js';
+import { olderTowerError } from '../utils/older-tower.js';
 
 export interface WorkspaceListOptions {
   json?: boolean;
@@ -20,7 +21,11 @@ export interface WorkspaceListOptions {
 const INDENT = '  ';
 const GAP = '    ';
 
-/** Text from Tower (a path, a reason that quotes one) kept to one printable line. */
+/**
+ * Text from Tower kept to one printable line. Every field Tower sends goes through it
+ * before it is printed, the ones that come from checked sources too: one rule for the
+ * whole listing, so no field can start a line of its own.
+ */
 function oneLine(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/[\x00-\x1f\x7f]/g, '?');
@@ -28,19 +33,29 @@ function oneLine(text: string): string {
 
 /** What an agent with no address is shown as: its short form, marked as not an address. */
 function unaddressedLabel(agent: AddressBookAgent): string {
-  return `(${agent.kind === 'architect' ? `architect:${agent.name}` : agent.name})`;
+  return `(${agent.kind === 'architect' ? `architect:${oneLine(agent.name)}` : oneLine(agent.name)})`;
+}
+
+/** What an agent's line starts with: its address, or its short form marked as not one. */
+function agentLabel(agent: AddressBookAgent): string {
+  return agent.address === null ? unaddressedLabel(agent) : oneLine(agent.address);
+}
+
+/** What a workspace's line starts with. */
+function workspaceLabel(workspace: AddressBookWorkspace): string {
+  return workspace.addressName === null ? '(no address name)' : oneLine(workspace.addressName);
 }
 
 /** What follows `live` / `no live terminal` on an agent's line. Nothing for an address ready to paste. */
 function agentNote(agent: AddressBookAgent): string {
   if (agent.sendable) return '';
   if (agent.address === null) return 'no address';
-  if (agent.reachThrough !== undefined) return `reach through ${agent.reachThrough}`;
+  if (agent.reachThrough !== undefined) return `reach through ${oneLine(agent.reachThrough)}`;
   return 'cannot be sent to from here';
 }
 
 function workspaceHeader(workspace: AddressBookWorkspace, nameWidth: number): string {
-  const name = (workspace.addressName ?? '(no address name)').padEnd(nameWidth);
+  const name = workspaceLabel(workspace).padEnd(nameWidth);
   return `${name}${GAP}${oneLine(workspace.path)}${workspace.running ? '' : `${GAP}not running`}`;
 }
 
@@ -52,9 +67,9 @@ function workspaceHeader(workspace: AddressBookWorkspace, nameWidth: number): st
 export function formatAddressBook(book: AddressBookResponse): string[] {
   if (book.workspaces.length === 0) return ['No workspaces are registered with this Tower.'];
 
-  const nameWidth = Math.max(...book.workspaces.map((w) => (w.addressName ?? '(no address name)').length));
+  const nameWidth = Math.max(...book.workspaces.map((w) => workspaceLabel(w).length));
   const agents = book.workspaces.flatMap((w) => w.agents);
-  const addressWidth = Math.max(0, ...agents.map((a) => (a.address ?? unaddressedLabel(a)).length));
+  const addressWidth = Math.max(0, ...agents.map((a) => agentLabel(a).length));
 
   const lines: string[] = [];
   for (const workspace of book.workspaces) {
@@ -63,7 +78,7 @@ export function formatAddressBook(book: AddressBookResponse): string[] {
       lines.push(`${INDENT}no address name: ${oneLine(workspace.unaddressableReason ?? 'Tower gave no reason')}`);
     }
     for (const agent of workspace.agents) {
-      const address = (agent.address ?? unaddressedLabel(agent)).padEnd(addressWidth);
+      const address = agentLabel(agent).padEnd(addressWidth);
       const liveness = agent.live ? 'live' : 'no live terminal';
       const note = agentNote(agent);
       lines.push(`${INDENT}${address}${GAP}${note === '' ? liveness : `${liveness.padEnd('no live terminal'.length)}${GAP}${note}`}`);
@@ -93,7 +108,7 @@ export async function workspaceList(options: WorkspaceListOptions = {}): Promise
 
   const outcome = await client.getAddressBook({ workspace, from });
   if (!outcome.ok) {
-    logger.error(outcome.error);
+    logger.error(outcome.unknownRoute ? olderTowerError('has no address book') : outcome.error);
     process.exit(1);
   }
 

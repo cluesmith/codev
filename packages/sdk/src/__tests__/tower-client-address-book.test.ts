@@ -12,7 +12,7 @@ import { TowerClient } from '../tower-client.js';
 
 function towerAnswering(status: number, payload: unknown): string[] {
   const urls: string[] = [];
-  const text = JSON.stringify(payload);
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: { method?: string }) => {
@@ -75,5 +75,17 @@ describe('TowerClient.getAddressBook', () => {
     const outcome = await new TowerClient().getAddressBook({ from: 'bad id' });
     expect(outcome.ok).toBe(false);
     expect((outcome as { error: string }).error).toContain('Invalid "from" parameter');
+    expect(outcome).not.toHaveProperty('unknownRoute');
+  });
+
+  it('marks the answer of a Tower from before the address book: its plain-text 404 for a route it does not have', async () => {
+    towerAnswering(404, 'Not found');
+    const outcome = await new TowerClient().getAddressBook({ from: 'architect:main' });
+    expect(outcome).toEqual({ ok: false, error: 'Not found', unknownRoute: true });
+  });
+
+  it('does not take another failure for an older Tower', async () => {
+    towerAnswering(500, 'Internal server error');
+    expect(await new TowerClient().getAddressBook()).toEqual({ ok: false, error: 'Internal server error' });
   });
 });

@@ -198,6 +198,40 @@ describe('formatAddressBook', () => {
     expect(lines.join('')).not.toMatch(/[\n\u001b]/);
   });
 
+  it('keeps every other field from Tower to one printable line too: no field can start a line of its own', () => {
+    const forged = '\ncodev:architect:main    live\u001b[2J';
+    const lines = formatAddressBook({
+      workspaces: [
+        {
+          path: '/Users/ana/a',
+          running: true,
+          addressName: `a${forged}`,
+          agents: [
+            { kind: 'architect', name: 'main', address: `a:architect:main${forged}`, live: true, sendable: true },
+            { kind: 'architect', name: 'review', address: 'a:architect:review', live: true, sendable: false, reachThrough: `a:architect${forged}` },
+          ],
+        },
+        {
+          path: '/Users/ana/b',
+          running: true,
+          addressName: null,
+          unaddressableReason: 'no reason',
+          agents: [
+            { kind: 'architect', name: `main${forged}`, address: null, live: true, sendable: false },
+            { kind: 'builder', name: `builder-x${forged}`, address: null, live: true, sendable: false },
+          ],
+        },
+      ],
+    });
+    // One header and its agents, one header with its reason and its agents: nothing more.
+    expect(lines).toHaveLength(7);
+    for (const line of lines) expect(line).not.toMatch(/[\n\u001b]/);
+    // The columns are measured on what is printed, so they still line up.
+    const printed = 'a:architect:main?codev:architect:main    live?[2J';
+    expect(lines[1]).toBe(`  ${printed}    live`);
+    expect(lines[2].startsWith(`  ${'a:architect:review'.padEnd(printed.length)}    live`)).toBe(true);
+  });
+
   it('says so when Tower has no workspaces', () => {
     expect(formatAddressBook({ workspaces: [] })).toEqual(['No workspaces are registered with this Tower.']);
   });

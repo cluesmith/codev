@@ -321,6 +321,15 @@ function extractTowerErrorCode(text: string): string | undefined {
   }
 }
 
+/**
+ * True for the answer a Tower gives to a route it does not have: its catch-all 404, which
+ * is plain text and so carries no code. Asked only of routes whose own 404s carry one
+ * (or that never answer 404), where it means the Tower is older than this client.
+ */
+function isUnknownRoute(result: { status: number; errorCode?: string }): boolean {
+  return result.status === 404 && result.errorCode === undefined;
+}
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -551,14 +560,15 @@ export class TowerClient {
   /**
    * Set a workspace's explicit address name, or clear it with `null` (Spec 1940). A refusal
    * carries Tower's reason in `error` and its code (`INVALID_NAME`, `RESERVED_NAME`,
-   * `NAME_TAKEN`, `NOT_FOUND`) in `errorCode`.
+   * `NAME_TAKEN`, `NOT_FOUND`) in `errorCode`. `unknownRoute` is set when the Tower has no
+   * such route at all: it is older than this client.
    */
   async setWorkspaceAddressName(
     workspacePath: string,
     name: string | null,
   ): Promise<
     | { ok: true; result: SetWorkspaceAddressNameResponse }
-    | { ok: false; error: string; errorCode?: string }
+    | { ok: false; error: string; errorCode?: string; unknownRoute?: true }
   > {
     const encoded = encodeWorkspacePath(workspacePath);
     const body: SetWorkspaceAddressNameRequest = { name };
@@ -572,6 +582,7 @@ export class TowerClient {
     );
     if (!result.ok || result.data === undefined) {
       const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
+      if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
       return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
     }
     return { ok: true, result: result.data };
@@ -580,18 +591,20 @@ export class TowerClient {
   /**
    * Every workspace on this Tower and its agents, as addresses for `caller` (Spec 1940):
    * the caller's workspace and sender id, as `sendMessage` gives them. A caller that
-   * gives neither is treated as a sender outside every workspace.
+   * gives neither is treated as a sender outside every workspace. `unknownRoute` is set
+   * when the Tower has no address book at all: it is older than this client.
    */
   async getAddressBook(
     caller: { workspace?: string; from?: string } = {},
-  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string; unknownRoute?: true }> {
     const query = new URLSearchParams();
     if (caller.workspace !== undefined) query.set('workspace', caller.workspace);
     if (caller.from !== undefined) query.set('from', caller.from);
     const text = query.toString();
     const result = await this.request<AddressBookResponse>(`/api/address-book${text === '' ? '' : `?${text}`}`);
     if (!result.ok || result.data === undefined) {
-      return { ok: false, error: result.error ?? `Tower answered ${result.status}` };
+      const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
+      return isUnknownRoute(result) ? { ...failure, unknownRoute: true } : failure;
     }
     return { ok: true, result: result.data };
   }

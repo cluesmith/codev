@@ -12,6 +12,7 @@
 import { logger } from '../utils/logger.js';
 import { getTowerClient } from '../lib/tower-client.js';
 import { detectWorkspaceRoot } from './send.js';
+import { olderTowerError } from '../utils/older-tower.js';
 
 export interface WorkspaceNameOptions {
   name?: string;
@@ -42,7 +43,7 @@ export async function workspaceName(options: WorkspaceNameOptions): Promise<void
 
   const outcome = await client.setWorkspaceAddressName(workspacePath, options.clear ? null : options.name!);
   if (!outcome.ok) {
-    logger.error(outcome.error);
+    logger.error(outcome.unknownRoute ? olderTowerError('cannot name a workspace') : outcome.error);
     process.exit(1);
   }
 

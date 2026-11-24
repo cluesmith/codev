@@ -36,6 +36,7 @@ import { getRegisteredWorkspaces, lookupBuilderSpawningArchitect } from '../stat
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { printableAddressName } from '../utils/workspace-address.js';
+import { TOWER_RESTART_COMMAND } from '../utils/older-tower.js';
 
 export interface WhoamiOptions {
   json?: boolean;
@@ -122,6 +123,16 @@ function workspacesWithTerminals(db: Database.Database, ownWorkspace: string): s
 }
 
 /**
+ * Whether this global.db holds workspace address names: the `address_name` column that
+ * migration v20 adds. Only Tower migrates the database, so one that lacks it has not been
+ * opened by a Tower of this version, whether or not an older Tower is running on it now.
+ */
+function holdsWorkspaceNames(db: Database.Database): boolean {
+  const columns = db.prepare('PRAGMA table_info(known_workspaces)').all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === 'address_name');
+}
+
+/**
  * The address of `agent` in the workspace at `workspaceRoot`, or why it has none. The
  * workspace's name is the one a frame or `afx workspace list` would print for it
  * ({@link printableAddressName}); a workspace with no usable name has no address, and the
@@ -138,10 +149,18 @@ function ownAddress(agent: AgentAddress, workspaceRoot: string | null, db: Datab
   const root = normalizeWorkspacePath(workspaceRoot);
   let named: ReturnType<typeof printableAddressName>;
   try {
+    if (!holdsWorkspaceNames(db)) {
+      return {
+        addressUnavailable:
+          'global.db has not been migrated by a Tower of this version, so it holds no workspace names; ' +
+          `restarting Tower migrates it: ${TOWER_RESTART_COMMAND}`,
+      };
+    }
     named = printableAddressName(root, getRegisteredWorkspaces(db), workspacesWithTerminals(db, root));
-  } catch {
-    // A database from before workspace names existed (Tower has not run since the upgrade).
-    return { addressUnavailable: 'global.db does not hold workspace names yet; start Tower once: afx workspace start' };
+  } catch (err) {
+    // Any other failure is reported as itself: advice for a cause it is not would mislead.
+    const cause = err instanceof Error ? err.message : String(err);
+    return { addressUnavailable: `the name of this workspace could not be read from global.db: ${cause}` };
   }
   if (named.name === null) return { addressUnavailable: `this workspace has no address name: ${named.reason}` };
   const formatted = tryFormatAddress({ ...agent, workspace: named.name });

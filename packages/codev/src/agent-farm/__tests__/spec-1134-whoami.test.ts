@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+import { runGlobalMigrations } from '../db/migrations.js';
 // Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { parseAddress } from '@cluesmith/codev-sdk/address';
@@ -451,14 +452,88 @@ describe('Spec 1134 — afx whoami', () => {
       expect(identity.addressUnavailable).toContain('global.db could not be read');
     });
 
-    it('says so when global.db predates workspace names, and does not guess one', () => {
+    describe('a global.db at schema 19: a Tower of this version has not opened it yet', () => {
+      /**
+       * The database as the Tower before Spec 1940 left it: every table of today's schema,
+       * `known_workspaces` in its shape before migration v20 (no `address_name`), and the
+       * markers 1 to 19. That older Tower may well be running on it, with terminals.
+       */
+      function seedSchema19(): void {
+        const db = openDb();
+        db.exec(`
+          DROP INDEX idx_known_workspaces_address_name;
+          DROP TABLE known_workspaces;
+          CREATE TABLE known_workspaces (
+            workspace_path TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+        `);
+        for (let version = 1; version <= 19; version++) {
+          db.prepare('INSERT INTO _migrations (version) VALUES (?)').run(version);
+        }
+        const path = normalizeWorkspacePath(workspacePath);
+        db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(path, 'workspace');
+        db.prepare("INSERT INTO terminal_sessions (id, workspace_path, type) VALUES ('term-1', ?, 'architect')").run(path);
+        db.close();
+      }
+
+      it('says the database has not been migrated and that restarting Tower fixes it, with the commands', () => {
+        seedSchema19();
+        process.chdir(workspacePath);
+
+        const identity = resolveIdentity(archEnv('main'));
+
+        expect(identity).toMatchObject({ type: 'architect', name: 'main', workspace: 'workspace' });
+        expect(identity.address).toBeUndefined();
+        expect(identity.addressUnavailable).toBe(
+          'global.db has not been migrated by a Tower of this version, so it holds no workspace names; ' +
+            'restarting Tower migrates it: afx tower stop && afx tower start',
+        );
+        expect(formatIdentity(identity).split('\n').at(-1)).toBe(`address: none (${identity.addressUnavailable})`);
+      });
+
+      it('does not tell someone whose Tower is running to start it', () => {
+        seedSchema19();
+        process.chdir(workspacePath);
+        expect(resolveIdentity(archEnv('main')).addressUnavailable).not.toContain('afx workspace start');
+      });
+
+      it('gives the address once Tower\'s own migration has run on that database', () => {
+        seedSchema19();
+        const db = new Database(dbState.globalDbPath);
+        runGlobalMigrations(db, { log: () => {}, runDir: join(tmpRoot, 'run') });
+        db.close();
+        process.chdir(workspacePath);
+
+        expect(resolveIdentity(archEnv('main')).address).toBe('workspace:architect:main');
+      });
+
+      it('says the same for a builder; its identity is unaffected', () => {
+        seedBuilder('builder-spir-984', 'main');
+        seedSchema19();
+        process.chdir(worktreePath);
+
+        const identity = resolveIdentity(noEnv);
+
+        expect(identity).toMatchObject({ type: 'builder', name: 'builder-spir-984', architect: 'main' });
+        expect(identity.addressUnavailable).toContain('has not been migrated by a Tower of this version');
+      });
+    });
+
+    it('reports any other failure to read the names as itself, not as a database to migrate', () => {
+      seedKnownWorkspace('workspace');
       const db = new Database(dbState.globalDbPath);
-      db.exec('CREATE TABLE known_workspaces (workspace_path TEXT PRIMARY KEY, name TEXT NOT NULL)');
+      db.exec('DROP TABLE terminal_sessions');
       db.close();
       process.chdir(workspacePath);
+
       const identity = resolveIdentity(archEnv('main'));
+
       expect(identity.address).toBeUndefined();
-      expect(identity.addressUnavailable).toContain('does not hold workspace names yet');
+      expect(identity.addressUnavailable).toBe(
+        'the name of this workspace could not be read from global.db: no such table: terminal_sessions',
+      );
     });
 
     it('never opens global.db for writing', () => {
