@@ -3056,6 +3056,190 @@ SCRIPTS.arrange = async (R, context, page) => {
   }
 };
 
+// ── webviews (diagnostic) ────────────────────────────────────────────────────────────────────
+
+/**
+ * Run inside a webview's content frame: what it holds and which of its scripts and stylesheets
+ * arrived. Resource URLs are cut to their last three path segments.
+ */
+function webviewContentProbe() {
+  const short = (u) => (u || '').split('?')[0].split('/').slice(-3).join('/');
+  const root = document.getElementById('root');
+  const text = (document.body?.innerText ?? '').trim();
+  return {
+    readyState: document.readyState,
+    title: document.title,
+    bodyClass: document.body?.className ?? null,
+    rootChildren: root ? root.childElementCount : null,
+    workView: !!document.querySelector('.work-view'),
+    markdownBody: !!document.querySelector('.markdown-body'),
+    textLength: text.length,
+    text: text.slice(0, 100),
+    scripts: [...document.scripts].map((s) => (s.src ? short(s.src) : '(inline)')),
+    stylesheets: [...document.querySelectorAll('link[rel="stylesheet"]')].map((l) => ({ href: short(l.href), loaded: !!l.sheet })),
+    resources: performance.getEntriesByType('resource').map((e) => ({ name: short(e.name), status: e.responseStatus ?? null, ms: Math.round(e.duration) })),
+  };
+}
+
+/** Every webview host frame (`pre/index.html`) on the page, with a probe of each content frame in it. */
+async function webviewHosts(page) {
+  const out = [];
+  for (const host of page.frames()) {
+    if (!/\/webview\/browser\/pre\/index\.html/.test(host.url())) continue;
+    const q = URL.canParse(host.url()) ? new URL(host.url()).searchParams : new URLSearchParams();
+    const frames = await host.evaluate(() => [...document.querySelectorAll('iframe')].map((f) => ({ id: f.id, visibility: f.style.visibility })))
+      .catch((err) => [{ error: String(err.message ?? err) }]);
+    const content = [];
+    for (const child of host.childFrames()) {
+      content.push({ url: child.url().split('?')[0].split('/').pop(), ...await child.evaluate(webviewContentProbe).catch((err) => ({ error: String(err.message ?? err) })) });
+    }
+    out.push({ id: q.get('id'), extensionId: q.get('extensionId') ?? '', purpose: q.get('purpose') ?? '', hostOrigin: URL.canParse(host.url()) ? new URL(host.url()).hostname.split('.').slice(1).join('.') : '', frames, content });
+  }
+  return out;
+}
+
+/**
+ * Diagnostic, not a Cockpit check: does a webview render on this server, and if not, what the
+ * browser saw. Opens VS Code's own Markdown preview, the Codev contextual panel, the Codev
+ * Markdown preview and Work, one after another. For each it records a screenshot, a probe of each
+ * new webview's content frame, and the console messages, page errors and webview requests (with
+ * their outcome, or still pending) since it was opened. The full capture goes to
+ * `<out>-capture.json`; each check passes only if its webview rendered.
+ */
+SCRIPTS.webviews = async (R, context, page) => {
+  const t0 = Date.now();
+  const cap = { console: [], errors: [], serviceWorkers: [], observations: [] };
+  const requests = [];
+  const since = () => Date.now() - t0;
+  const frameOf = (r) => { try { return r.frame().url(); } catch { return null; } };
+  context.on('console', (m) => cap.console.push({ at: since(), type: m.type(), text: m.text(), source: m.location()?.url ?? '', worker: m.worker()?.url() ?? null }));
+  context.on('weberror', (e) => cap.errors.push({ at: since(), kind: 'weberror', text: String(e.error()?.stack ?? e.error()) }));
+  page.on('pageerror', (e) => cap.errors.push({ at: since(), kind: 'pageerror', text: String(e.stack ?? e) }));
+  context.on('serviceworker', (w) => {
+    cap.serviceWorkers.push({ at: since(), url: w.url() });
+    w.on('console', (m) => cap.console.push({ at: since(), type: m.type(), text: m.text(), source: m.location()?.url ?? '', worker: w.url() }));
+  });
+  const byRequest = new Map();
+  context.on('request', (r) => {
+    const e = { n: requests.length, at: since(), method: r.method(), url: r.url(), type: r.resourceType(), frame: frameOf(r), state: 'pending' };
+    requests.push(e);
+    byRequest.set(r, e);
+  });
+  context.on('requestfinished', async (r) => {
+    const e = byRequest.get(r);
+    if (!e) return;
+    const res = await r.response().catch(() => null);
+    Object.assign(e, { state: 'finished', status: res?.status() ?? null, fromServiceWorker: res?.fromServiceWorker() ?? false, doneAt: since() });
+  });
+  context.on('requestfailed', (r) => {
+    const e = byRequest.get(r);
+    if (e) Object.assign(e, { state: 'failed', failure: r.failure()?.errorText ?? '', doneAt: since() });
+  });
+  const isWebviewRequest = (e) => /vscode-cdn\.net|vscode-resource|\/webview\//.test(e.url) || /\/webview\/browser\/pre\//.test(e.frame ?? '');
+  const shortUrl = (u) => {
+    if (!URL.canParse(u)) return u;
+    const url = new URL(u);
+    return `${url.hostname.replace(/^[a-z0-9]{40,}\./, '<uuid>.')}/…/${url.pathname.split('/').slice(-3).join('/')}`;
+  };
+
+  /**
+   * Open one webview with `open`, then wait up to `timeout` for a content frame that `rendered`
+   * accepts, in a webview that is new since `open` or that `target` picks (the contextual panel
+   * may exist before it is shown). Record what the browser saw; throw (so the check fails) when
+   * nothing rendered.
+   */
+  async function observe(label, slug, open, { target, rendered }, timeout = 45_000) {
+    const known = new Set((await webviewHosts(page)).map((h) => h.id));
+    const c0 = cap.console.length;
+    const e0 = cap.errors.length;
+    const r0 = requests.length;
+    const started = since();
+    await open();
+    const candidates = async () => (await webviewHosts(page)).filter((h) => !known.has(h.id) || target(h));
+    let fresh = [];
+    let ok = false;
+    try {
+      await waitFor(`${label} to render`, async () => {
+        fresh = await candidates();
+        return fresh.some((h) => h.content.some((c) => rendered(c)));
+      }, timeout, 1000);
+      ok = true;
+    } catch { /* recorded below as not rendered */ }
+    await page.waitForTimeout(2000);
+    fresh = await candidates();
+    const shot = await R.shot(page, slug);
+    const webviewRequests = requests.slice(r0).filter(isWebviewRequest)
+      .map((e) => ({ ...e, url: shortUrl(e.url), frame: e.frame ? shortUrl(e.frame) : null }));
+    const observation = {
+      label, rendered: ok, existing: fresh.filter((h) => known.has(h.id)).map((h) => h.id), openedAt: started, observedAt: since(), webviews: fresh,
+      console: cap.console.slice(c0).filter((m) => m.type === 'error' || m.type === 'warning'),
+      errors: cap.errors.slice(e0),
+      requests: webviewRequests,
+    };
+    cap.observations.push(observation);
+    const content = fresh.flatMap((h) => h.content);
+    const pending = webviewRequests.filter((e) => e.state === 'pending');
+    const failed = webviewRequests.filter((e) => e.state === 'failed' || (e.status ?? 0) >= 400);
+    const missing = content.flatMap((c) => (c.stylesheets ?? []).filter((s) => !s.loaded).map((s) => s.href));
+    const summary = [
+      `${fresh.length} webview(s): ${fresh.map((h) => `${known.has(h.id) ? 'existing ' : 'new '}${h.extensionId || '(no extension id)'}${h.purpose ? `/${h.purpose}` : ''} [${h.frames.map((f) => `${f.id || '?'}:${f.visibility || '-'}`).join(',')}]`).join('; ') || 'none'}`,
+      `content: ${content.map((c) => `${c.url} ${c.readyState} root=${c.rootChildren} text=${c.textLength} scripts=${JSON.stringify(c.scripts)} resources=${(c.resources ?? []).length}`).join('; ') || 'none'}`,
+      `stylesheets not loaded: ${missing.length ? missing.join(', ') : 'none'}`,
+      `webview requests ${webviewRequests.length}: ${pending.length} pending${pending.length ? ` (${pending.slice(0, 4).map((e) => e.url).join(', ')})` : ''}, ${failed.length} failed${failed.length ? ` (${failed.slice(0, 4).map((e) => `${e.url} ${e.failure ?? e.status}`).join(', ')})` : ''}`,
+      `console errors ${observation.console.filter((m) => m.type === 'error').length}${observation.console.length ? `: ${observation.console.slice(0, 4).map((m) => JSON.stringify(m.text.slice(0, 160))).join(' | ')}` : ''}`,
+      `page errors ${observation.errors.length}${observation.errors.length ? `: ${observation.errors.slice(0, 3).map((e) => JSON.stringify(e.text.split('\n')[0].slice(0, 160))).join(' | ')}` : ''}`,
+    ].join('; ');
+    if (!ok) throw new Error(`did not render. ${summary} (screenshot ${shot})`);
+    return { detail: summary, shots: [shot] };
+  }
+
+  const SPEC = 'codev/specs/401-fixture-backlog.md';
+  try {
+    await R.check('workbench loads on alpha', async () => {
+      await loadWorkbench(page, R.folderUrl('alpha'));
+      return `${page.frames().length} frames`;
+    });
+    await R.check('built-in webview: VS Code\'s own Markdown preview of a fixture .md renders styled content', async () =>
+      observe('the built-in Markdown preview', 'builtin-markdown-preview', async () => {
+        await quickOpenFile(page, path.basename(SPEC));
+        await runCommand(page, 'Markdown: Open Preview');
+      }, {
+        target: (h) => h.extensionId === 'vscode.markdown-language-features',
+        rendered: (c) => c.markdownBody && c.textLength > 0 && (c.stylesheets ?? []).length > 0 && c.stylesheets.every((s) => s.loaded),
+      }));
+    await R.check('existing Codev webview: the contextual panel (codev.contextualPanel) renders', async () =>
+      observe('the Codev contextual panel', 'codev-contextual-panel', async () => {
+        await setPart(page, 'panel', true);
+        await page.locator('.part.panel .composite-bar .action-item .action-label[aria-label^="Codev"]').first().click();
+      }, {
+        target: (h) => h.extensionId === 'cluesmith.codev-vscode' && h.purpose === 'webviewView',
+        rendered: (c) => (c.scripts ?? []).some((s) => /contextual-panel\.js$/.test(s)) && c.rootChildren > 0,
+      }));
+    await R.check('existing Codev webview: the Codev Markdown preview (codev.markdownPreview) renders', async () =>
+      observe('the Codev Markdown preview', 'codev-markdown-preview', async () => {
+        await quickOpenFile(page, path.basename(SPEC));
+        await runCommand(page, 'Codev: Open Markdown Preview');
+      }, {
+        target: (h) => h.content.some((c) => (c.scripts ?? []).some((s) => /markdown-preview\.js$/.test(s))),
+        rendered: (c) => (c.scripts ?? []).some((s) => /markdown-preview\.js$/.test(s)) && c.rootChildren > 0,
+      }));
+    await R.check('this PR\'s Work panel renders', async () =>
+      observe('the Work panel', 'work-panel', async () => {
+        await runCommand(page, 'Codev: Open Work');
+      }, {
+        target: (h) => h.content.some((c) => (c.scripts ?? []).some((s) => /work\.js$/.test(s))),
+        rendered: (c) => c.workView,
+      }));
+  } finally {
+    const file = R.opts.out.replace(/\.json$/, '-capture.json');
+    fs.writeFileSync(file, `${JSON.stringify({
+      at: new Date().toISOString(), serviceWorkers: cap.serviceWorkers, observations: cap.observations,
+      allConsole: cap.console, allErrors: cap.errors,
+    }, null, 2)}\n`);
+    console.log(`capture written to ${file}`);
+  }
+};
+
 // ── profile-seed / profile-existing ──────────────────────────────────────────────────────────
 
 /**
