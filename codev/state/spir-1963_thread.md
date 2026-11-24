@@ -91,3 +91,21 @@ Verification harness: isolated Tower (non-default port, own CODEV_AGENT_FARM_DIR
 with isolated data/extension dirs + fixture repos — never :4100 or the owner's /ide/.
 Finding while planning: builder rows show no held/queued today, so those counts are Cockpit-only
 (an `attentionCounts` option) to keep Agents byte-for-byte.
+
+## 2026-11-24 — Plan consultation → plan-approval
+
+Iter 1: Codex REQUEST_CHANGES, Claude COMMENT. Iter 2: both COMMENT. All points accepted (rebuttals
+`1963-plan-iter{1,2}-rebuttals.md`). Things the reviews caught that the code confirmed:
+- `requestPreservingBody` reads text → decision images need a binary request path.
+- `/api/overview` lists only builders with a LIVE builder terminal, and `spawnedByArchitect` comes
+  only from global.db's `builders` row → the harness spawns fixture builders for real
+  (`afx spawn --task`, `CODEV_ARCHITECT_NAME`, plain-shell `shell.builder`) against an isolated
+  Tower; gate asserts attribution before screenshots.
+- `removeArchitect` falls back to the display label (`WEB (0)`); Cockpit architect rows need
+  main/sibling context values.
+- Hidden retained webviews still report `visibilityState === 'visible'` → host relays panel
+  visibility into `useDecisions`' `isActive`.
+- Existing webviews use `style-src 'unsafe-inline'`; BuilderCard needs it.
+- Windows path cases + windows.yml dispatch for the containment code.
+
+At plan-approval. Owner pre-approved the plan; waiting on the architect's check and go.
