@@ -50,3 +50,23 @@ single spaces for that reason.
 
 Draft PR #1964 opened so CI runs the full suite; Windows on-demand run 45303921745 dispatched.
 Holding before `porch done` (fix phase's `tests` check is the full local suite) per architect rule 2.
+
+## 2026-11-23 — porch done (fix phase), run once on the architect's go
+
+`VITEST_MAX_WORKERS=3 porch done bugfix-1853`: build passed (26.0s), tests failed (147.8s), 174s
+wall. Not rerun, per the architect. The failing test is unknown because the `porch` on PATH is the
+installed v3.3.7 (main's build), not this branch's build. So the run printed the old five npm-warning
+lines and saved no log: the bug this fix addresses hid its own evidence. Reported to the architect
+with options; holding.
+
+Named from vitest's results cache (`packages/codev/node_modules/.vite/vitest/<hash>/results.json`):
+the one real failure was `src/__tests__/skill-refresh.test.ts`, "lists the current version of every
+shipped skill". It was caused by this PR: I edited the porch SKILL.md without running
+`generate-skill-hashes`. It failed alone too, deterministically. Regenerating the registry added one
+hash each for `.claude/skills/porch` and `.codex/skills/porch`, and the file then passed 23/23. The
+cache's other failed entry, `zz-repro-1853`, was my deleted repro file, a stale record.
+
+The worker cap reaches vitest through porch → shell → npm → vitest. I probed with 6 throwaway files
+under porch's own `runCheck`: with `VITEST_MAX_WORKERS=3`, pool ids were 1–3 and at most 3 ran at
+once; without it, ids 1–6 and 6 at once. vitest 4.1.4 applies the variable in config resolution,
+overriding the config. I did not sample load during the porch done run (1-min load was 6.4 just after).
