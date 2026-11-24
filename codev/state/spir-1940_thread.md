@@ -1134,3 +1134,194 @@ the first step of the job. The other seven jobs on that head were green.
 - **First commit of phase 6**, in full: the architect's two defects (the 404 from an older Tower
   in `afx workspace list`; whoami's advice when the database has not been migrated), each tested
   against the old shape (a 404; a database at schema 19), and note 3 above.
+
+## 2026-11-24 — phase 6: the first commit (`ea180564e`): the new CLI against an older Tower
+
+Resumed after a context refresh at the phase boundary.
+
+**What the architect found, and one more of the same kind.** Right after an upgrade the new CLI
+meets the Tower that was already running.
+
+- `afx workspace list` printed `[error] Not found`. It now prints: `The running Tower is older
+  than this CLI: it has no address book. Restart Tower to pick up the new version: afx tower stop
+  && afx tower start`.
+- **`afx workspace name` had the same defect** (found by reading the route table at the merge
+  base: the name route is also one that Tower does not have). Fixed in the same commit; it says
+  `it cannot name a workspace`. I did not run this one against the installed Tower: on a Tower
+  that has the route it writes.
+- `afx whoami` told someone whose Tower was running to start it. It now looks for the
+  `address_name` column (migration v20) and says `global.db has not been migrated by a Tower of
+  this version, so it holds no workspace names; restarting Tower migrates it: afx tower stop &&
+  afx tower start`. Any other failure to read the names is reported as itself
+  (`the name of this workspace could not be read from global.db: <cause>`), which is the
+  reviewer's note 4.
+- Reviewer's note 3: `formatAddressBook` keeps every field from Tower to one printable line
+  (address name, agent name, address, `reach through`), and measures the columns on what is
+  printed.
+
+**How the SDK tells the two 404s apart.** A Tower's catch-all 404 is plain text and carries no
+error code; the name route's own 404 (`NOT_FOUND`, a workspace with no row) carries one, and the
+address book never answers 404. So `status === 404` with no code is "this Tower has no such
+route", returned as `unknownRoute: true` beside the error text. The CLI words the remedy once
+(`utils/older-tower.ts`).
+
+**Tests, against the old shapes** (the architect's order). `spec-1940-older-tower.test.ts` (new,
+5): the two commands run for real through the real SDK client against a transport that answers
+as the older Tower does (healthy; plain-text 404 for anything else), and a 404 of the route's own
+is not taken for an older Tower. `spec-1134-whoami.test.ts`: a database at schema 19 (today's
+tables, `known_workspaces` in its pre-v20 shape, markers 1 to 19, a registered workspace with a
+terminal) gives the new message for an architect and a builder; the same database gives the
+address once the real `runGlobalMigrations` has run on it. SDK: the plain-text 404 is marked, a
+500 is not, the route's own 404 keeps its code. `workspace-list.test.ts`: forged newlines and an
+escape sequence in each of the four fields print on one line.
+
+**Checked on the real path** (the architect's check, repeated with this build against the
+installed Tower, both read-only):
+
+```
+$ afx workspace list
+[error] The running Tower is older than this CLI: it has no address book. Restart Tower to pick up the new version: afx tower stop && afx tower start
+$ afx whoami
+workspace: codev
+type: builder
+name: builder-spir-1940
+architect: main
+address: none (global.db has not been migrated by a Tower of this version, so it holds no workspace names; restarting Tower migrates it: afx tower stop && afx tower start)
+```
+
+**Not fixed, for the architect to rule on.** `afx send codev:architect:review` typed with the new
+CLI against an older Tower is answered by the old resolver: it reads `architect:review` as a
+builder id in `codev` and says it was not found. No wrong recipient, but the message does not
+say the Tower is old. `/health` carries no version, so the CLI cannot tell without a new probe.
+
+**A sixth bare `cd`.** The second command of this session was `cd packages/codev/src/agent-farm
+&& wc …` with no parentheses. The next command returned to the worktree root; nothing was written
+from the wrong directory. Since then no command in this session starts with `cd`.
+
+## 2026-11-24 — phase 6 built: docs in both trees, the kept real-Tower test, one more older-Tower fix
+
+**The architect's answers (02:17Z).** (1) Run the five latency runs, back to back, nothing else of
+mine running, one-minute load sampled at the start and end of each; if the median of medians is
+outside the bound, tell them before the clean-baseline retake. (2) Fix the fourth older-Tower case
+in this phase, with the probe that already exists: when a send of the form
+`<workspace>:architect:<name>` comes back not found, ask the address-book route; no such route
+means the Tower is older.
+
+**The fourth case (`6649d8566`).** `failedForAnOlderTower` in `commands/send.ts`. Asked only when
+the send failed `NOT_FOUND` AND the address is the new three-part local form; an address-book
+route that is missing (`unknownRoute`) means older, and any other answer, a failure of the address
+book included, leaves the resolver's message. `spec-1940-older-tower-send.test.ts` (new, 10): the
+stub answers `/api/send` with the older Tower's own body (`Agent 'architect:review' not found in
+workspace 'codev'.`). Five mutations each fail a test; two survived at first and each got one (any
+address-book failure counted as older; an `afx://` address counted as the new form). On the real
+path, this build against the installed Tower:
+
+```
+$ afx send codev:architect:nobody-1940 "…"
+[error] The running Tower is older than this CLI: it does not know an address of the form <workspace>:architect:<name>. Restart Tower to pick up the new version: afx tower stop && afx tower start
+```
+
+**Docs (`d5f798ecd`).** Found by grepping both trees for the address forms.
+
+- `CLAUDE.md` and `AGENTS.md` (byte-identical): the table gains `<workspace>:architect:<name>`
+  and `<workspace>:<builder-id>`, says who may use each, and points at `afx workspace list`.
+- The four templates (`codev/templates/`, `codev-skeleton/templates/`): the same, with the
+  builder rule, finding an address, workspace names and replying. **The plan's criterion "the
+  diff of each template pair is empty" was inexact**: each `CLAUDE.md`/`AGENTS.md` template pair
+  already differed in its title and one note about the AGENTS.md standard, and still differs in
+  exactly those. The two trees' copies of each are identical.
+- The `afx` skill, four copies, identical, hashes regenerated: `afx workspace list` replaces the
+  `curl … /api/workspaces` advice; the three footers; `afx workspace name`; the whoami address.
+- `agent-farm.md` in both trees: `afx send` addresses, `afx workspace list`, `afx workspace name`,
+  `afx whoami`. The skeleton's copy had drifted (it listed only a builder id as a recipient and had
+  no multi-architect sections); I brought its `afx send` up to date and did not port the rest.
+- `roles/architect.md` and `roles/builder.md` in both trees: a short "Other workspaces" section
+  each. `.builder-role.md` in a live worktree is a copy made at spawn and does not change.
+- `arch.md` (cold tier): the stale routing chain corrected; "One structured address, one parser",
+  the builder rule, workspace address names, cross-workspace frames, the address book, a CLI newer
+  than the running Tower. The hot tier is untouched.
+- Left as they are: the `arch-save` skill and `decision-protocol.md` use `architect:<name>` inside
+  one workspace, which is unchanged. Stage 2 and 3 guidance (REMOTE, OTHER OWNER) is not added.
+
+**The kept end-to-end test (`fd37af57a`), `cross-workspace-addressing.e2e.test.ts`, 13 tests.** A
+built Tower on its own port, directory and database, never connected to Codev Cloud (asserted:
+`registered: false`, `disconnected`). Three workspaces, two of them directories called `codev`.
+Every case is the CLI's own `send`, `workspaceName` or `workspaceList` run in the test process as
+the agent (its directory; for an architect, `CODEV_ARCHITECT_NAME`).
+
+- **Two things are replaced, not one as the plan says**: the port the CLI's Tower client
+  connects to, and the file the CLI opens as global.db (this Tower's own). The second is needed
+  for a builder sender, whose identity the CLI verifies against global.db.
+- It covers: the headline path under the qualified header; the reply command taken from the
+  stored frame and run unchanged by the recipient; `no-live-pty` for a registered architect with no
+  terminal; an unknown architect name; the builder refused with the front door named and nothing
+  stored; the same builder through the front door and to its own architect; the two builder
+  footers; `afx://devvm/codev:architect` refused; the listing as the builder; the shared directory
+  name ambiguous; `no reply address`; both resolving after `afx workspace name one`.
+- **Found while writing it.** A workspace's architect command is split on whitespace
+  (`architectCmd.split(/\s+/)`), so `sh -c "sleep 3600"` (the config `send-integration.e2e` uses)
+  becomes `sh -c '"sleep' '3600"'`, which exits at once: architects on a test Tower so configured
+  have no live terminal. This is why the phase 5 transcript read `no live terminal` for every
+  architect. Here the architect program is one executable file, so architects are live and their
+  mail is held by the gate (`no-profile`). Not changed in Tower: a quoted architect command is not
+  this project's subject. **For the review.**
+- **A boundary, for the review.** The not-found hint (`Architects there: main, tunnel`) names the
+  architects that have a terminal now. One that is registered and between sessions is not in it,
+  though mail to it is held.
+- The send banner (`Sending Instruction`) is printed before a refusal too; the test reads what
+  follows it.
+- Teardown deactivates the three workspaces and asserts no process naming the socket directory
+  survives: passed on each of six runs, the five that failed in my own setup included.
+
+**The latency test** gains the cross-workspace figure: 100 held sends to a named architect in a
+second workspace, started only after the same-workspace scenario has been measured.
+
+**Verification so far.** SDK suite 16 files / 411 tests; `npm run build`; 114 related test files
+in `packages/codev` / 2928 tests at 4 workers; the five new and changed test files type-checked
+with a throwaway config (tests are outside the build's `tsc`); the residue check; the e2e file by
+file. No full local suite (ruling main-38). Pushed `fd37af57a`; Windows workflow dispatched on it:
+https://github.com/cluesmith/codev/actions/runs/45311869550
+
+## 2026-11-24 — phase 6: the latency verdict (five runs)
+
+`send-latency.e2e.test.ts`, `CODEV_SEND_LATENCY=1`, five runs back to back at `fd37af57a`, nothing
+else of mine running (the architect's go-ahead, 02:17Z). n=100 timed held sends per scenario per
+run. One-minute load from `uptime` at the start and end of each run.
+
+| Run | same-workspace median | cross-workspace named architect median | load start | load end |
+|---|---|---|---|---|
+| 1 | 2.200 ms | 2.215 ms | 5.03 | 5.39 |
+| 2 | 2.111 ms | 2.167 ms | 5.39 | 5.16 |
+| 3 | 2.270 ms | 2.265 ms | 5.16 | 4.83 |
+| 4 | 2.509 ms | 2.506 ms | 4.83 | 5.38 |
+| 5 | 2.276 ms | 2.086 ms | 5.38 | 4.91 |
+
+**Same-workspace: median of medians 2.270 ms.** Baseline (pre-phase-1 code) 2.19 ms; the spec's
+bound is the larger of +5% and +1 ms, so 3.19 ms. Inside the bound, by 0.92 ms; the worst single
+run (2.509 ms) is inside it too. No clean-baseline retake was needed. The two earlier single
+readings (3.10 ms, 5.03 ms) were taken under load from other work and are not the verdict.
+
+**Cross-workspace to a named architect: median of medians 2.215 ms** (no bound in the spec; for
+the record). The name lookup across workspaces costs nothing measurable over a same-workspace send.
+
+No shellper survived the five runs (`ps` for the test socket directories: 0).
+
+## 2026-11-24 — phase 6: the Windows run was red on a test fixture of mine; fixed
+
+Windows workflow on `fd37af57a` (run 45311869550): probes, CLI tests and install verification
+green on every Node; **Unit tests red on Node 22 and 24**: 30 tests, all in the Spec 1940 block of
+`tower-routes.test.ts` (written in phases 2 to 5; this is the first Windows run on this branch).
+
+**Cause: the fixture, not the route.** The block made its workspaces under `os.tmpdir()`, which
+Windows hands out in its short spelling (`C:\Users\RUNNER~1\…`), and seeded registry rows under
+that spelling. The routes key a workspace by `workspaceKey()`, the canonical spelling
+(`C:\Users\runneradmin\…`), as the architecture requires, so they looked up a workspace the test
+had never seeded: `has no registered terminals`, a 404 for a 200, and from the name route its own
+designed 500 (`Tower has no row for <path> under that spelling of its path`). **Fix:** the block's
+root is now `workspaceKey(mkdtempSync(…))`, one line; on POSIX `workspaceKey` returns the path as
+given, so nothing changes there (266 tests in the file pass locally).
+
+One other red test on Node 22 only, not mine and green on Node 24 in the same run:
+`pir-1233-session-launch-loop.test.ts` › "relaunches FRESH after a clean exit (per #1267) but
+pinned to a newly minted id": `Command failed: …\bash.exe …/start.sh`, then `EBUSY … rmdir` in its
+`afterEach`. **For the review's Flaky Tests section**; the architect is told.
