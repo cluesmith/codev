@@ -414,7 +414,15 @@ wait anywhere on the machine is visible on the row it concerns.
   - *Arrange Cockpit* (Command Palette and the combined view's title bar) arranges on demand at any
     time, and is idempotent: running it on an already-arranged window changes nothing visible;
   - a setting, `codev.cockpit.autoArrange` (default on), turns the first-show auto-arrange off. With
-    it off, only the command arranges.
+    it off, only the command arranges;
+  - **a one-time notice on the first auto-arrange** (ruled at the spec gate). VS Code has no
+    "undo layout", so the first time an auto-arrange happens for this user, an information
+    notification says the editor area was arranged for the Cockpit. It offers a *Don't arrange
+    automatically* action, which sets `codev.cockpit.autoArrange` to `false` at the user (global)
+    level.
+    - "First" is per user profile: a flag in the extension's global state is set when the notice is
+      shown, whatever the user does with it, so it never appears again in any window or workspace.
+    - *Arrange Cockpit* run by hand never shows it, and it is not shown while auto-arrange is off.
 - **Where it is offered:**
   - in a **builder-worktree window** the split is not offered. There is no auto-arrange and the
     title-bar action is hidden. This follows #1809: surfaces that act on the parent workspace stay
@@ -509,6 +517,10 @@ and usable, so the work can be cut after any of them; the plan phases against th
       isolated verification instance, never by stopping the owner's Tower.
 - [ ] With `codev.cockpit.autoArrange` off, showing the container never arranges, and the command
       still does.
+- [ ] The first auto-arrange for a user profile shows a one-time notice with *Don't arrange
+      automatically*. Choosing it sets `codev.cockpit.autoArrange` to `false` globally. The notice
+      does not appear again, in that or any other window, whether it was acted on or dismissed. It
+      never appears for a manual *Arrange Cockpit*.
 - [ ] The dashboard's Work and Decisions views look and behave as before. Existing `apps/web` tests
       (`DecisionsView*.test.tsx`, `useDecisions.test.ts`, `BuilderCard.test.tsx`,
       `NeedsAttentionList.test.tsx`, `BacklogList.test.tsx`, `App.decisions-tab.test.tsx`, …) pass
@@ -762,40 +774,22 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 - **Combined panel:** one hierarchy, Tower → workspaces → architects + Decisions → builders. Section
   order is therefore moot.
 
-**Important (shapes scope); for the owner at the gate, nothing assumed:**
+Scope and nice-to-know questions, ruled at the same gate (owner: "go with your recommendation"
+on all four; recorded on issue #1963):
 
-1. **Acting on other workspaces from this window.** This spec makes another workspace's rows
-   navigate: clicking opens that workspace's window (A1). Making them fully actionable here (A2)
-   needs no Tower route changes but is a large extension change. It requires workspace-qualified
-   terminal keys, the #1497 invariant over (workspace, name), every builder command made
-   workspace-aware, and per-workspace Decisions panels. **Recommendation:** A1 now, A2 as a
-   follow-up if wanted.
-   - A narrower middle option: opening *another workspace's Decisions screen* in this window
-     (decisions routes are workspace-scoped; no terminal changes) while terminals still navigate.
-     Its cost is per-workspace Decisions panels and their single-instance rule. Not specced unless
-     ruled in.
-2. **Decisions pending count / file presence.** The overview carries neither, so the Decisions
-   entry shows no count and appears for every active workspace (opening it shows the empty state
-   when there is no file).
-   - Showing a count, or hiding the entry when there is no file, needs an **additive Tower change**:
-     a decisions summary (present, open count) in the overview payload. The existing fleet fan-out
-     would then carry it with no new requests.
-   - **Recommendation:** no count in this spec; the additive field as a separate change if wanted.
-     This spec keeps "no Tower route changes".
+- **Acting on other workspaces from this window:** not in this spec. Other workspaces' rows show
+  state and navigate (A1). Acting on them in place (A2, including the Decisions-only middle option)
+  is follow-up issue #1969.
+- **Decisions pending count / file presence:** no count; the entry appears under every active
+  workspace. The additive overview field that a count would need is follow-up issue #1970. This
+  spec keeps "no Tower route changes".
+- **Dev URLs:** one *Open Dev URL…* context entry on the workspace row, as specced.
+- **First auto-arrange notice:** added as a requirement, with a criterion and a test (section 3,
+  *Triggers*).
+- **Nice-to-know defaults stand:** this window's workspace keeps its urgency slot (#1566) and
+  starts expanded, and the Decisions entry comes after the architects.
 
-**Nice-to-know:**
-
-3. **Ordering of this window's workspace.** It keeps its urgency slot, as in the Tower view (#1566),
-   and starts expanded. Pinning it first is the alternative.
-4. **Decisions entry position.** After the architects, per the owner's order ("architects /
-   decisions"). First under the workspace is the alternative.
-5. **Dev URLs.** They become one context-menu entry (*Open Dev URL…*) on the workspace row instead
-   of one row each. Keeping them as rows under the workspace is the alternative, at the cost of
-   hierarchy clutter.
-6. **A notice on the first auto-arrange.** VS Code has no "undo layout". A one-time notification
-   on the first auto-arrange, with a *Don't arrange automatically* action that turns
-   `codev.cockpit.autoArrange` off, would make the one surprising reshuffle dismissible. Not
-   specced, because it is not ruled; offered.
+No questions remain open.
 
 ## Test Scenarios
 
@@ -848,6 +842,10 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
    at creation; does not fire again on later shows; does not fire with `codev.cockpit.autoArrange`
    off, in a worktree window or in a no-workspace window. In those windows the commands explain why
    instead of acting.
+   - First-arrange notice: shown on the first auto-arrange when the global-state flag is unset, and
+     the flag is then set. Not shown when the flag is set, for a manual *Arrange Cockpit*, or with
+     auto-arrange off. *Don't arrange automatically* writes `codev.cockpit.autoArrange = false` at
+     `ConfigurationTarget.Global`, and dismissing the notice leaves the setting unchanged.
 8. Host decisions bridge: document, refusal (structured code/message preserved), transport error,
    image bytes / not-loaded; not-found maps to the empty state.
 9. Arrange: architect resolution delegates to `openResolvedArchitect` (non-live `main` → warning, no
@@ -906,7 +904,7 @@ markdown artifacts. Work and Decisions are workspace-state surfaces. Not recomme
 | Other workspaces' rows lag this workspace's | Medium | Low | They refresh when the Tower view does today (SSE, debounced, plus the 20 s poll); this is stated, not hidden |
 | The combined panel goes stale because periodic refresh is gated on the Codev-container views' visibility | High if missed | Medium | The combined view and the Work panel count toward the existing visibility gate (a success criterion and tests) |
 | Tests that match `extension.ts` source text (e.g. `worktree-window-1809.test.ts`) break when wiring is generalised, and the breakage is misread as a regression | Medium | Low | Named in Success Criteria: such tests are updated to follow the wiring, with the guarded behaviour unchanged |
-| Auto-arrange or the `terminalPosition` override is unwelcome for some users | Medium | Low | `codev.cockpit.autoArrange` turns auto-arrange off; the override applies only to the arrange action |
+| Auto-arrange or the `terminalPosition` override is unwelcome for some users | Medium | Low | `codev.cockpit.autoArrange` turns auto-arrange off, and the one-time first-arrange notice offers that in one click; the override applies only to the arrange action |
 | A webview-supplied path or URL is used to open something outside the workspace or a non-web scheme | Low | High | Canonical-path containment, including symlink resolution, and an `http:`/`https:` allowlist, both enforced and tested host-side |
 | Moving components changes the dashboard's look or behaviour | Medium | Medium | Thin dashboard wrappers with the current fetch adapter, the existing `apps/web` tests unchanged in intent, and a dashboard render check in verification |
 | A Decisions draft is lost by the layout or by hiding the panel | Low | High | `retainContextWhenHidden`; arrangement reuses panels and never recreates them; tested. Loss on explicit panel close or reload is parity with the dashboard and stated |
