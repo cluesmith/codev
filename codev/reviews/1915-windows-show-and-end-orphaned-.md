@@ -36,9 +36,10 @@ The guard went through three CI rounds and each found a real defect (fails open 
 - `codev/reviews/1915-windows-show-and-end-orphaned-.md` (new)
 - `codev/state/pir-1915_thread.md` (+119 / -0)
 - `packages/codev/src/__tests__/helpers/tracked-pids.ts` (+52 / -0)
-- `packages/codev/src/__tests__/launchers.windows.test.ts` (+12 / -1)
+- `packages/codev/src/__tests__/launchers.windows.test.ts` (+16 / -9)
 - `packages/codev/src/__tests__/session-job-containment.windows.test.ts` (+153 / -0)
-- `packages/codev/src/__tests__/tower-lifecycle.windows.test.ts` (+13 / -1)
+- `packages/codev/src/__tests__/process-tree.windows.test.ts` (+5 / -9)
+- `packages/codev/src/__tests__/tower-lifecycle.windows.test.ts` (+18 / -10)
 - `packages/codev/src/__tests__/windows-job.test.ts` (+17 / -1)
 - `packages/codev/src/__tests__/windows-job.windows.test.ts` (+59 / -15)
 - `packages/codev/src/agent-farm/__tests__/tower-stop-windows.test.ts` (+32 / -1)
@@ -72,6 +73,8 @@ Implementation commits on top of the merge-base (porch bookkeeping and thread-on
 - `aad9c00a1` [PIR #1915] Prevent instead of guard: Tower refuses to run inside any session job; drop the listing
 - `3b4066839` [PIR #1915] windows-job.windows: never terminate a job holding the test worker or its parent
 - `72e0e2f42` Merge remote-tracking branch 'origin/main' into builder/pir-1915 (clean; only `arch.md` changed on both sides and auto-merged)
+- `99e244a0e` [PIR #1915] Consultation follow-ups: exact flag assertion, openBrowser documented, full untested list
+- `cbd1cf763` [PIR #1915] Windows tests kill a leftover pid only if it is still the recorded process (process-tree, tower-lifecycle, launchers)
 
 `aad9c00a1` reverts the listing, the API, `afx orphans` and the teardown guard back to `main`'s code, so the net diff is the file list above.
 
@@ -80,6 +83,7 @@ Implementation commits on top of the merge-base (porch bookkeeping and thread-on
 - Build: ✓ pass (after the merge with `origin/main`)
 - Local full suite (Windows 11, Node 22, on `aad9c00a1`): **8135 passed, 0 failed**. The main Tower kept PID 53132 before and after.
 - Local after the merge: every test file this branch changed, plus the tests merged in from `main` (air-1893, bugfix-1910, bugfix-1952): 109 passed, 7 skipped, 0 failed.
+- Windows CI on the final head `cbd1cf763` (tracked-pids in all Windows test cleanup): **https://github.com/cluesmith/codev/actions/runs/45298573627** (suites plus `.windows.` targeted); the merge was gated on this run being green.
 - Windows CI on the merged code:
   - Full run **https://github.com/cluesmith/codev/actions/runs/45276143657** (suites), green after one re-run of the Node 24 unit job (see Flaky Tests: Phase 4(b)).
   - Targeted `.windows.` run **https://github.com/cluesmith/codev/actions/runs/45279040879**: 9 files passed, 1 skipped; all probes green.
@@ -148,7 +152,8 @@ COLD `codev/resources/lessons-learned.md`:
 - **Audit of pid kills in tests** (architect request): I checked every new or touched test file for cleanup that kills recorded pids without checking identity.
   - `windows-job.windows` and the since-removed `session-orphans.windows` had that pattern; both now use `tracked-pids`.
   - The rest use fakes, mocks, or kills that check identity.
-  - Untouched by this PR, two files still use the unchecked leftovers pattern: `process-tree.windows.test.ts:75` and `tower-lifecycle.windows.test.ts:64`. A follow-up should move them to `tracked-pids`. Not done here at the architect's direction, because one of them is the flaky Phase 4(b) test's own file.
+  - By owner decision on this PR, every Windows test file whose cleanup killed by bare pid now uses `tracked-pids` (commit `cbd1cf763`, test code only). That covers `process-tree.windows`, `tower-lifecycle.windows` and `launchers.windows`; my first audit missed the last one although this branch touches it. A grep of all Windows test files found no others: `ide-server-windows` and `ide-server-stub.windows` kill nothing by pid, and `process-tree.windows:146` kills a root the test just started and is still alive.
+  - Worker and parallelism settings are unchanged. vitest 4 ignores `singleFork`, so Windows test files still run in parallel.
 
 ### Consultation (single pass)
 
@@ -159,7 +164,7 @@ Verdicts:
 
 Disposition of Claude's findings:
 1. **The always-on flag test could pass with `0x800`.** Fixed. `windows-job.test.ts` now matches the whole line `$SESSION_JOB_LIMIT_FLAGS = 0` and rejects `= 0x…`. It is the only check of the flag that runs on the Linux PR CI, because `.windows.` tests skip themselves there.
-2. **`process-tree.windows.test.ts:75` is the suspected killer in the Phase 4(b) flake.** Not changed in this PR; it is a pre-existing test outside this change. I proposed moving it to `tracked-pids` to the architect, as this PR or a numbered follow-up issue; their call.
+2. **`process-tree.windows.test.ts:75` is the suspected killer in the Phase 4(b) flake.** Fixed in this PR by owner decision. It and the two other Windows test files with the same cleanup pattern now use `tracked-pids` (see the audit above).
 3. **`openBrowser` starts a browser inside the session.** Documented: `DEPENDENCIES.md` (both trees) now names the dashboard browser that `afx workspace start`, `afx attach` and `afx tower cloud login` open. It ends with the session if no browser was already running. Launching it through CIM is a possible follow-up.
 4. **The untested list was narrower than the plan's risks.** Fixed; see Test Results.
 5. **Nits.**
@@ -173,7 +178,7 @@ Disposition of Claude's findings:
 - **What to verify** (Windows):
   - Run `pnpm exec vitest run .windows.` in `packages/codev`.
   - In a Codev session, start a long-running native program from Git Bash and let its parent exit (e.g. `(find / -name x >/dev/null 2>&1 &)`). Close the session (or `afx cleanup`) and confirm the program is gone.
-  - From inside a session, start Tower plainly (`node dist/agent-farm/servers/tower-server.js <port>`). It should exit 1 with the refusal message. `afx tower start` should still work.
+  - From inside a session, start a throwaway Tower plainly, with its own state folder and a spare port, so it never touches the main Tower: `CODEV_AGENT_FARM_DIR="$(mktemp -d)" node dist/agent-farm/servers/tower-server.js 4199`. It should exit 1 with the refusal message. Without `CODEV_AGENT_FARM_DIR` it collides with the main Tower's state and exits with a different error. `afx tower start` should still work.
 
 ## Flaky Tests
 
@@ -183,6 +188,7 @@ All pre-existing; each was left running, not skipped.
   - Seen on run 45276143657, Node 24; passed on re-run.
   - Before teardown, Tower 2136 was not in the launcher's job (`inJob=False`, created through CIM, parent = WMI). Its log ended normally with no shutdown or refusal line, so it was ended from outside.
   - Likely cause: `process-tree.windows.test.ts:75`'s unchecked `afterAll` SIGKILLs every pid it recorded. Those were all confirmed dead mid-test and so free for reuse. That file finished at 22:09:00.87, after the pre-teardown check (22:08:59.41) and before the assertion (about 22:09:01.5). Unproven, because that file doesn't log its pids.
+  - Addressed at its likely cause in `cbd1cf763`: that cleanup, and the same pattern in `tower-lifecycle.windows` and `launchers.windows`, now kills a pid only if the live process was created no later than the recording. Still not proven to be the cause; if Phase 4(b) fails again with this in place, the cause is elsewhere.
   - This branch cannot put a CIM-created process into a session job:
     - A process joins a job only through its creator or an explicit assign, and the helper assigns only shellpers it just spawned.
     - The no-breakaway flag only stops members from leaving.
