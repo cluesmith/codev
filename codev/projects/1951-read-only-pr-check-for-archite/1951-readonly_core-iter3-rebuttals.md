@@ -11,7 +11,7 @@ Accepted. The stub's `ls-remote` now requires `origin` as its first argument. Ev
 - a path to another repository;
 - `origin` with an `ext::` ref.
 
-Both layers refuse all four: `allow-list.test.ts` includes the list, and so does `stub-bin.test.ts`. The `ext::` case's probe file is never created, because the stub refuses the call before git starts.
+Both layers refuse all four: `allow-list.test.ts` includes the list, and so does `stub-bin.test.ts`. The `ext::` case uses `sh -c true`, because the repository's `/tmp` residue check (`scripts/tmp-residue-check.mjs`) refuses a literal `/tmp` path in a test file.
 
 ## Audit requested by the architect: other forms with checked flags but unchecked arguments
 

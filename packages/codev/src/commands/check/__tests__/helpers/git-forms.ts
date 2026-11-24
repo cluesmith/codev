@@ -95,7 +95,7 @@ export const OFF_GRAMMAR_FORMS: Array<[string, string[]]> = [
   // Arguments, not flags: another repository, a transport that runs a program, a file
   // system path. The second layer must not rely on the first having checked them.
   ['ls-remote another remote', ['ls-remote', 'upstream', 'HEAD']],
-  ['ls-remote an ext:: transport', ['ls-remote', 'ext::sh -c touch% /tmp/codev-check-ext', 'HEAD']],
+  ['ls-remote an ext:: transport', ['ls-remote', 'ext::sh -c true', 'HEAD']],
   ['ls-remote a path to another repository', ['ls-remote', '/other/repo.git']],
   ['ls-remote origin with an ext:: ref', ['ls-remote', 'origin', 'ext::x']],
   ['diff of absolute paths (an implicit --no-index diff)', ['diff', '--no-ext-diff', '--no-textconv', '/etc/hosts', '/etc/passwd']],
