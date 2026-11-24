@@ -637,3 +637,37 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
   seed. Each needs its own seed because it mutates state: it removes architects and deactivates gamma.
 
 Evidence: `codev/projects/1963-vscode-alternative-layout-seco/verification-increment1/`.
+
+### Architect on Phase 5 (2026-11-24T11:01Z)
+
+All four points were accepted:
+1. **The Spawn Builder cwd fix stays in this PR.** The architect confirmed that main's
+   `runAfxCommand` passes no cwd, and will flag to the owner that the bug is live on main until
+   this merges.
+2. **The agent-cycle reading is right,** including the worktree window keeping the Agents order.
+3. **Asserting the #1494 relay over the plan's `porch approve` wording is right.** Say so in the
+   review.
+4. **The render screenshots read well** in light and dark.
+
+**Carried to Phase 7:** the increment-2 screenshots must show the Decisions entry under every
+active workspace, including one with no decisions file.
+
+### Phase 5 review, iteration 1 (2026-11-24)
+
+**Verdicts:** Codex APPROVE (no issues); Claude APPROVE (four non-blocking notes). Responses are in
+`1963-cockpit_actions-iter1-rebuttals.md`.
+
+**Fixed:**
+- The parity guard's source-view filter is no longer anchored to the start of the `when` clause.
+- New test: the hidden palette entry for `codev.cockpit.openWebInterface`.
+
+**Kept, as planned:**
+- The root listing awaits the held worktree config. The fetch cannot reject: the SDK returns
+  `null`, with a 10 s timeout.
+- *Remove Architect* stays on an owner-only row (the plan's accepted divergence; invoking it fails
+  visibly).
+
+**Candidate refinements for the review doc:**
+- A row whose architect is not in the overview roster gets its own context value, with no *Remove
+  Architect*.
+- A config fetch that fails while connected holds `null` until the next drop signal.

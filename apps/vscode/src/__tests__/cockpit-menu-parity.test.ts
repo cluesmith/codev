@@ -62,9 +62,11 @@ const PKG = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'u
 const LOCATIONS = ['view/item/context', 'view/title'] as const;
 const ALL_ENTRIES: MenuEntry[] = LOCATIONS.flatMap(location =>
   (PKG.contributes.menus[location] as Array<Omit<MenuEntry, 'location'>>).map(e => ({ location, ...e })));
-const SOURCE_VIEW = /^view == codev\.(workspace|agents|tower)( |$)/;
+// Anywhere in the clause, not only leading: an entry written `codev.hasFoo && view == codev.agents`
+// must not escape the oracle.
+const SOURCE_VIEW = /\bview == codev\.(workspace|agents|tower)( |\)|$)/;
 const SOURCE_ENTRIES = ALL_ENTRIES.filter(e => SOURCE_VIEW.test(e.when));
-const COCKPIT_MENU = ALL_ENTRIES.filter(e => /^view == codev\.cockpit( |$)/.test(e.when));
+const COCKPIT_MENU = ALL_ENTRIES.filter(e => /\bview == codev\.cockpit( |\)|$)/.test(e.when));
 
 const key = (e: MenuEntry) => JSON.stringify([e.location, e.command, e.when, e.group ?? null]);
 const COCKPIT_KEYS = new Set(COCKPIT_MENU.map(key));
@@ -102,6 +104,13 @@ const AGENT_ROW_ENTRIES = [
 // ── Menu entries ─────────────────────────────────────────────────────────────
 
 describe('every source-view menu entry has exactly one record, and matches its snapshot', () => {
+  it('a source view is recognised anywhere in a when clause, and only that view', () => {
+    expect(SOURCE_VIEW.test('codev.hasFoo && view == codev.agents')).toBe(true);
+    expect(SOURCE_VIEW.test('(view == codev.tower)')).toBe(true);
+    expect(SOURCE_VIEW.test('view == codev.agentsExtra')).toBe(false);
+    expect(SOURCE_VIEW.test('view == codev.cockpit')).toBe(false);
+  });
+
   it('27 source entries today: 18 row entries and 9 title-bar entries', () => {
     expect(SOURCE_ENTRIES.filter(e => e.location === 'view/item/context')).toHaveLength(18);
     expect(SOURCE_ENTRIES.filter(e => e.location === 'view/title')).toHaveLength(9);
@@ -323,5 +332,18 @@ describe("every viewsWelcome entry of the three views has a record", () => {
       expect(row.label).toBe(label);
       if (command) { expect((row.command as { command: string }).command).toBe(command); }
     }
+  });
+});
+
+describe('the Cockpit-only command stays out of the palette', () => {
+  // The Workspace view's Open Web Interface row is not a palette command either; this command
+  // exists only to give that row a Cockpit menu entry.
+  it('codev.cockpit.openWebInterface is contributed and hidden from the command palette', () => {
+    const commands = PKG.contributes.commands as Array<{ command: string }>;
+    expect(commands.some(c => c.command === 'codev.cockpit.openWebInterface')).toBe(true);
+    const palette = PKG.contributes.menus.commandPalette as Array<{ command: string; when?: string }>;
+    expect(palette.filter(e => e.command === 'codev.cockpit.openWebInterface')).toEqual([
+      { command: 'codev.cockpit.openWebInterface', when: 'false' },
+    ]);
   });
 });
