@@ -36,7 +36,7 @@ describe('checkWindowsNodeForPrebuilds', () => {
     }
   });
 
-  it('passes Node 22 and 24 on x64 and arm64 (the audited prebuild set)', () => {
+  it('passes Node 22 and 24 on x64 and arm64 (the audited prebuild set, broader than the tested Node 22)', () => {
     for (const arch of ['x64', 'arm64']) {
       expect(checkWindowsNodeForPrebuilds({ platform: 'win32', arch, abi: '127', nodeVersion: 'v22.11.0' })).toBeNull();
       expect(checkWindowsNodeForPrebuilds({ platform: 'win32', arch, abi: '137', nodeVersion: 'v24.13.0' })).toBeNull();

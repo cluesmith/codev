@@ -47,7 +47,7 @@ sudo apt install -y nodejs build-essential python3
 # Windows: the Node.js 22 installer from https://nodejs.org
 
 # Verify
-node --version  # Should show v22.x
+node --version  # Should show v22.x or newer
 ```
 
 ### git
@@ -202,8 +202,11 @@ xcode-select --install
 Most dependencies are available via apt:
 
 ```bash
+# Node.js 22 from NodeSource (the distribution's nodejs package is older than 22)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+
 # Core dependencies (build-essential and python3 build node-pty)
-sudo apt install nodejs npm git build-essential python3
+sudo apt install nodejs git build-essential python3
 
 # gh requires adding GitHub's apt repository (see above)
 ```

@@ -747,7 +747,7 @@ const CORE_DEPENDENCIES: Dependency[] = [
     required: true,
     installHint: {
       macos: 'brew install node',
-      linux: 'apt install nodejs npm',
+      linux: 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs',
     },
   },
   {
