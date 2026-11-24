@@ -69,3 +69,25 @@ hierarchy → shared package + panels → arrange), active workspace rows click-
 the inline action), Tower root shows "Not connected to Tower" + Reconnect after the first failed
 attempt (ConnectionManager retries forever, never gives up), Loading… child before an overview.
 New owner question offered, not specced: a one-time notice on the first auto-arrange.
+
+## 2026-11-24 — Spec approved → plan
+
+Owner approved the spec ("go with your recommendation" on all four): other workspaces navigate-only
+(acting in place → #1969), no Decisions pending count (→ #1970), dev URLs as "Open Dev URL…", and
+ADD the one-time first-auto-arrange notice. Rulings recorded in the spec (95029fd66); ran
+`porch approve 1963 spec-approval` on the architect's relay.
+
+Plan gate is pre-approved by the owner for a plan that implements the approved spec; I still wait
+for the architect's go (after their check) before `porch approve 1963 plan-approval`.
+
+Plan (9475ca950): 8 phases on the spec's 3 increments —
+1 fleet-cache overview retention · 2 `ArchitectTreeBuilder` extracted from BuildersProvider
+(scoped ids, act/navigate modes; Agents ids byte-identical) · 3 Cockpit container + hierarchy +
+generalised tree wiring · 4 placement-table menus + parity mapping oracle + rendered check ·
+5 `@cluesmith/codev-workspace-views` (source-exported, host adapter, `--codev-wv-*` tokens),
+dashboard on wrappers · 6 SDK decisions methods + Decisions panel + Decisions entry · 7 Work panel ·
+8 spike then Arrange Cockpit + triggers + notice.
+Verification harness: isolated Tower (non-default port, own CODEV_AGENT_FARM_DIR) + `code serve-web`
+with isolated data/extension dirs + fixture repos — never :4100 or the owner's /ide/.
+Finding while planning: builder rows show no held/queued today, so those counts are Cockpit-only
+(an `attentionCounts` option) to keep Agents byte-for-byte.
