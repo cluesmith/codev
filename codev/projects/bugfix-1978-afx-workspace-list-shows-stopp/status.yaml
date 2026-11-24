@@ -1,7 +1,7 @@
 id: bugfix-1978
 title: afx-workspace-list-shows-stopp
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-24T21:54:58.375Z'
-updated_at: '2026-11-24T22:00:12.753Z'
+updated_at: '2026-11-24T22:20:09.373Z'
