@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock node-pty so PtySession can be instantiated without a real PTY
-vi.mock('node-pty', () => ({
+vi.mock('../../terminal/node-pty-loader.js', () => ({ loadNodePty: () => ({
   default: {
     spawn: vi.fn(() => ({
       onData: vi.fn(),
@@ -17,7 +17,7 @@ vi.mock('node-pty', () => ({
       kill: vi.fn(),
     })),
   },
-}));
+}).default }));
 
 // Mock fs to avoid disk log creation
 vi.mock('node:fs', async () => {
