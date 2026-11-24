@@ -206,9 +206,13 @@ export class ArchitectTreeBuilder {
 
   /**
    * The children of `element`, or the root rows when it is `undefined`. `element` must be a row
-   * this builder made (same `scope`).
+   * this builder made (same `scope`); anything else is a routing bug and throws.
    */
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
+    if (element === undefined) {
+      return this.rootRows();
+    }
+    this.assertOwnRow(element);
     // Second level: a builder's changed files. VSCode only calls this for
     // an *expanded* builder, so collapsed builders cost no git. Navigate-mode
     // builder rows are leaves.
@@ -235,7 +239,21 @@ export class ArchitectTreeBuilder {
     if (element instanceof BuilderGroupTreeItem) {
       return this.rowsForGroup(element.groupName);
     }
-    return this.rootRows();
+    // Placeholders are leaves, so VSCode never asks for their children.
+    throw new Error(`ArchitectTreeBuilder: no children for unrecognised row '${String(element.label)}'`);
+  }
+
+  /**
+   * Throw when `element` is a row another builder made. A host holding several
+   * builders (the Cockpit) routes each row by its `scope`; a row that reaches the
+   * wrong builder would otherwise render that builder's rows, or answer another
+   * workspace's parent, without any sign of the mistake.
+   */
+  private assertOwnRow(element: vscode.TreeItem): void {
+    const scope = (element as { scope?: unknown }).scope;
+    if (typeof scope === 'string' && scope !== this.scope) {
+      throw new Error(`ArchitectTreeBuilder '${this.scope}': row of scope '${scope}' routed here`);
+    }
   }
 
   // The accordion's `reveal(builderItem)` and the active-file sync's
@@ -251,6 +269,7 @@ export class ArchitectTreeBuilder {
   // A root answer (`undefined`) is root *within this builder*: a host that nests
   // the builder's rows under its own nodes bridges from there.
   getParent(element: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem> {
+    this.assertOwnRow(element);
     if (element instanceof BuilderTreeItem) {
       return this.groupParentByBuilderId.get(element.builderId);
     }
@@ -444,9 +463,12 @@ export class ArchitectTreeBuilder {
    *    and so cycle — last.
    *
    * Non-agent terminals (the dev PTY, shells) are never in the roster because only
-   * architects and builders appear here.
+   * architects and builders appear here. Empty in navigate mode: the cycle opens
+   * terminals through this window's `TerminalManager`, and another workspace's
+   * agents are not there.
    */
   agentCycleOrder(): AgentTarget[] {
+    if (this.options.mode !== 'act') { return []; }
     const data = this.options.getData();
     if (!data) { return []; }
     const groups = this.groupsOf(data, Date.now());

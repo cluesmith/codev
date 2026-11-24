@@ -376,3 +376,27 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
     or an empty description fails the snapshot.
 - `check-types` is clean. `lint` shows only the two pre-existing `curly` warnings. `test:unit`
   passed 1326/1326 (1293 + 33). `esbuild` bundles.
+- Review, iteration 1: Codex and Claude both approved with HIGH confidence, and neither raised a
+  blocking issue.
+  - Taken now, from Claude's non-blocking notes:
+    - `agentCycleOrder()` returns `[]` in navigate mode, as `findFileItem` and
+      `revealTargetForAgent` already did. The cycle opens terminals through this window's
+      `TerminalManager`, so another workspace's agents must never enter it.
+    - `getChildren` and `getParent` throw on a row whose `scope` is another builder's.
+      `getChildren` also throws on an unrecognised row, where it used to fall through and render
+      the root again. A Phase 4 routing mistake now fails loudly instead of duplicating rows.
+    - A new test asserts that two builders' accordion versioning is independent.
+    - Each of the three was mutation-checked. `test:unit` passed 1329/1329.
+  - Carried into Phase 4, not changed here:
+    - Rendering this window's builder rows probes the disk for a review file
+      (`builderHasReviewFile`). The Cockpit will render on fleet ticks as well as overview changes,
+      which roughly doubles those probes. Keep that in mind when Phase 4 chooses its re-render
+      signals. Navigate rows do no fs work.
+    - `architect-tree.ts` imports `views/tower.ts` for `OPEN_WORKSPACE_COMMAND` and
+      `WorkspaceTarget`. There is no cycle and nothing touches `vscode` at load time. The import is
+      cosmetic and stays as it is.
+  - Snapshot provenance: Claude could not confirm from git that the snapshot predates the refactor,
+    because both landed in one commit. The order was: test written, snapshot recorded
+    (`Snapshots 18 written`) against the untouched `BuildersProvider`, then the source changes,
+    after which the snapshot matched unchanged. The mutation runs also show the snapshot is not
+    self-confirming: giving the Agents view a cockpit contextValue or a description fails it.

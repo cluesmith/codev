@@ -374,6 +374,32 @@ describe('ArchitectTreeBuilder: scoped ids', () => {
     const after = await tree.getChildren(find(await tree.getChildren(), 'ws:/a|builder-group:main'));
     expect(ids(after)).toEqual(['ws:/a|spir-10#0', 'ws:/a|air-11#1']);
   });
+
+  it('keeps accordion state per builder: re-versioning one leaves another untouched', async () => {
+    const a = actTree(MANY, 'ws:/a|');
+    const b = actTree(MANY, 'ws:/b|');
+    const mainRows = async (tree: typeof a, scope: string) =>
+      ids(await tree.getChildren(find(await tree.getChildren(), `${scope}builder-group:main`)));
+    a.keepOnlyOpen(find(await a.getChildren(find(await a.getChildren(), 'ws:/a|builder-group:main')), 'ws:/a|spir-10#0'));
+    expect(await mainRows(a, 'ws:/a|')).toEqual(['ws:/a|spir-10#0', 'ws:/a|air-11#1']);
+    expect(await mainRows(b, 'ws:/b|')).toEqual(['ws:/b|spir-10#0', 'ws:/b|air-11#0']);
+  });
+
+  it('refuses a row another builder made, in getChildren and getParent', async () => {
+    const a = actTree(MANY, 'ws:/a|');
+    const b = actTree(MANY, 'ws:/b|');
+    const foreignGroup = find(await b.getChildren(), 'ws:/b|builder-group:main');
+    const foreignBuilder = find(await b.getChildren(foreignGroup), 'ws:/b|spir-10#0');
+    await expect(a.getChildren(foreignGroup)).rejects.toThrow("row of scope 'ws:/b|' routed here");
+    await expect(a.getChildren(foreignBuilder)).rejects.toThrow("row of scope 'ws:/b|' routed here");
+    expect(() => a.getParent(foreignBuilder)).toThrow("row of scope 'ws:/b|' routed here");
+  });
+
+  it('refuses an unrecognised row instead of rendering the root again', async () => {
+    const tree = actTree(MANY, 'ws:/a|');
+    const stray = { label: 'stray' } as vscode.TreeItem;
+    await expect(tree.getChildren(stray)).rejects.toThrow("no children for unrecognised row 'stray'");
+  });
 });
 
 describe('ArchitectTreeBuilder: act mode, scoped (this window in the Cockpit)', () => {
@@ -470,6 +496,8 @@ describe('ArchitectTreeBuilder: navigate mode (another workspace\'s rows)', () =
     }
     expect(await tree.findFileItem('spir-10', 'README.md')).toBeUndefined();
     expect(tree.revealTargetForAgent({ kind: 'builder', id: 'spir-10' })).toBeUndefined();
+    // The agent cycle opens this window's terminals; another workspace's agents are not in it.
+    expect(tree.agentCycleOrder()).toEqual([]);
   });
 
   it('every row clicks to open the workspace, and its tooltip names that workspace', async () => {
