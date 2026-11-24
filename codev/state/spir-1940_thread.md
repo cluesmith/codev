@@ -860,3 +860,24 @@ them.
 formatter, the naming module or the write path (1810 tests, 4 workers); type-check;
 `npm run build`. The full local suite was NOT run (ruling main-38); GitHub's run on the pushed
 head is the full check.
+
+## 2026-11-24 — phase 4: build recorded; review round 1 starts
+
+- GitHub 8 of 8 green on `ba33ee37b` (runs 45300455783 Tests, 45300455800 CLI Integration
+  Tests). The architect checked the run and gave the word; `porch done` for the build ran with
+  the one-time tests skip under ruling main-38 (local config restored byte-identical in the same
+  command, nothing under `.codev` staged). The build check ran and passed.
+- **Architect's answers, for the review document:**
+  1. Front door: keep as built. Record it as a deliberate reading of the spec's "the `main`
+     architect" row: the same thing in a workspace that has a `main`, and the only correct
+     answer in one that does not. Name the case it adds (no `main`, the sender is the first
+     registered) and what a builder sees when the front door does NOT reach the sender
+     (`reply through your architect`).
+  2. Layout (reply logic in `tower-messages.ts`): fine.
+  3. Record the known boundary: the footer checks permission, not that the sender's workspace
+     is running.
+- The 18 old leaked shellpers: killed by the architect on the owner's word, each checked
+  against Tower's terminal list first.
+- **Phase 5 order** (architect): build, push, tell them when GitHub is green; carry the two
+  phase 3 notes (the `NAME_TAKEN` wording for an ambiguous basename, and the comment on which
+  name wins).
