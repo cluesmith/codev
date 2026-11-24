@@ -59,6 +59,8 @@ function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
 /** The window's one panel of a kind, and its serializer. */
 export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerializer, vscode.Disposable {
   private current: vscode.WebviewPanel | undefined;
+  /** The open panel's listeners, kept until the panel closes or this is disposed. */
+  private panelSubscriptions: vscode.Disposable[] = [];
   private readonly visibilityEmitter = new vscode.EventEmitter<void>();
   /** Fires when the panel opens, closes, or is shown or hidden. */
   readonly onDidChangeVisibility = this.visibilityEmitter.event;
@@ -130,6 +132,8 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
   }
 
   dispose(): void {
+    for (const subscription of this.panelSubscriptions) { subscription.dispose(); }
+    this.panelSubscriptions = [];
     this.visibilityEmitter.dispose();
   }
 
@@ -156,9 +160,11 @@ export abstract class SingleWebviewPanel implements vscode.WebviewPanelSerialize
       panel.onDidDispose(() => {
         if (this.current === panel) { this.current = undefined; }
         for (const subscription of subscriptions) { subscription.dispose(); }
+        if (this.panelSubscriptions === subscriptions) { this.panelSubscriptions = []; }
         this.visibilityEmitter.fire();
       }),
     ];
+    this.panelSubscriptions = subscriptions;
     this.attach(panel);
     this.visibilityEmitter.fire();
   }

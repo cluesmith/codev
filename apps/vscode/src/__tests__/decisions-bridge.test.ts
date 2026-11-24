@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { DecisionsDocument } from '@cluesmith/codev-types';
-import { DecisionsBridge, DECISIONS_INIT_HINT, NOT_CONNECTED_MESSAGE, type DecisionsConnection } from '../workspace-views/decisions-bridge.js';
+import { DecisionsBridge, DECISIONS_INIT_HINT, NOT_CONNECTED_MESSAGE, TRANSPORT_FAILED, type DecisionsConnection } from '../workspace-views/decisions-bridge.js';
 
 const WS = '/work/codev';
 const DOC: DecisionsDocument = { path: 'codev/decisions.md', version: 'v1', items: [], ruledMarkdown: '', problems: [] };
@@ -53,6 +53,16 @@ describe('read', () => {
       .toEqual({ kind: 'error', message: 'Could not reach Tower: Tower not running' });
     expect(await bridgeWith({ getDecisions: async () => ({ kind: 'unreadable', status: 401 }) }).bridge.read())
       .toEqual({ kind: 'error', message: 'Unexpected response from Tower (HTTP 401)' });
+  });
+
+  it("never passes on a raw transport error, which can name Tower's URL or port (claude review)", async () => {
+    const raw = 'fetch failed: connect ECONNREFUSED 127.0.0.1:4100 (http://localhost:4100/api/decisions)';
+    const unreachable = async () => ({ kind: 'unreachable' as const, error: raw });
+    const { bridge } = bridgeWith({ getDecisions: unreachable, ruleDecision: unreachable, getDecisionImage: unreachable });
+    const messages = [await bridge.read(), await bridge.rule({ id: 'D-1', fingerprint: 'abc', word: 'ship' }), await bridge.image('a.png')]
+      .map((r) => ('message' in r ? r.message : ''));
+    expect(messages).toEqual(Array(3).fill(`Could not reach Tower: ${TRANSPORT_FAILED}`));
+    for (const m of messages) { expect(m).not.toMatch(/4100|localhost|127\.0\.0\.1|http/); }
   });
 
   it.each(['disconnected', 'connecting', 'reconnecting'] as const)('requests nothing while %s, and says it is not connected', async (state) => {

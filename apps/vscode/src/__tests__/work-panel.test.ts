@@ -224,6 +224,18 @@ describe('opening the panel', () => {
 });
 
 describe('the periodic overview refresh counts the Work panel (scenario 5)', () => {
+  it("disposing the manager drops the open panel's listeners, as closing the panel does (claude review)", () => {
+    const { manager } = setup();
+    manager.show();
+    expect(panels[0].viewState.count).toBe(1);
+    expect(panels[0].disposal.count).toBeGreaterThan(0);
+    const disposalBefore = panels[0].disposal.count;
+    manager.dispose();
+    expect(panels[0].viewState.count).toBe(0);
+    // The manager's own close listener is gone; the panel session's own may remain until the panel closes.
+    expect(panels[0].disposal.count).toBe(disposalBefore - 1);
+  });
+
   it('reports its visibility, and fires on open, show, hide and close', () => {
     const { manager } = setup();
     const fired = vi.fn();

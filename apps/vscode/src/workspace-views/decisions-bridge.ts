@@ -30,10 +30,16 @@ export const NOT_CONNECTED_MESSAGE = 'Not connected to Tower.';
 /** Appended to Tower's not-found message: how a workspace gets a decisions file. */
 export const DECISIONS_INIT_HINT = 'To start one, run afx decisions init in this workspace.';
 
+/**
+ * The client's two fixed transport texts. Any other is a raw transport error, which can name Tower's
+ * URL or port, and no webview message may carry those: it shows as {@link TRANSPORT_FAILED}.
+ */
+const SHOWN_TRANSPORT_ERRORS = new Set(['Tower not running', 'Request timeout']);
+export const TRANSPORT_FAILED = 'the connection failed';
+
 function unanswered(result: { kind: 'unreachable'; error: string } | { kind: 'unreadable'; status: number }): string {
-  return result.kind === 'unreachable'
-    ? `Could not reach Tower: ${result.error}`
-    : `Unexpected response from Tower (HTTP ${result.status})`;
+  if (result.kind === 'unreadable') { return `Unexpected response from Tower (HTTP ${result.status})`; }
+  return `Could not reach Tower: ${SHOWN_TRANSPORT_ERRORS.has(result.error) ? result.error : TRANSPORT_FAILED}`;
 }
 
 export class DecisionsBridge {

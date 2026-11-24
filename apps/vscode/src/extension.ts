@@ -678,7 +678,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		readArchitects: readArchitectRoster,
 		// The editor-area override: this action puts the architect in the left editor group even with
 		// `codev.terminalPosition: panel`.
-		openArchitect: async (terminalId, name) => terminalManager?.openArchitect(terminalId, name, true, 'editor'),
+		// Thrown, not skipped: arrange then stops and says why. (Set in activation before this; cleared
+		// only on deactivate.)
+		openArchitect: async (terminalId, name) => {
+			if (!terminalManager) { throw new Error('the terminal manager is not running'); }
+			return terminalManager.openArchitect(terminalId, name, true, 'editor');
+		},
 		architectTerminal: (name) => terminalManager?.getArchitectTerminal(name),
 		work: workPanels,
 		decisions: decisionsPanels,
