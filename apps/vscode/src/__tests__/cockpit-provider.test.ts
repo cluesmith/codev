@@ -65,7 +65,7 @@ vi.mock('vscode', () => {
   };
 });
 
-const { CockpitProvider, COCKPIT_IDS, cockpitScope } = await import('../views/cockpit.js');
+const { CockpitProvider, COCKPIT_IDS, cockpitScope, cockpitConnectionMode } = await import('../views/cockpit.js');
 const { TowerProvider, OPEN_WORKSPACE_COMMAND } = await import('../views/tower.js');
 const { BuildersProvider } = await import('../views/builders.js');
 const { REMOTE_CONTEXT } = await import('../views/architect-tree.js');
@@ -173,7 +173,7 @@ interface WorldOptions {
   windowPath?: string | null;
   state?: ConnectionState;
   worktreeWindow?: boolean;
-  connects?: boolean;
+  connection?: 'auto' | 'manual' | 'none';
 }
 
 /** The mutable state the fakes read, and the events the Cockpit subscribes to. */
@@ -222,7 +222,7 @@ function world(opts: WorldOptions = {}): World {
     } as never,
     diffCache: DIFFS,
     builderWorktreeWindow: opts.worktreeWindow ?? false,
-    connects: opts.connects ?? true,
+    connection: opts.connection ?? 'auto',
   });
   return w;
 }
@@ -361,11 +361,39 @@ describe('Tower root and its state rows', () => {
     expect(labelOf(w.provider, (await towerRows(w.provider))[0])).toBe('Not connected to Tower');
   });
 
-  it('says Not connected, with no dead Reconnect, in a window that never connects', async () => {
-    const w = world({ loaded: false, state: 'disconnected', connects: false });
+  it('says Not connected, with the reason and Open Folder instead of a dead Reconnect, in a window that never connects', async () => {
+    const w = world({ loaded: false, state: 'disconnected', connection: 'none' });
     const row = item(w.provider, (await towerRows(w.provider))[0]);
     expect(row.label).toBe('Not connected to Tower');
-    expect(row.command).toBeUndefined();
+    expect(row.tooltip).toMatch(/^This window has no Codev workspace, so it does not connect to Tower\./);
+    expect(row.command).toEqual({ command: 'workbench.action.files.openFolder', title: 'Open Folder' });
+  });
+
+  it('with codev.autoConnect off, says Not connected with Reconnect until an attempt runs, then Connecting…', async () => {
+    const w = world({ loaded: false, state: 'disconnected', connection: 'manual' });
+    const row = async () => item(w.provider, (await towerRows(w.provider))[0]);
+    expect(await row()).toMatchObject({
+      label: 'Not connected to Tower',
+      tooltip: 'Automatic connection is off (codev.autoConnect). Click to connect to Tower.',
+      command: { command: 'codev.reconnect', title: 'Reconnect to Tower' },
+    });
+    // Reconnect runs: ConnectionManager goes disconnected → connecting.
+    w.setState('connecting');
+    expect((await row()).label).toBe('Connecting to Tower…');
+    // That attempt fails: the ordinary not-connected row, retrying in the background.
+    w.setState('disconnected');
+    expect(await row()).toMatchObject({
+      label: 'Not connected to Tower',
+      tooltip: 'Click to reconnect to Tower now. Codev keeps retrying in the background.',
+      command: { command: 'codev.reconnect', title: 'Reconnect to Tower' },
+    });
+  });
+
+  it('derives the connection mode from the activation policy and codev.autoConnect', () => {
+    expect(cockpitConnectionMode(true, true)).toBe('auto');
+    expect(cockpitConnectionMode(true, false)).toBe('manual');
+    expect(cockpitConnectionMode(false, true)).toBe('none');
+    expect(cockpitConnectionMode(false, false)).toBe('none');
   });
 
   it('says No workspaces registered when Tower lists none', async () => {

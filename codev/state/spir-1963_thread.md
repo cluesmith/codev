@@ -463,3 +463,38 @@ Separately, the extension activates `alpha` on the isolated Tower by itself when
   - Mutation-checked, 45 mutations across the provider, the hosts, the gate, the badge, the tower
     extraction and the `extension.ts` wiring; every one is killed. Three survivors on the first pass
     (connected-before-load, pruning, `restart()`) got stronger tests.
+
+### Phase 4: `porch done` tests check failed (2026-11-24)
+
+- Ran when load was 5.90 with no vitest running. `build` passed; `tests` (`packages/codev`, 68.5 s)
+  failed. porch printed only npm warnings as the tail and kept no log, so the failing test names
+  are unknown.
+- Standing order 6: no re-run. Pushed `43f34f0f4` and opened draft PR #1971. Told the architect,
+  with options: CI names the failures and I run those files alone; one re-run with a reporter;
+  or a CI-stands-in ruling.
+- The branch changes nothing under `packages/`. Every change so far is in `apps/vscode`.
+
+### Phase 4 review, iteration 1 (2026-11-24)
+
+- Codex: REQUEST_CHANGES (3). Claude: APPROVE with 5 notes. Answers in
+  `1963-cockpit_hierarchy-iter1-rebuttals.md`.
+- Architect ruling (option A) on dormant windows (guest mode, no Codev workspace). They keep #1144
+  inertness: the Cockpit shows *Not connected to Tower* with the reason and *Open Folder*, and never
+  initialises the connection. This is a deviation from the spec's no-workspace criterion for that one
+  window type. The architect recorded it on #1963 and will raise it with the owner at the PR gate.
+  The spec is not edited. **The PR description and the review must state it.** New test:
+  `cockpit-dormant-1144.test.ts`, with no client, SSE, auto-start or fetch while the Cockpit is shown.
+- Fixed in place:
+  - The badge now follows connection-state changes. **This also changes the existing Codev
+    button**: during an outage its badge clears instead of keeping the stale count. The PR must say
+    so ("existing views behave as before" is a criterion).
+  - `codev.autoConnect: false` no longer shows *Connecting…* forever. The Cockpit's connection mode
+    is now `auto`, `manual` or `none`.
+- Claude's notes:
+  - `navigateTarget` throws a named error instead of a bare `!`.
+  - `entryOfRow` keeps its throw (Phase 3 decision).
+  - An active workspace with an empty roster shows an empty chevron until Phase 7 adds the Decisions
+    entry. Leave it; don't fix it twice.
+- The Phase 4 `porch done` before this used the architect's one-time main-32 tests skip (GitHub
+  green on `43f34f0f`; `bugfix-1267-launch-loop.test.ts` passed alone, 7/7). The skip was removed
+  straight afterwards and is noted on PR #1971.

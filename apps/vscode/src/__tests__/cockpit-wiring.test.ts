@@ -144,7 +144,7 @@ function setup(opts: { worktreeWindow?: boolean; agentsVisible?: boolean; cockpi
     overviewCache: overviewCache as never,
     diffCache: DIFFS,
     builderWorktreeWindow: opts.worktreeWindow ?? false,
-    connects: true,
+    connection: 'auto',
   });
   const agentsView = fakeView(opts.agentsVisible ?? false);
   const cockpitView = fakeView(opts.cockpitVisible ?? false);
@@ -365,6 +365,31 @@ describe('the activity badge', () => {
     hosts.setBadge(undefined);
     expect(agentsView.badge).toBeUndefined();
     expect(cockpitView.badge).toBeUndefined();
+  });
+
+  it('clears on a disconnect and repaints on reconnect, though the overview keeps its data', () => {
+    const { agentsView, cockpitView, hosts } = setup();
+    // What extension.ts's `updateActivityBadge` does, driven by the connection state alone.
+    let state = 'connected';
+    const update = () => hosts.setBadge(workspaceActivityBadge(blocked, { connected: state === 'connected', builderWorktreeWindow: false }));
+    update();
+    expect(agentsView.badge?.value).toBe(1);
+    expect(cockpitView.badge?.value).toBe(1);
+    state = 'reconnecting';
+    update();
+    expect(agentsView.badge).toBeUndefined();
+    expect(cockpitView.badge).toBeUndefined();
+    state = 'connected';
+    update();
+    expect(cockpitView.badge?.value).toBe(1);
+  });
+
+  it('extension.ts repaints the badge on every connection-state change', () => {
+    expect(EXT_SRC).toMatch(/context\.subscriptions\.push\(connectionManager\.onStateChange\(\(\) => updateActivityBadge\(\)\)\);/);
+  });
+
+  it('extension.ts gives the Cockpit its connection mode from the policy and codev.autoConnect', () => {
+    expect(EXT_SRC).toMatch(/connection: cockpitConnectionMode\(\s*policy\.initializeConnection,\s*vscode\.workspace\.getConfiguration\('codev'\)\.get<boolean>\('autoConnect', true\),\s*\),/);
   });
 
   it('is suppressed when disconnected, with no data, and in a builder-worktree window', () => {

@@ -65,7 +65,7 @@ import { readBuildersFileViewAsTree } from './builders-config.js';
 import { deriveAttention, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 import { BuildersProvider, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
 import { AgentTreeHosts } from './views/agent-tree-hosts.js';
-import { CockpitProvider, COCKPIT_VIEW_ID, type CockpitNode } from './views/cockpit.js';
+import { CockpitProvider, COCKPIT_VIEW_ID, cockpitConnectionMode, type CockpitNode } from './views/cockpit.js';
 import { OverviewRefreshGate } from './views/overview-refresh-gate.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
@@ -642,7 +642,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		overviewCache,
 		diffCache: builderDiffCache,
 		builderWorktreeWindow: isBuilderWorktreeWindow,
-		connects: policy.initializeConnection,
+		connection: cockpitConnectionMode(
+			policy.initializeConnection,
+			vscode.workspace.getConfiguration('codev').get<boolean>('autoConnect', true),
+		),
 	});
 	const cockpitView: vscode.TreeView<CockpitNode> = vscode.window.createTreeView(COCKPIT_VIEW_ID, { treeDataProvider: cockpitProvider });
 	// Builders accordion (#913), row-click expand, follow-reveals, the
@@ -678,6 +681,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Seed the badge so it's correct immediately if overview data is already
 	// cached, instead of waiting for the next onDidChange tick.
 	updateActivityBadge();
+	// And follow the connection: `OverviewCache` keeps its last-known data and
+	// emits nothing on a disconnect, so without this both buttons would keep a
+	// stale badge through a Tower outage.
+	context.subscriptions.push(connectionManager.onStateChange(() => updateActivityBadge()));
 	const teamProvider = new TeamProvider(connectionManager);
 	// A tree view (not a bare provider registration) so the provider can skip
 	// fetches while the Team view is hidden (#1919).

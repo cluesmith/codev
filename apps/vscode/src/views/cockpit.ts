@@ -52,10 +52,27 @@ export interface CockpitProviderOptions {
    */
   builderWorktreeWindow: boolean;
   /**
-   * Whether this window connects to Tower at all. A dormant window (guest mode, no Codev
-   * workspace, #1144) never does, so it says *Not connected* rather than *Connecting…* forever.
+   * How this window connects to Tower, decided at activation:
+   * - `auto`: `ConnectionManager.initialize()` makes the first attempt by itself;
+   * - `manual`: `codev.autoConnect` is off, so no attempt starts until *Reconnect*;
+   * - `none`: a dormant window (guest mode, no Codev workspace, #1144) never connects.
+   *
+   * Only `auto` may say *Connecting…* before any attempt has started; the others would say it
+   * forever.
    */
-  connects: boolean;
+  connection: CockpitConnectionMode;
+}
+
+/** See `CockpitProviderOptions.connection`. */
+export type CockpitConnectionMode = 'auto' | 'manual' | 'none';
+
+/**
+ * The window's connection mode, from the activation policy's `initializeConnection` and the
+ * `codev.autoConnect` setting `ConnectionManager.initialize()` reads at the same moment.
+ */
+export function cockpitConnectionMode(initializeConnection: boolean, autoConnect: boolean): CockpitConnectionMode {
+  if (!initializeConnection) { return 'none'; }
+  return autoConnect ? 'auto' : 'manual';
 }
 
 /** One workspace's row builder, and the workspace as it was last listed. */
@@ -259,26 +276,40 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
   }
 
   /**
-   * *Connecting to Tower…* until an attempt has failed (also while connected but before the first
-   * fleet load lands); *Not connected to Tower* after one, with *Reconnect* on click.
-   * `ConnectionManager` keeps retrying with backoff, so this never claims it gave up.
+   * *Connecting to Tower…* during the first attempt (also while connected but before the first
+   * fleet load lands); *Not connected to Tower* once one has failed, with *Reconnect* on click.
+   * `ConnectionManager` keeps retrying with backoff, so this never claims it gave up. With
+   * `codev.autoConnect` off no attempt starts by itself, so the row is *Not connected* (with
+   * *Reconnect*) until one does.
    */
   private connectionStateRow(): CockpitOwnNode {
-    const { connectionManager, connects } = this.options;
-    if (!connects) {
+    const { connectionManager, connection } = this.options;
+    if (connection === 'none') {
+      // A dormant window stays as inert as if Codev never activated (#1144): no connection, ever.
+      // The row says why and offers the Agents view's welcome action for such a window.
       return {
         kind: 'message', text: 'Not connected to Tower', icon: 'debug-disconnect',
-        tooltip: 'This window has no Codev workspace, so it does not connect to Tower.',
+        tooltip: 'This window has no Codev workspace, so it does not connect to Tower. '
+          + 'Click to open a folder containing a Codev project. '
+          + 'To set up Codev in a project, run `codev init` in its root.',
+        command: { command: 'workbench.action.files.openFolder', title: 'Open Folder' },
       };
     }
-    if (connectionManager.getState() === 'connected' || !this.attemptFailed) {
+    const state = connectionManager.getState();
+    // Connected but the fleet has not loaded yet; or the first attempt is under way (`auto` makes
+    // one by itself; `manual` once *Reconnect* runs).
+    const firstAttempt = !this.attemptFailed && (state === 'connecting' || connection === 'auto');
+    if (state === 'connected' || firstAttempt) {
       return { kind: 'message', text: 'Connecting to Tower…', icon: 'sync~spin' };
     }
+    const tooltip = this.attemptFailed
+      ? 'Click to reconnect to Tower now. Codev keeps retrying in the background.'
+      : 'Automatic connection is off (codev.autoConnect). Click to connect to Tower.';
     return {
       kind: 'message',
       text: 'Not connected to Tower',
       icon: 'debug-disconnect',
-      tooltip: 'Click to reconnect to Tower now. Codev keeps retrying in the background.',
+      tooltip,
       command: { command: 'codev.reconnect', title: 'Reconnect to Tower' },
     };
   }
@@ -362,8 +393,12 @@ export class CockpitProvider implements vscode.TreeDataProvider<CockpitNode>, Ac
    * is *marked* current, yet opening it must still reach the parent's window.
    */
   private navigateTarget(scope: string): WorkspaceTarget {
-    const ws = this.trees.get(scope)!.ws;
-    return { ...targetOf(ws), isCurrent: false };
+    // `treeFor` stores the entry before building any row, so a miss is a routing bug: say so.
+    const entry = this.trees.get(scope);
+    if (!entry) {
+      throw new Error(`CockpitProvider: no workspace tree for scope '${scope}' while building a navigate row`);
+    }
+    return { ...targetOf(entry.ws), isCurrent: false };
   }
 
   /** Drop the row builders of workspaces no longer active in the fleet. */
