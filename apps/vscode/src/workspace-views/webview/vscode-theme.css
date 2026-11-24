@@ -83,6 +83,8 @@ body {
   background: var(--vscode-editor-background);
   color: var(--vscode-foreground);
   font-family: var(--vscode-font-family);
+  /* A webview default the older host page lacks (see the end of this file). */
+  overscroll-behavior-x: none;
 }
 
 /* Keyboard focus follows VS Code's focus colour. */
@@ -285,4 +287,66 @@ summary:focus-visible {
   background: transparent;
   padding-left: 0;
   padding-right: 0;
+}
+
+/*
+ * VS Code's webview defaults, stated here (cluesmith/codev-ide issue #67). The host page puts its
+ * default styles in front of the panel's own; in VS Code 1.147 they sit in `@layer vscode-default`
+ * and are the rules below. Codev IDE 1.138 serves an older host page, whose defaults are unlayered
+ * and differ: for one, it colours `code` with the theme's preformatted foreground but not its
+ * background, and High Contrast Light pairs a white foreground with a dark blue background, so code
+ * text there was white on white. So every default that differs on that page, for an element these
+ * panels render, is stated here with 1.147's value, and the panels look the same on every host
+ * (1.128's own defaults differ from 1.147's only in `a code` and `pre code`). The panels' own rules
+ * are more specific and still win where they set a property.
+ *
+ * Differing defaults, and where they apply:
+ * - body: overscroll-behavior-x (the old page leaves it unset), stated in the body rule above.
+ * - video: max-width/max-height (the old page sizes only img). An item's Markdown may hold one.
+ * - code: the old page sets only the colour. The file path, the notices and Markdown use it.
+ * - a code: the old page gives it the link colour, at the same specificity as the rule here.
+ * - pre code: absent on the old page. Markdown code blocks.
+ * - p > a: the link-underline setting, absent on the old page. Markdown links.
+ * - kbd: the old page's fixed greys, and its `.vscode-light kbd` (one class and one element, which
+ *   `:root kbd` matches and, coming later, overrides). An item's Markdown may hold one.
+ * The rest of the defaults (html, the body's other properties, img, a, a:hover, the focus outline,
+ * blockquote, scrollbars, find highlights) have the same values on all three pages. They are
+ * unlayered on the old page, but no panel rule loses to one of them there: under each page's
+ * defaults, every element the panels render measured the same computed style.
+ */
+video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+code {
+  font-family: var(--monaco-monospace-font);
+  color: var(--vscode-textPreformat-foreground);
+  background-color: var(--vscode-textPreformat-background);
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+
+a code {
+  color: var(--vscode-textPreformat-foreground);
+  text-decoration: underline;
+}
+
+pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+p > a {
+  text-decoration: var(--text-link-decoration);
+}
+
+:root kbd {
+  background-color: var(--vscode-keybindingLabel-background);
+  color: var(--vscode-keybindingLabel-foreground);
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--vscode-keybindingLabel-border);
+  border-bottom-color: var(--vscode-keybindingLabel-bottomBorder);
+  box-shadow: inset 0 -1px 0 var(--vscode-widget-shadow);
 }

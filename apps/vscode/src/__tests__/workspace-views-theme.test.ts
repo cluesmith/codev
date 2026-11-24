@@ -111,3 +111,95 @@ describe('vscode-theme.css', () => {
     expect(declarations).toEqual([]);
   });
 });
+
+/** The stylesheet's top-level rules (outside every at-rule): selector → its declarations, each rule once. */
+function topLevelRules(css: string): Map<string, Array<Record<string, string>>> {
+  const text = withoutComments(css);
+  const out = new Map<string, Array<Record<string, string>>>();
+  let depth = 0;
+  let start = 0;
+  let selector = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '{') {
+      if (depth === 0) { selector = text.slice(start, i).trim().replace(/\s+/g, ' '); start = i + 1; }
+      depth++;
+    } else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) {
+        if (!selector.startsWith('@')) {
+          const declarations = Object.fromEntries(text.slice(start, i).split(';').map(d => d.trim()).filter(Boolean)
+            .map(d => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim().replace(/\s+/g, ' ')]));
+          out.set(selector, [...(out.get(selector) ?? []), declarations]);
+        }
+        start = i + 1;
+      }
+    }
+  }
+  return out;
+}
+
+/** Specificity of one simple selector chain, as [ids, classes and pseudo-classes, elements]. */
+function specificity(selector: string): [number, number, number] {
+  const ids = selector.match(/#[\w-]+/g)?.length ?? 0;
+  const classes = (selector.match(/\.[\w-]+/g)?.length ?? 0) + (selector.match(/(^|[^:]):[\w-]+/g)?.length ?? 0);
+  const elements = selector.replace(/[#.:][\w-]+/g, ' ').split(/[\s>+~]+/).filter(part => /^[a-z]/i.test(part)).length;
+  return [ids, classes, elements];
+}
+
+/**
+ * VS Code 1.147's webview defaults for the elements the panels render, where the older host page
+ * Codev IDE 1.138 serves (cluesmith/codev-ide issue #67) differs: it sets `code` only a colour, which
+ * High Contrast Light makes white on a white page.
+ */
+const HOST_DEFAULTS: Array<[string, Record<string, string>]> = [
+  ['video', { 'max-width': '100%', 'max-height': '100%' }],
+  ['code', {
+    'font-family': 'var(--monaco-monospace-font)',
+    color: 'var(--vscode-textPreformat-foreground)',
+    'background-color': 'var(--vscode-textPreformat-background)',
+    padding: '1px 3px',
+    'border-radius': '4px',
+  }],
+  ['a code', { color: 'var(--vscode-textPreformat-foreground)', 'text-decoration': 'underline' }],
+  ['pre code', { 'background-color': 'transparent', padding: '0' }],
+  ['p > a', { 'text-decoration': 'var(--text-link-decoration)' }],
+  [':root kbd', {
+    'background-color': 'var(--vscode-keybindingLabel-background)',
+    color: 'var(--vscode-keybindingLabel-foreground)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'var(--vscode-keybindingLabel-border)',
+    'border-bottom-color': 'var(--vscode-keybindingLabel-bottomBorder)',
+    'box-shadow': 'inset 0 -1px 0 var(--vscode-widget-shadow)',
+  }],
+];
+
+describe("vscode-theme.css states VS Code's webview defaults (cluesmith/codev-ide#67)", () => {
+  const rules = topLevelRules(THEME);
+
+  it.each(HOST_DEFAULTS)('states %s as VS Code 1.147 does, once and outside any layer', (selector, declarations) => {
+    expect(rules.get(selector), `one top-level ${selector} rule`).toHaveLength(1);
+    expect(rules.get(selector)![0]).toEqual(declarations);
+  });
+
+  it("states the body's overscroll-behavior-x in the panels' one body rule", () => {
+    expect(rules.get('body'), 'one top-level body rule').toHaveLength(1);
+    expect(rules.get('body')![0]).toMatchObject({ 'overscroll-behavior-x': 'none' });
+  });
+
+  it("matches the old host page's competing rules, so coming after them it wins there", () => {
+    // That page's defaults are unlayered and come before the panel's stylesheet: a rule here wins
+    // when its specificity is at least theirs. `a, a code` gives linked code the link colour;
+    // `.vscode-light kbd` keeps its fixed greys in light themes.
+    expect(specificity('a code')).toEqual([0, 0, 2]);
+    expect(specificity(':root kbd')).toEqual(specificity('.vscode-light kbd'));
+    expect(specificity('.vscode-light kbd')).toEqual([0, 1, 1]);
+  });
+
+  it('leaves the option word its own colours: a class rule outranks the element rule', () => {
+    const word = topLevelRules(SHARED).get('.decisions-option-word');
+    expect(word, 'a .decisions-option-word rule in the shared stylesheet').toHaveLength(1);
+    expect(word![0]).toMatchObject({ color: 'inherit', background: expect.stringContaining('--codev-wv-bg-tertiary') });
+    expect(specificity('.decisions-option-word')[1]).toBeGreaterThan(specificity('code')[1]);
+  });
+});
