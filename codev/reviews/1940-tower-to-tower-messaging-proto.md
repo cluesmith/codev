@@ -9,7 +9,8 @@ workspace on the same Tower, the recipient sees who wrote and a reply command th
 pasted, and `afx workspace list`, `afx workspace name` and `afx whoami` show and manage the
 addresses. Six plan phases were built and reviewed; the seventh (a front-door-only setting per
 workspace) was cut by the owner at plan approval. No commit in any implement phase went
-unreviewed. Stages 2 and 3 are follow-up issues for the architect to file.
+unreviewed. Stage 2 is issue #1967 (between my own Towers, through Codev Cloud) and stage 3 is
+issue #1968 (another owner's Tower, by invitation); each inherits the spec's checklist as written.
 
 ## Spec Compliance
 
@@ -82,8 +83,12 @@ After phase 6 (`fd37af57a`), five runs back to back, 100 timed held sends per sc
 Same-workspace: median of medians **2.270 ms**, inside the bound by 0.92 ms; the worst single run
 is inside it too. Cross-workspace to a named architect: **2.215 ms** (the spec sets no bound; for
 the record). The baseline was not retaken from a clean copy of the old commit, because the result
-was inside the bound. The baseline was measured at a higher load than the after figure, which
-favours the after figure; the margin is several times the difference between runs.
+was inside the bound. **The comparison is one-sided:** the baseline was measured at a load average
+of 14.6 and the after figure at about 5, which favours the after figure. What supports the
+conclusion all the same: the measured difference is 0.08 ms against an allowance of 1 ms, and the
+cross-workspace figure, which does the extra name lookup, is no higher than the same-workspace
+one. Retaking the baseline at a load of about 5 would settle it for the cost of one run of the
+old commit; it is listed under Follow-up Items.
 
 ### Known boundaries
 
@@ -623,6 +628,40 @@ points and their fixes are listed in
   builds a whole address book; one whoami message has no remedy. → **N/A**: none blocking, none
   changed; recorded under Known boundaries and Follow-up Items.
 
+### Review Phase (Round 1)
+
+#### Codex (REQUEST_CHANGES; "no blocking implementation defect found")
+- **Concern**: PR #1957 is still marked draft. → **Addressed**: it was a draft because it was
+  opened early so that GitHub would run the suite; marked ready for review.
+- **Concern**: The spec and the plan lack `approved` / `validated` frontmatter. → **Rebutted**:
+  that frontmatter is for a spec or plan approved and committed to `main` *before* a builder is
+  spawned, so that porch treats the phase as done. These two were written by the builder and
+  approved by the human at porch's own gates, which `status.yaml` records (`spec-approval`,
+  `plan-approval`). Adding `validated: [codex, claude]` to the spec would also overstate it: the
+  approved text is one commit ahead of what the reviewers read.
+- **Concern**: Commit `d4cb7e648` carries a `Co-Authored-By` trailer. → **N/A**: true, and
+  disclosed. Removing it means rewriting the history of an open pull request and force-pushing,
+  which the builder may not do without the owner's word. Put to the owner at the `pr` gate.
+
+#### Claude (APPROVE)
+- **Concern**: The `afx` skill says a builder is refused `<workspace>:architect:<name>`, but a
+  builder that writes its own workspace's name in front of its own spawning architect is
+  accepted. → **Addressed**: one clause added to the skill (four copies, hashes regenerated)
+  and to `agent-farm.md` in both trees.
+- **Concern**: The latency baseline and the after figure were taken at different loads. →
+  **Addressed** in this document: the Latency section now says the comparison is one-sided and
+  what supports the conclusion; a retake is a follow-up item.
+- **Concern**: Confirm issue #1605 is really superseded, since the front-door-only setting was
+  cut. → **N/A**: the owner's ruling at plan approval (main-31) cut the setting and said the
+  issue still closes as superseded. Passed to the architect, who closes it.
+- **Concern**: `afx workspace list` costs one resolve per agent with no cache. → **N/A**:
+  deliberate; recorded under Known boundaries.
+- **Concern**: `status.yaml` records review rounds only when one asked for changes, so phases 4
+  to 6 look unreviewed there. → **N/A** for this PR (porch's bookkeeping); added under
+  Methodology Improvements.
+- **Concern**: Whether the branch is current with `main` could not be checked. → **N/A**:
+  GitHub reports the PR mergeable, and its runs test the merge with `main`.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -676,6 +715,9 @@ points and their fixes are listed in
   a route, as a line in the plan template.
 - **`porch.checks.tests` has no way to say "GitHub's run on this head is the check"**; the
   one-time skip by hand, under a standing ruling, was the working substitute.
+- **`status.yaml` records a review round only when a reviewer asked for changes.** Phases 4, 5
+  and 6 each had one round in which both reviewers approved, and the committed status file shows
+  no review for them at all. Porch should record every round with its verdicts.
 
 ## Architecture Updates
 
@@ -742,14 +784,16 @@ The architect was told of each.
 
 ## Follow-up Items
 
-- **Stage 2 (my own Towers) and stage 3 (another owner's Tower)**: one issue each, filed by the
-  architect, inheriting the spec's checklists. The `devvm` hint and the "until it has an
-  explicit name" tests belong to stage 2.
+- **Stage 2, issue #1967** (between my own Towers, through Codev Cloud) and **stage 3, issue
+  #1968** (another owner's Tower, by invitation), each inheriting the spec's checklist as
+  written. The `devvm` hint and the "until it has an explicit name" tests belong to stage 2.
 - **Issue #1605** (front door only) closes as superseded when this PR merges, and **issue
   #1633** is fixed by it; the architect closes both.
 - **Issue #1966**: architect commands with a quoted argument are split on whitespace.
 - **Issue #1960**: workspace routes refuse Windows UNC paths.
 - **Issue #1956**: the local suite under its own load. The ci-first ruling retires with it.
+- Retake the latency baseline at a load average of about 5 (one run of the test on a clean copy
+  of `732ad0118`), so that before and after are measured under the same load.
 - A version field on `/health` would let the CLI tell an older Tower with one cheap read, in
   place of the address-book probe.
 - The unknown-architect hint could list registered architects as well as live ones.

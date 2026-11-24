@@ -1410,3 +1410,26 @@ Resumed after a context refresh at the phase boundary (`enter:review`).
   next command returned to the worktree root; nothing was written from the wrong directory.
 - Order from here (ruling main-38): push, GitHub green on that head, tell the architect, and
   only on their word `porch done 1940` with the one-time skip. Then porch's review lanes.
+
+## 2026-11-24 — review phase, round 1: codex REQUEST_CHANGES, claude APPROVE
+
+- 03:26Z: GitHub 8 of 8 green on `2e774e5bd`; the architect gave the word; `porch done 1940` ran
+  (the review phase has no tests check, so nothing was skipped; local config restored, sha1 the
+  original). `Closes #1940` stays (architect). Follow-up issues: #1967 (stage 2), #1968 (stage 3).
+- **Codex** found no implementation defect; three procedural points. (1) PR still a draft:
+  marked ready. (2) No `approved`/`validated` frontmatter on the spec and plan: rebutted, that
+  frontmatter is for artifacts approved before a spawn; these were approved at porch's gates.
+  (3) The `Co-Authored-By` trailer on `d4cb7e648`: true; removing it is a history rewrite and a
+  force-push, which needs the owner's word. Put to the owner at the `pr` gate.
+- **Claude**, non-blocking. Fixed: the `afx` skill and `agent-farm.md` said a builder is always
+  refused `<workspace>:architect:<name>`; a builder naming its own spawning architect with its
+  own workspace in front is accepted (one clause, four skill copies, both trees, hashes
+  regenerated; the four skill-hash test files pass, 77 tests). In the review: the latency
+  comparison is one-sided (baseline at load 14.6, after at about 5) and a retake is a follow-up;
+  `status.yaml` shows no review round for phases 4 to 6 because porch records only rounds that
+  asked for changes. Passed to the architect: confirm #1605 is superseded before closing it.
+- **A gap of about 15 hours.** I stopped after writing the rebuttal and the review edits, before
+  committing. Nothing blocked me; the session went idle mid-step. The architect's message at
+  18:26Z restarted it.
+- `shipped-skill-hashes.ts` is a code file, so the head changes after the last green run: push,
+  GitHub green, tell the architect, then `porch done`.

@@ -102,7 +102,7 @@ it is persisted and will deliver; a resend arrives twice.
 | `afx send architect "…"` | From a builder: its spawning architect. From an architect: the `main` architect (else first registered). |
 | `afx send architect:<name> "…"` | A specific named architect in your own workspace (sibling-architect messaging). Architects can address any architect; a builder may only use its own `spawnedByArchitect`. |
 | `afx send <workspace>:architect "…"` | The **front door** of another workspace: its `main` architect, else the first registered. Any sender, builders included. |
-| `afx send <workspace>:architect:<name> "…"` | A named architect in **another workspace** on this Tower. Architects and humans only: a builder is refused, and the error names the front door to use instead. |
+| `afx send <workspace>:architect:<name> "…"` | A named architect in **another workspace** on this Tower. Architects and humans only: a builder is refused, and the error names the front door to use instead. (A builder may still write its own workspace's name in front of its own spawning architect; that is the same as `architect:<name>`.) |
 | `afx send <workspace>:<builder-id> "…"` | A builder in another workspace. |
 
 ```bash
