@@ -1,9 +1,36 @@
 id: '1963'
 title: vscode-alternative-layout-seco
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: verification_harness
+    title: Isolated verification harness
+    status: in_progress
+  - id: fleet_overviews
+    title: Fleet cache keeps every active workspace's overview
+    status: pending
+  - id: architect_tree_builder
+    title: Reusable, workspace-scoped architect-axis row builder
+    status: pending
+  - id: cockpit_hierarchy
+    title: Cockpit button and the Tower → workspaces → architects → builders tree
+    status: pending
+  - id: cockpit_actions
+    title: Placement-table actions on the hierarchy, parity mapping, increment-1 verification
+    status: pending
+  - id: workspace_views_package
+    title: Shared Work/Decisions package; dashboard moved onto it unchanged
+    status: pending
+  - id: decisions_panel
+    title: Decisions panel in VS Code, its host bridge, and the hierarchy's Decisions entry
+    status: pending
+  - id: work_panel
+    title: Work panel in VS Code, increment-2 verification
+    status: pending
+  - id: arrange_cockpit
+    title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
+    status: pending
+current_plan_phase: verification_harness
 gates:
   spec-approval:
     status: approved
@@ -18,7 +45,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T06:55:48.002Z'
+updated_at: '2026-11-24T06:55:50.289Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-11-24T06:55:50.288Z'
