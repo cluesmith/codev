@@ -412,6 +412,7 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
       fs.mkdirSync(path.join(fx.root, 'elsewhere'));
       fs.mkdirSync(path.join(b.dir, 'tmp'));
       fs.symlinkSync(path.join(fx.root, 'elsewhere'), path.join(b.dir, 'tmp/link'));
+      fs.symlinkSync(path.join(fx.root, 'gone'), path.join(b.dir, 'tmp/gone'));
       mergeBuilder(fx, b);
       prIs(b, 8, 'MERGED');
 
@@ -421,11 +422,23 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
       expect(report.removable).toBe('not-removable');
       expect(byId(report, 'ignored')).toMatchObject({
         status: 'attention',
-        details: { keep: [], links: [{ path: 'tmp/link', target: path.join(fx.root, 'elsewhere'), missing: false }] },
+        details: {
+          keep: [],
+          links: [
+            { path: 'tmp/gone', target: path.join(fx.root, 'gone'), missing: true },
+            { path: 'tmp/link', target: path.join(fx.root, 'elsewhere'), missing: false },
+          ],
+        },
       });
+      // One link per line, each with its target, so none is cut off.
       const human = renderWorktreeHuman(report);
-      expect(human.split('\n')[0]).toBe('NOT REMOVABLE  spir-8 — 1 keep-list symlink');
-      expect(human).toContain(`1 keep-list symlink would be lost: tmp/link -> ${path.join(fx.root, 'elsewhere')}\n`);
+      expect(human.split('\n')[0]).toBe('NOT REMOVABLE  spir-8 — 2 keep-list symlinks');
+      const lines = byId(report, 'ignored').summary.split('\n');
+      expect(lines.slice(0, 3)).toEqual([
+        '2 keep-list symlinks would be lost:',
+        `  tmp/gone -> ${path.join(fx.root, 'gone')} (target missing)`,
+        `  tmp/link -> ${path.join(fx.root, 'elsewhere')}`,
+      ]);
       expect(human).toContain('→ copy them out first (`afx cleanup --keep-ignored` never copies a link)');
     });
 
@@ -451,6 +464,31 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
       expect(byId(report, 'ignored')).toMatchObject({ status: 'ok', details: { keep: [], links: [], scaffold: ['.env', '.env.local'] } });
       expect(byId(report, 'uncommitted').summary).toContain(`[${SCAFFOLD_FILES.length + 1} scaffold files not counted]`);
       expect(byId(report, 'ignored').summary).toContain('[2 scaffold links not counted]');
+    });
+
+    // Where a symlink is not allowed, native Windows spawn makes a hard link, else a copy
+    // (createWorktreeLink). Both shapes can be made on every platform, so this runs everywhere.
+    it("spawn's fallbacks: a hard link of the main checkout's file, or a copy still equal to it, is scaffold; a changed copy is data", async () => {
+      configure({ cleanup: { keepIgnored: ['.env*'] } });
+      fs.mkdirSync(path.join(fx.main, '.git', 'info'), { recursive: true });
+      fs.appendFileSync(path.join(fx.main, '.git', 'info', 'exclude'), '.env*\n');
+      for (const [rel, text] of [['.env', 'A=1\n'], ['.env.local', 'B=2\n'], ['.env.test', 'C=3\n'], ['shared.json', '{}\n']]) {
+        fs.writeFileSync(path.join(fx.main, rel), text);
+      }
+      const b = addBuilder(fx, 'spir-8');
+      fs.linkSync(path.join(fx.main, '.env'), path.join(b.dir, '.env'));
+      fs.copyFileSync(path.join(fx.main, '.env.local'), path.join(b.dir, '.env.local'));
+      fs.copyFileSync(path.join(fx.main, 'shared.json'), path.join(b.dir, 'shared.json'));
+      // A copy edited since: same size, different bytes.
+      fs.writeFileSync(path.join(b.dir, '.env.test'), 'C=4\n');
+      mergeBuilder(fx, b);
+      prIs(b, 8, 'MERGED');
+
+      const { report } = await runReport('spir-8', { inspected: b.dir });
+
+      expect(report.removable).toBe('removable-after-keeping');
+      expect(byId(report, 'uncommitted')).toMatchObject({ status: 'ok', details: { files: [], scaffold: [...SCAFFOLD_FILES, 'shared.json'].sort() } });
+      expect(byId(report, 'ignored')).toMatchObject({ status: 'attention', details: { keep: ['.env.test'], links: [], scaffold: ['.env', '.env.local'] } });
     });
 
     it.skipIf(isWindows)("a link at spawn's path that points anywhere else is not spawn's: it is data", async () => {

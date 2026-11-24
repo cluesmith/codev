@@ -11,16 +11,17 @@
  *   pr           the branch's PR: OPEN is attention ("builder not finished")
  *   ignored      ignored files matching `cleanup.keepIgnored` that are not dependency or build
  *                output: the definitions `afx cleanup --keep-ignored` uses (`keep-list.ts`).
- *                A symbolic link among them is listed apart: one spawn made is scaffold; one to
- *                a keep-list file inside the worktree is judged as that file; any other is data
- *                cleanup cannot keep (it never copies a link), so it blocks removal
+ *                What spawn linked in (`isSpawnMade`) is scaffold. A symbolic link among the
+ *                rest is listed apart: one to a keep-list file inside the worktree is judged as
+ *                that file; any other is data cleanup cannot keep (it never copies a link), so
+ *                it blocks removal
  *
  * The verdict word describes data only. The exit code also counts the lifecycle and anything
  * that could not run, so "removable" never silently means "finished". The target is
  * resolved against the main checkout, so the command reads the same from any worktree.
  */
 
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isBuilderScaffold, spawnLinkTarget } from '../../agent-farm/lib/builder-scaffold.js';
 import { isNeverKeep } from '../../agent-farm/lib/keep-list.js';
@@ -298,6 +299,29 @@ function isSpawnLink(facts: Facts, rel: string, link: Link): boolean {
   return comparable(link.resolved) === comparable(spawnLinkTarget(facts.mainRoot, rel));
 }
 
+/**
+ * Whether the entry at `rel` is one spawn made, so removing it loses nothing. Spawn links each
+ * entry to the same path in the main checkout: a symbolic link where it may make one, else, on
+ * native Windows, a hard link of that file, else a copy (`createWorktreeLink`). A copy counts
+ * only while its bytes still equal the main checkout's file: one that has changed is data.
+ */
+function isSpawnMade(facts: Facts, rel: string, link: Link | null): Lookup<boolean> {
+  if (link !== null) return { ok: true, value: isSpawnLink(facts, rel, link) };
+  const source = spawnLinkTarget(facts.mainRoot, rel);
+  const abs = join(facts.target.path, ...rel.split('/'));
+  try {
+    const main = statSync(source, { bigint: true, throwIfNoEntry: false });
+    if (main === undefined || !main.isFile()) return { ok: true, value: false };
+    const mine = statSync(abs, { bigint: true });
+    if (!mine.isFile()) return { ok: true, value: false };
+    if (mine.dev === main.dev && mine.ino === main.ino) return { ok: true, value: true };
+    if (mine.size !== main.size) return { ok: true, value: false };
+    return { ok: true, value: readFileSync(abs).equals(readFileSync(source)) };
+  } catch (err) {
+    return { ok: false, reason: `could not compare ${rel} with the main checkout's: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
 /** The worktree-relative path a link resolves to, or null when it resolves outside the worktree or to nothing. */
 function insideTarget(facts: Facts, link: Link): string | null {
   const real = realPath(link.resolved);
@@ -329,7 +353,9 @@ async function checkUncommitted(facts: Facts): Promise<Check> {
       if (!isScaffold) {
         const link = linkAt(facts, e.path);
         if (!link.ok) return notRun('uncommitted', link.reason);
-        isScaffold = link.value !== null && isSpawnLink(facts, e.path, link.value);
+        const made = isSpawnMade(facts, e.path, link.value);
+        if (!made.ok) return notRun('uncommitted', made.reason);
+        isScaffold = made.value;
       }
     }
     if (isScaffold) scaffold.push(e.path);
@@ -437,16 +463,15 @@ async function checkIgnored(facts: Facts, patterns: readonly string[]): Promise<
     for (const p of matched) {
       const link = linkAt(facts, p);
       if (!link.ok) return notRun('ignored', link.reason);
-      if (link.value === null) keep.push(p);
+      const made = isSpawnMade(facts, p, link.value);
+      if (!made.ok) return notRun('ignored', made.reason);
+      if (made.value) scaffold.push(p);
+      else if (link.value === null) keep.push(p);
       else linked.push([p, link.value]);
     }
     const key = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
     const kept = new Set(keep.map(key));
     for (const [p, link] of linked) {
-      if (isSpawnLink(facts, p, link)) {
-        scaffold.push(p);
-        continue;
-      }
       // A link to a keep-list file inside the worktree is judged as that file, which is kept.
       const inside = insideTarget(facts, link);
       if (inside !== null && kept.has(key(inside))) continue;
@@ -475,8 +500,9 @@ async function checkIgnored(facts: Facts, patterns: readonly string[]): Promise<
   // A link is data too, but `afx cleanup --keep-ignored` skips every link, so only copying it
   // out by hand keeps it. Each is printed with its target, so the reader can judge what is at stake.
   if (links.length > 0) {
-    const each = links.map((l) => `${l.path} -> ${l.target}${l.missing ? ' (target missing)' : ''}`).join(', ');
-    lines.push(`${plural(links.length, 'keep-list symlink')} would be lost: ${each}`);
+    const each = links.map((l) => `${l.path} -> ${l.target}${l.missing ? ' (target missing)' : ''}`);
+    if (each.length === 1) lines.push(`1 keep-list symlink would be lost: ${each[0]}`);
+    else lines.push(`${plural(links.length, 'keep-list symlink')} would be lost:`, ...each.map((e) => `  ${e}`));
   }
   lines[0] += note;
   if (others.length > 0) lines.push(`(${plural(others.length, 'other ignored path')} treated as regenerable${examples})`);

@@ -330,3 +330,16 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   `[2 scaffold links not counted]` (.env, .codev/config.json), `.codev/config.local.json` (spawn's snapshot COPY,
   a regular file) counted as a keep file — correct, it is a file a builder may edit; default keep list never
   matches it. Real-HOME runs on spir-1951/air-1938/bugfix-1956 unchanged.
+- Architect (2026-11-24 18:26, after a ~15 h delivery delay): accepted the shape-based recognition of spawn links
+  ("cannot drift from what spawn did"), and config.local.json as a kept regular file. Skip applied for the iter2
+  rebuttal's porch done (a56bf9a37) and once more for iteration 3's (8a66ff91a, status file only). Machine at load
+  32: nothing heavy.
+- Review iter3: codex REQUEST_CHANGES — native Windows spawn falls back on a HARD LINK, then a COPY
+  (createWorktreeLink), which the symlink-only rule read as data. Fixed with `isSpawnMade`: a symlink to P in main,
+  or a hard link of main's P (bigint dev+ino), or a copy whose bytes still equal it (size, then contents); a changed
+  copy (even same size) is data. Same rule on every platform (an entry main holds byte for byte at the same path
+  loses nothing); applied in uncommitted and ignored; a failed read → not run. Test runs on every platform.
+  Claude APPROVE; note 1 fixed (several links: one per continuation line, each with its target); note 2 (link to an
+  unkept inside path blocks) → Phase 7 docs; note 3: cleanup's dirty notice still counts a non-ignored spawn link
+  (same class as main-36, informational, outside the plan's scoped cleanup edit) → asked the architect whether to
+  fix in this PR (needs a read-only helper cleanup can import); note 4 → Phase 7 docs.
