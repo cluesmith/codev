@@ -26,11 +26,11 @@ plan_phases:
     status: complete
   - id: work_panel
     title: Work panel in VS Code, increment-2 verification
-    status: in_progress
+    status: complete
   - id: arrange_cockpit
     title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
-    status: pending
-current_plan_phase: work_panel
+    status: in_progress
+current_plan_phase: arrange_cockpit
 gates:
   spec-approval:
     status: approved
@@ -44,8 +44,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: verification_harness
@@ -108,7 +108,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-work_panel-iter1-claude.txt
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T14:13:51.859Z'
+updated_at: '2026-11-24T14:16:29.098Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-24T06:55:50.288Z'
@@ -134,3 +134,5 @@ context_refreshes:
   - boundary: plan-phase:work_panel
     at: '2026-11-24T12:58:17.405Z'
     acknowledged_at: '2026-11-24T13:06:56.199Z'
+  - boundary: plan-phase:arrange_cockpit
+    at: '2026-11-24T14:16:29.097Z'
