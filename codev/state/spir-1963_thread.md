@@ -180,3 +180,43 @@ Both are now in the harness section. A side gotcha: zsh doesn't word-split `$PID
 `kill $PIDS` silently did nothing. I killed per PID instead.
 
 The evidence is in `codev/projects/1963-…/layout-spike/`.
+
+## 2026-11-24 — Phase 1 (verification_harness): harness built, self-test green
+
+I told the architect before the first isolated Tower start. Their OK came at 07:02Z, and they
+accepted two deviations:
+- **Scratch HOME** for every harness child (Tower, driver, serve-web, browser). This is an extra
+  layer beyond the plan.
+- **The socket dir is a short `/tmp/cckp-<random>` symlink** to `<scratch>/cockpit-harness/run`.
+  macOS caps a Unix-socket path at 104 bytes, and the scratchpad path alone is 135, so a socket dir
+  literally under the scratchpad cannot work.
+  - Gate 2 checks the realpath, and also checks the socket-path length.
+  - Teardown removes the link even after a failed start (the architect's condition).
+  - Standing order: if pre-flight or the tripwire fires in a real run, stop and tell the
+    architect before retrying.
+
+Findings that shaped the code:
+- **Plain-shell fixtures.** A `bash` architect auto-detects the **claude** harness and would be
+  handed claude's session and role args. So each fixture's `.codev/config.json` names a no-op custom
+  harness (`roleArgs: []`, `roleScriptFragment: ""`).
+- **No adopt.** `launchInstance` runs `npx codev adopt` when `codev/` is missing, so fixtures always
+  carry `codev/`. The driver fails if activation reports `adopted`.
+- **Builder terminals.** `POST /api/terminals` only registers a builder (shellper-backed) with
+  `persistent: true`, which the plan table omitted. The driver requires `persistent === true` in
+  the response.
+- **Machine settings.** User settings in serve-web live in the browser, so the harness writes
+  `<user-data-dir>/Machine/settings.json`. Restricted Mode ignores the `codev.tower*` settings only
+  from *workspace* settings, so Machine settings still apply.
+- **Allowlisted environments.** Child environments are built from an allowlist, so no `CLAUDE_CODE_*`,
+  `VSCODE_*`, `CODEV_*`, `NODE_ENV` or token variables leak in.
+
+`harness.mjs selftest` passes all 14 cases:
+- gate 1: port 4100, a non-numeric port, and a port that already has a listener;
+- gate 2: `~/.agent-farm`, an agent-farm dir outside the scratchpad, `~/.codev/run`, a socket dir
+  outside the scratchpad, and an over-long socket dir. Each refuses with nothing created;
+- gate 3: a `NODE_ENV=test` driver against a real production-mode isolated Tower refuses, and no
+  `test.db` or fixture is created;
+- gate 4: a foreign listener refuses;
+- teardown by PID, with the link removed;
+- the tripwire ignores a connection from outside the tree, and fires (exit 3) on one from a harness
+  child.
