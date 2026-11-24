@@ -27,11 +27,19 @@
  * (`no-profile`): the message is resolved, formatted and persisted, and nothing is typed.
  * The held row is dismissed after each sample, outside the timed region, so every sample
  * does the same work and the pile of held mail does not grow under the measurement.
+ *
+ * A second scenario times the same number of sends to a named architect in ANOTHER
+ * workspace (`<workspace>:architect:<name>`), also held. The spec sets no bound for it; the
+ * figure is for the record, so that the cost of the name lookup is known and not assumed.
+ * Its workspace is started only after the same-workspace scenario has been measured, so
+ * that scenario still runs under the conditions its baseline was taken in.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { performance } from 'node:perf_hooks';
-import { realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   startTower,
   createTestWorkspace,
@@ -145,9 +153,30 @@ function report(label: string, s: ReturnType<typeof summarize>): void {
   );
 }
 
+/**
+ * A second workspace, `<root>/latency-other`, whose architects are inert: the program is
+ * one executable file, because a workspace's architect command is split on whitespace and
+ * given further arguments by Tower.
+ */
+function createWorkspaceWithInertArchitects(root: string): string {
+  const agent = join(root, 'inert-agent.sh');
+  writeFileSync(agent, '#!/bin/sh\ntrap "" INT; while true; do sleep 3600; done\n', { mode: 0o755 });
+  const workspacePath = join(root, 'latency-other');
+  mkdirSync(join(workspacePath, 'codev'), { recursive: true });
+  mkdirSync(join(workspacePath, '.agent-farm'), { recursive: true });
+  mkdirSync(join(workspacePath, '.codev'), { recursive: true });
+  writeFileSync(
+    join(workspacePath, '.codev', 'config.json'),
+    JSON.stringify({ shell: { architect: agent, builder: 'bash', shell: 'bash' } }),
+  );
+  return workspacePath;
+}
+
 describe.skipIf(!ENABLED)('send latency (Spec 1940, opt-in measurement)', () => {
   let tower: TowerHandle;
   let workspace: string;
+  let otherRoot: string | undefined;
+  let otherWorkspace: string | undefined;
   const BUILDER = 'builder-spir-9001';
 
   beforeAll(async () => {
@@ -182,8 +211,9 @@ describe.skipIf(!ENABLED)('send latency (Spec 1940, opt-in measurement)', () => 
     // Shellpers outlive Tower by design: stopping Tower alone leaves the architect's and
     // the builder's running for good. Deactivating the workspace is what ends them. A
     // failed deactivation is not swallowed: the assertion below is what reports it.
-    if (workspace) {
-      await fetch(`http://localhost:${tower.port}/api/workspaces/${encodeWorkspacePath(workspace)}/deactivate`, {
+    for (const started of [workspace, otherWorkspace]) {
+      if (!started) continue;
+      await fetch(`http://localhost:${tower.port}/api/workspaces/${encodeWorkspacePath(started)}/deactivate`, {
         method: 'POST',
         signal: AbortSignal.timeout(30_000),
       }).catch(() => {});
@@ -191,6 +221,7 @@ describe.skipIf(!ENABLED)('send latency (Spec 1940, opt-in measurement)', () => 
     const { socketDir } = tower;
     await tower.stop();
     if (workspace) cleanupTestWorkspace(workspace);
+    if (otherRoot) rmSync(otherRoot, { recursive: true, force: true });
 
     let survivors = pidsNamingSocketDir(socketDir);
     for (let i = 0; i < 40 && survivors.length > 0; i++) {
@@ -220,5 +251,39 @@ describe.skipIf(!ENABLED)('send latency (Spec 1940, opt-in measurement)', () => 
           `(max ${Math.max(baselineMs * 1.05, baselineMs + 1).toFixed(3)}ms)`,
       ).toBe(true);
     }
+  }, 300_000);
+
+  it('cross-workspace send to a named architect whose mail is held (no bound: for the record)', async () => {
+    otherRoot = realpathSync(mkdtempSync(join(tmpdir(), 'codev-latency-')));
+    otherWorkspace = createWorkspaceWithInertArchitects(otherRoot);
+    await activate(tower.port, otherWorkspace);
+    const added = await fetch(
+      `http://localhost:${tower.port}/api/workspaces/${encodeWorkspacePath(otherWorkspace)}/architects`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'tunnel' }) },
+    );
+    if (!added.ok) throw new Error(`add-architect failed: ${added.status} ${await added.text()}`);
+
+    const body: SendBody = {
+      to: 'latency-other:architect:tunnel',
+      message: 'latency probe: forty bytes of body text.',
+      from: 'architect:main',
+      workspace,
+      fromWorkspace: workspace,
+    };
+    // Ready when the send is held by the gate (`timedHeldSend` throws until it is).
+    let ready: unknown;
+    for (let i = 0; i < 60; i++) {
+      try {
+        await timedHeldSend(tower.port, body);
+        ready = true;
+        break;
+      } catch (err) {
+        ready = err;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    if (ready !== true) throw ready;
+
+    report('cross-workspace-named-architect', await measure(tower.port, body));
   }, 300_000);
 });
