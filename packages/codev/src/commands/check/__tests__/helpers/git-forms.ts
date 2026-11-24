@@ -5,6 +5,7 @@
 
 export const SHA = 'a'.repeat(40);
 export const SHA2 = 'b'.repeat(40);
+export const SHA3 = 'c'.repeat(40);
 
 export interface GitForm {
   globals: string[];
@@ -27,6 +28,8 @@ export function allowedForms(dir: string): GitForm[] {
     form([], 'rev-list', '--first-parent', '--max-count=10', SHA),
     form([], 'rev-list', '--count', `${SHA}..${SHA2}`),
     form([], 'rev-list', '--first-parent', '--parents', '--max-count=11', SHA, '--not', SHA2),
+    form([], 'rev-list', SHA, '--not', SHA2),
+    form([], 'rev-list', SHA, '--not', SHA2, SHA3),
     form([], 'merge-base', SHA, SHA2),
     form([], 'merge-base', '--is-ancestor', SHA, 'refs/remotes/origin/main'),
     form([], 'log', '--no-ext-diff', '--no-textconv', '-z', '--format=%H%x00%B', `${SHA}..${SHA2}`),
@@ -39,6 +42,7 @@ export function allowedForms(dir: string): GitForm[] {
     form([], 'cat-file', '-t', SHA),
     form([], 'for-each-ref', '--format=%(refname)', 'refs/heads/main'),
     form(['-C', dir], 'ls-files', '--others', '--ignored', '--exclude-standard', '-z', '--', ':(top,glob)codev/**'),
+    form(['-C', dir], 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'),
     form([], 'ls-remote', 'origin', 'refs/heads/main'),
     form([], 'ls-remote', '--symref', 'origin', 'HEAD'),
     form([], 'worktree', 'list', '--porcelain'),

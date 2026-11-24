@@ -9,12 +9,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { useFakeHome } from '../../commands/check/__tests__/helpers/fake-home.js';
 import { hasUncommittedChanges } from '../commands/cleanup.js';
-import { isBuilderScaffold, OPENCODE_CONFIG_RELPATH, SCAFFOLD_PATHS } from '../lib/builder-scaffold.js';
+import { symlinkConfigFiles } from '../commands/spawn-worktree.js';
+import { isBuilderScaffold, OPENCODE_CONFIG_RELPATH, SCAFFOLD_PATHS, spawnLinkTarget } from '../lib/builder-scaffold.js';
 import { DEFAULT_KEEP_IGNORED, isNeverKeep, keepPatterns } from '../lib/keep-list.js';
 import * as keepFiles from '../lib/keep-files.js';
 import { BUILTIN_HARNESSES } from '../utils/harness.js';
@@ -37,6 +39,50 @@ describe('Spec 1951 — isBuilderScaffold', () => {
   it('names every file a built-in harness writes into a worktree, so the two cannot drift', () => {
     const written = Object.values(BUILTIN_HARNESSES).flatMap((h) => h.getWorktreeFiles?.('role', '/w/.builder-role.md', '/w') ?? []);
     expect([...new Set(written.map((f) => f.relativePath))].sort()).toEqual([...SCAFFOLD_PATHS].sort());
+  });
+});
+
+// Native Windows may make a hard link or a copy where POSIX makes a symlink; this is about links.
+describe.skipIf(process.platform === 'win32')("Spec 1951 — spawnLinkTarget is the shape of every link spawn makes", { timeout: 30_000 }, () => {
+  useFakeHome();
+  let base: string;
+  beforeEach(() => {
+    base = realpathSync(mkdtempSync(join(tmpdir(), 'spec-1951-links-')));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  /** Every symbolic link under `dir`, worktree-relative and `/`-separated. */
+  const linksUnder = (dir: string): string[] =>
+    readdirSync(dir, { recursive: true, encoding: 'utf8' })
+      .filter((rel) => lstatSync(join(dir, rel)).isSymbolicLink())
+      .map((rel) => rel.split(sep).join('/'))
+      .sort();
+
+  it('symlinkConfigFiles: the built-in links and each worktree.symlinks entry point at spawnLinkTarget', () => {
+    const root = join(base, 'main');
+    const worktree = join(base, 'wt');
+    const put = (rel: string): void => {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), `${rel}\n`);
+    };
+    put('.env');
+    put('.env.local');
+    put('packages/web/.env');
+    put('.codev/config.json');
+    writeFileSync(join(root, '.codev/config.json'), JSON.stringify({ worktree: { symlinks: ['.env.local', 'packages/*/.env', '.local-data/'] } }));
+    mkdirSync(worktree);
+
+    symlinkConfigFiles({ workspaceRoot: root } as Parameters<typeof symlinkConfigFiles>[0], worktree);
+
+    const made = linksUnder(worktree);
+    expect(made).toEqual(['.codev/config.json', '.env', '.env.local', '.local-data', 'packages/web/.env']);
+    for (const rel of made) {
+      const abs = join(worktree, ...rel.split('/'));
+      expect(resolve(dirname(abs), readlinkSync(abs)), rel).toBe(spawnLinkTarget(root, rel));
+    }
+    expect(relative(root, spawnLinkTarget(root, 'packages/web/.env'))).toBe(join('packages', 'web', '.env'));
   });
 });
 

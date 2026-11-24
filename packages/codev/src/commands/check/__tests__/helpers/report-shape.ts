@@ -129,7 +129,10 @@ export function expectWorktreeReportShape(report: WorktreeReport): void {
       expect(['matches', 'ahead', 'behind', 'diverged', 'absent']).toContain(c.details.relation);
     }
     if (c.id === 'pr' && 'mergedHead' in c.details) expect(c.details.mergedHead).toMatch(SHA);
-    if (c.id === 'ignored') expect(c.details).toEqual({ keep: expect.any(Array), regenerable: expect.any(Number), links: expect.any(Array) });
+    if (c.id === 'ignored') {
+      expect(c.details).toEqual({ keep: expect.any(Array), regenerable: expect.any(Number), links: expect.any(Array), scaffold: expect.any(Array) });
+      for (const link of c.details.links as unknown[]) expect(link).toEqual({ path: expect.any(String), target: expect.any(String), missing: expect.any(Boolean) });
+    }
   }
   const attention = parsed.checks.some((c) => c.status === 'attention' || c.status === 'not-run');
   expect(parsed.verdict).toBe(attention ? 'attention' : 'clear');

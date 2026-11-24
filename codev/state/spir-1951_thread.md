@@ -306,3 +306,27 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   a remote-branch read failure with commits off the base now makes `commits` NOT RUN (truthful) rather than
   "unpushed". Notes 1 (regenerable approximation in collapsed dirs) and 2 (nested-repo dir/ entries) → Phase 7
   docs + REVIEW. Not on the read-only core. Targeted 910/910 (29 files), build, both tsc, tmp-residue OK.
+- Porch sequencing (2026-11-24 ~03:20): I committed the iter1 fixes (dd21e15ce) and ran the architect-approved
+  one-time skip + `porch done` BEFORE `porch next` had read the iter1 verdicts, so that `porch done` only re-signalled
+  the iteration-1 build. The `porch next` after it read codex's REQUEST_CHANGES and opened iteration 2 (95ae544b5,
+  status.yaml only), whose build/tests criteria start unrun. Code is unchanged since dd21e15ce. Asked the architect
+  for the skip again for iteration 2's `porch done`, after GitHub's run on 95ae544b5. Architect: covered by the
+  Phase 4 word (further porch done calls in a phase with no code or test changes); skip applied, build passed.
+  Correction to my own lesson: porch's round really is rebuttal → `porch done` → `porch next` (re-iter: build/tests)
+  → `porch done` → `porch next` (consult). After a review round, `porch next` first so the rebuttal task is named.
+- Review iter2: codex REQUEST_CHANGES — a keep-list symlink is data (spec line 577) that --keep-ignored deletes, so
+  links-only must not read REMOVABLE. Told the architect before reversing that line of the iter1 fix; architect
+  (03:29): Codex is right, go NOT REMOVABLE + honest hint, with two conditions. (1) Links spawn makes are scaffold:
+  `spawnLinkTarget` in builder-scaffold.ts = the shape every spawn link has (P → P in the main checkout, built-in
+  `.env`/`.codev/config.json` and every worktree.symlinks entry); recognised by shape, not by re-matching spawn's
+  node-glob patterns (needs the `glob` package's I/O or path.matchesGlob, which engines >=20.0.0 don't guarantee).
+  Tie test runs spawn's own symlinkConfigFiles (file glob, literal file, dir entry). Counted in `uncommitted`'s
+  scaffold (a link git does not ignore) and as `[N scaffold links not counted]` in `ignored`. (2) Each remaining
+  link printed with its target (`p -> t`, `(target missing)`); JSON `links: [{path, target, missing}]`, plus
+  `ignored.details.scaffold`. A link to a keep-list file inside the worktree is judged as that file (not listed).
+  Claude APPROVE; note 3 fixed (git-forms catalogue gains ls-files --directory and the two plain rev-list forms);
+  notes 1/2/5 → Phase 7 docs; note 4 (sample wording) rebutted. Targeted 925/925 (24 files), build, both tsc,
+  tmp-residue OK. LIVE: air-1938 with a scratch HOME whose keepIgnored adds `.env*` and `.codev/**`:
+  `[2 scaffold links not counted]` (.env, .codev/config.json), `.codev/config.local.json` (spawn's snapshot COPY,
+  a regular file) counted as a keep file — correct, it is a file a builder may edit; default keep list never
+  matches it. Real-HOME runs on spir-1951/air-1938/bugfix-1956 unchanged.

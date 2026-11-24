@@ -12,6 +12,7 @@ import { spawn as realSpawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawnLinkTarget } from '../../../agent-farm/lib/builder-scaffold.js';
 import { listKeepCandidates } from '../../../agent-farm/lib/keep-files.js';
 import { DEFAULT_KEEP_IGNORED } from '../../../agent-farm/lib/keep-list.js';
 import type { Check, CommandOptions, ErrorReport, Status, WorktreeReport } from '../report.js';
@@ -76,6 +77,10 @@ describe('Spec 1951 — check worktree: parsers and the verdict rule', () => {
     expect(removability(all('ok', 'not-run', 'ok'), true)).toBe('removable');
     expect(removability(all('ok', 'ok', 'not-run'), false)).toBe('not-removable');
     expect(removability(all('skip', 'skip', 'skip'), false)).toBe('removable');
+    // Keep-list symlinks are data cleanup cannot keep: with or without keep files, they block removal.
+    const withLinks = (keep: string[]) => [...all('ok', 'ok', 'attention').slice(0, 4), { ...c('ignored', 'attention'), details: { keep, regenerable: 0, links: [{ path: 'tmp/link', target: '/x', missing: false }], scaffold: [] } }];
+    expect(removability(withLinks([]), false)).toBe('not-removable');
+    expect(removability(withLinks(['tmp/notes.md']), false)).toBe('not-removable');
   });
 });
 
@@ -362,8 +367,9 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
     });
 
     // keepFiles() skips every symlink it is handed ("Not kept (symlinks)"), so check worktree
-    // must not count one as a file cleanup would keep. Symlinks need privileges on Windows.
-    it.skipIf(isWindows)('a keep-list symlink is listed apart: not a keep file, not data, as cleanup never copies it', async () => {
+    // must not count one as a file cleanup would keep; a link is still data, which nothing but
+    // copying it out keeps. Symlinks need privileges on Windows.
+    it.skipIf(isWindows)('a keep-list symlink is listed apart, with its target; one to a kept file is judged as that file', async () => {
       configure();
       const b = withIgnored();
       fs.symlinkSync('notes.md', path.join(b.dir, 'tmp/link.md'));
@@ -382,18 +388,28 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
       }
       const isLink = (f: string): boolean => fs.lstatSync(path.join(b.dir, f)).isSymbolicLink();
 
-      const { report } = await runReport('spir-8', { inspected: b.dir });
+      const { report, exitCode } = await runReport('spir-8', { inspected: b.dir });
 
       const ignored = byId(report, 'ignored');
-      expect(ignored.details).toEqual({ keep: candidates.filter((f) => !isLink(f)), regenerable: 3, links: candidates.filter(isLink) });
-      expect(ignored.details.links).toEqual(['tmp/env', 'tmp/link.md']);
-      expect(report.removable).toBe('removable-after-keeping');
-      expect(ignored.summary).toContain('2 keep-list symlinks not counted (cleanup never copies a link): tmp/env, tmp/link.md');
+      // The keep files are what keepFiles() copies; tmp/link.md points at tmp/notes.md, which is kept.
+      expect(candidates.filter(isLink)).toEqual(['tmp/env', 'tmp/link.md']);
+      expect(ignored.details).toEqual({
+        keep: candidates.filter((f) => !isLink(f)),
+        regenerable: 3,
+        links: [{ path: 'tmp/env', target: path.join(fx.root, 'outside-secret'), missing: true }],
+        scaffold: [],
+      });
+      expect(exitCode).toBe(1);
+      expect(report.removable).toBe('not-removable');
+      expect(ignored.status).toBe('attention');
+      expect(ignored.summary).toContain(`1 keep-list symlink would be lost: tmp/env -> ${path.join(fx.root, 'outside-secret')} (target missing)`);
+      expect(ignored.summary).toContain('→ copy the symlinks out first (`afx cleanup --keep-ignored` keeps the files, never a link)');
     });
 
-    it.skipIf(isWindows)('keep-list symlinks alone leave it REMOVABLE', async () => {
+    it.skipIf(isWindows)('keep-list symlinks alone: NOT REMOVABLE, and the hint does not offer --keep-ignored', async () => {
       configure({ cleanup: { keepIgnored: ['tmp/**'] } });
       const b = addBuilder(fx, 'spir-8');
+      fs.mkdirSync(path.join(fx.root, 'elsewhere'));
       fs.mkdirSync(path.join(b.dir, 'tmp'));
       fs.symlinkSync(path.join(fx.root, 'elsewhere'), path.join(b.dir, 'tmp/link'));
       mergeBuilder(fx, b);
@@ -401,9 +417,59 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
 
       const { report, exitCode } = await runReport('spir-8', { inspected: b.dir });
 
+      expect(exitCode).toBe(1);
+      expect(report.removable).toBe('not-removable');
+      expect(byId(report, 'ignored')).toMatchObject({
+        status: 'attention',
+        details: { keep: [], links: [{ path: 'tmp/link', target: path.join(fx.root, 'elsewhere'), missing: false }] },
+      });
+      const human = renderWorktreeHuman(report);
+      expect(human.split('\n')[0]).toBe('NOT REMOVABLE  spir-8 — 1 keep-list symlink');
+      expect(human).toContain(`1 keep-list symlink would be lost: tmp/link -> ${path.join(fx.root, 'elsewhere')}\n`);
+      expect(human).toContain('→ copy them out first (`afx cleanup --keep-ignored` never copies a link)');
+    });
+
+    // A project that keeps '.env*' must not see every worktree it spawns as NOT REMOVABLE.
+    it.skipIf(isWindows)("the links spawn makes are scaffold, never data, ignored or not", async () => {
+      configure({ cleanup: { keepIgnored: ['.env*', 'tmp/**'] } });
+      fs.mkdirSync(path.join(fx.main, '.git', 'info'), { recursive: true });
+      fs.appendFileSync(path.join(fx.main, '.git', 'info', 'exclude'), '.env*\n');
+      fs.writeFileSync(path.join(fx.main, '.env'), 'A=1\n');
+      fs.writeFileSync(path.join(fx.main, '.env.local'), 'B=2\n');
+      const b = addBuilder(fx, 'spir-8');
+      // As spawn links them: the built-in .env, a worktree.symlinks file, and a directory entry
+      // that git does not ignore and whose source does not exist yet (spawn allows that).
+      for (const rel of ['.env', '.env.local', 'shared-data']) fs.symlinkSync(spawnLinkTarget(fx.main, rel), path.join(b.dir, rel));
+      mergeBuilder(fx, b);
+      prIs(b, 8, 'MERGED');
+
+      const { report, exitCode } = await runReport('spir-8', { inspected: b.dir });
+
       expect(exitCode).toBe(0);
       expect(report.removable).toBe('removable');
-      expect(byId(report, 'ignored')).toMatchObject({ status: 'ok', details: { keep: [], links: ['tmp/link'] } });
+      expect(byId(report, 'uncommitted')).toMatchObject({ status: 'ok', details: { files: [], scaffold: [...SCAFFOLD_FILES, 'shared-data'].sort() } });
+      expect(byId(report, 'ignored')).toMatchObject({ status: 'ok', details: { keep: [], links: [], scaffold: ['.env', '.env.local'] } });
+      expect(byId(report, 'uncommitted').summary).toContain(`[${SCAFFOLD_FILES.length + 1} scaffold files not counted]`);
+      expect(byId(report, 'ignored').summary).toContain('[2 scaffold links not counted]');
+    });
+
+    it.skipIf(isWindows)("a link at spawn's path that points anywhere else is not spawn's: it is data", async () => {
+      configure({ cleanup: { keepIgnored: ['.env*'] } });
+      fs.mkdirSync(path.join(fx.main, '.git', 'info'), { recursive: true });
+      fs.appendFileSync(path.join(fx.main, '.git', 'info', 'exclude'), '.env*\n');
+      fs.writeFileSync(path.join(fx.root, 'my-env'), 'SECRET=1\n');
+      const b = addBuilder(fx, 'spir-8');
+      fs.symlinkSync(path.join(fx.root, 'my-env'), path.join(b.dir, '.env'));
+      mergeBuilder(fx, b);
+      prIs(b, 8, 'MERGED');
+
+      const { report } = await runReport('spir-8', { inspected: b.dir });
+
+      expect(report.removable).toBe('not-removable');
+      expect(byId(report, 'ignored')).toMatchObject({
+        status: 'attention',
+        details: { keep: [], links: [{ path: '.env', target: path.join(fx.root, 'my-env'), missing: false }], scaffold: [] },
+      });
     });
 
     it('cleanup.keepIgnored [] reports no keep files: REMOVABLE', async () => {
@@ -427,7 +493,7 @@ describe('Spec 1951 — check worktree on real worktrees', { timeout: 30_000 }, 
 
       const { report } = await runReport('spir-8', { inspected: b.dir });
 
-      expect(byId(report, 'ignored').details).toEqual({ keep: ['debug.log'], regenerable: 4, links: [] });
+      expect(byId(report, 'ignored').details).toEqual({ keep: ['debug.log'], regenerable: 4, links: [], scaffold: [] });
     });
   });
 

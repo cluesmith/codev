@@ -25,7 +25,7 @@ interface ImportRule {
 const ALLOWED: Record<string, ImportRule> = {
   'node:path': { names: '*', reason: 'path arithmetic only; no I/O' },
   'node:fs': {
-    names: ['existsSync', 'readFileSync', 'realpathSync', 'statSync', 'lstatSync'],
+    names: ['existsSync', 'readFileSync', 'realpathSync', 'statSync', 'lstatSync', 'readlinkSync'],
     reason: 'read-only file system calls',
   },
   '../../lib/config.js': {
@@ -37,8 +37,8 @@ const ALLOWED: Record<string, ImportRule> = {
     reason: "#1950's keep list as pure definitions, shared with afx cleanup --keep-ignored (audited below)",
   },
   '../../agent-farm/lib/builder-scaffold.js': {
-    names: ['isBuilderScaffold'],
-    reason: "spawn's scaffold file list, pure, shared with afx cleanup (audited below)",
+    names: ['isBuilderScaffold', 'spawnLinkTarget'],
+    reason: "spawn's scaffold files and the shape of its links, pure, shared with afx cleanup (audited below)",
   },
 };
 
@@ -49,7 +49,7 @@ const ALLOWED: Record<string, ImportRule> = {
  */
 const PURE_MODULES: Record<string, { imports: readonly string[]; scriptText?: string }> = {
   '../../agent-farm/lib/keep-list.ts': { imports: [] },
-  '../../agent-farm/lib/builder-scaffold.ts': { imports: ['../utils/worktree-write-guard.js'] },
+  '../../agent-farm/lib/builder-scaffold.ts': { imports: ['node:path', '../utils/worktree-write-guard.js'] },
   '../../agent-farm/utils/worktree-write-guard.ts': { imports: ['node:path'], scriptText: WORKTREE_WRITE_GUARD_SCRIPT },
 };
 

@@ -3,25 +3,26 @@
  * and its local branch lose data, and, separately, is the builder finished.
  *
  *   uncommitted  staged, unstaged and untracked-not-ignored files (`status`, without optional
- *                locks); spawn's scaffold (`isBuilderScaffold`) is counted apart and is not data
+ *                locks); spawn's scaffold files and links (`builder-scaffold.ts`) are counted
+ *                apart and are not data
  *   commits      local commits on neither the live base tip nor the live remote branch tip,
  *                unless the PR is merged and the local tip is its merged head (squash or rebase)
  *   remote       the local tip against `origin/<branch>`: context only
  *   pr           the branch's PR: OPEN is attention ("builder not finished")
  *   ignored      ignored files matching `cleanup.keepIgnored` that are not dependency or build
  *                output: the definitions `afx cleanup --keep-ignored` uses (`keep-list.ts`).
- *                A symbolic link among them is listed apart: cleanup never copies a link, and a
- *                link holds no file data of its own (a target inside the worktree is judged
- *                as itself)
+ *                A symbolic link among them is listed apart: one spawn made is scaffold; one to
+ *                a keep-list file inside the worktree is judged as that file; any other is data
+ *                cleanup cannot keep (it never copies a link), so it blocks removal
  *
  * The verdict word describes data only. The exit code also counts the lifecycle and anything
  * that could not run, so "removable" never silently means "finished". The target is
  * resolved against the main checkout, so the command reads the same from any worktree.
  */
 
-import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { isBuilderScaffold } from '../../agent-farm/lib/builder-scaffold.js';
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isBuilderScaffold, spawnLinkTarget } from '../../agent-farm/lib/builder-scaffold.js';
 import { isNeverKeep } from '../../agent-farm/lib/keep-list.js';
 import {
   ancestry,
@@ -231,6 +232,8 @@ type Tip = Lookup<string | null>;
 
 interface Facts {
   runner: Runner;
+  /** The main checkout, where spawn's links point. */
+  mainRoot: string;
   target: Target;
   pr: PrLookup | null;
   /** The base branch, or why there is none. */
@@ -261,6 +264,49 @@ async function revList(runner: Runner, args: string[]): Promise<Lookup<string[]>
   return { ok: true, value: shas };
 }
 
+/** A symbolic link: its target as written, where that points, and whether anything is there. */
+interface Link {
+  target: string;
+  resolved: string;
+  missing: boolean;
+}
+
+/** The link at a worktree-relative path, or null when the path is not a link. */
+function linkAt(facts: Facts, rel: string): Lookup<Link | null> {
+  const abs = join(facts.target.path, ...rel.split('/'));
+  try {
+    if (!lstatSync(abs).isSymbolicLink()) return { ok: true, value: null };
+    const target = readlinkSync(abs);
+    const resolved = resolve(dirname(abs), target);
+    return { ok: true, value: { target, resolved, missing: realPath(resolved) === null } };
+  } catch (err) {
+    return { ok: false, reason: `could not read ${rel}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** A path spelled for comparison: its real path, or, when it does not exist, its parent's. */
+function comparable(p: string): string {
+  const real = realPath(p);
+  if (real !== null) return real;
+  const parent = realPath(dirname(p));
+  const spelled = parent === null ? resolve(p) : join(parent, basename(p));
+  return process.platform === 'win32' ? spelled.toLowerCase() : spelled;
+}
+
+/** Whether a link is one spawn made: it points at the same path in the main checkout. */
+function isSpawnLink(facts: Facts, rel: string, link: Link): boolean {
+  return comparable(link.resolved) === comparable(spawnLinkTarget(facts.mainRoot, rel));
+}
+
+/** The worktree-relative path a link resolves to, or null when it resolves outside the worktree or to nothing. */
+function insideTarget(facts: Facts, link: Link): string | null {
+  const real = realPath(link.resolved);
+  if (real === null) return null;
+  const rel = relative(comparable(facts.target.path), real);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null;
+  return rel.split(sep).join('/');
+}
+
 /** Git in the inspected worktree, for the reads that are per worktree. */
 function gitIn(facts: Facts, args: string[]): Promise<GitResult> {
   return facts.runner.git(['-C', facts.target.path, ...args]);
@@ -274,9 +320,23 @@ async function checkUncommitted(facts: Facts): Promise<Check> {
   const result = await gitIn(facts, ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all']);
   if (result.exitCode !== 0) return notRun('uncommitted', failureReason('status', result, facts.runner.timeoutLabel));
   const entries = parseStatus(result.stdout);
-  const isScaffold = (e: StatusEntry): boolean => e.change === 'untracked' && isBuilderScaffold(e.path);
-  const scaffold = entries.filter(isScaffold).map((e) => e.path).sort();
-  const files = entries.filter((e) => !isScaffold(e)).sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
+  const scaffold: string[] = [];
+  const files: StatusEntry[] = [];
+  for (const e of entries) {
+    let isScaffold = false;
+    if (e.change === 'untracked') {
+      isScaffold = isBuilderScaffold(e.path);
+      if (!isScaffold) {
+        const link = linkAt(facts, e.path);
+        if (!link.ok) return notRun('uncommitted', link.reason);
+        isScaffold = link.value !== null && isSpawnLink(facts, e.path, link.value);
+      }
+    }
+    if (isScaffold) scaffold.push(e.path);
+    else files.push(e);
+  }
+  scaffold.sort();
+  files.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
   const note = scaffold.length > 0 ? `   [${plural(scaffold.length, 'scaffold file')} not counted]` : '';
   const details = { files, scaffold };
   if (files.length === 0) return check('uncommitted', 'ok', `nothing uncommitted${note}`, details);
@@ -365,44 +425,68 @@ function checkPrState(lookup: PrLookup, branch: string): Check {
 
 async function checkIgnored(facts: Facts, patterns: readonly string[]): Promise<Check> {
   const keep: string[] = [];
-  const links: string[] = [];
+  const links: Array<{ path: string; target: string; missing: boolean }> = [];
+  const scaffold: string[] = [];
+  let matched: string[] = [];
   const pathspecs = pathspecArgs({ include: patterns });
   if (pathspecs !== null) {
     const result = await gitIn(facts, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...pathspecs]);
     if (result.exitCode !== 0) return notRun('ignored', failureReason('ls-files', result, facts.runner.timeoutLabel));
-    const matched = splitNul(result.stdout).filter((p) => !isNeverKeep(p));
+    matched = splitNul(result.stdout).filter((p) => !isNeverKeep(p));
+    const linked: Array<[string, Link]> = [];
     for (const p of matched) {
-      let isLink: boolean;
-      try {
-        isLink = lstatSync(join(facts.target.path, p)).isSymbolicLink();
-      } catch (err) {
-        return notRun('ignored', `could not read ${p}: ${err instanceof Error ? err.message : String(err)}`);
+      const link = linkAt(facts, p);
+      if (!link.ok) return notRun('ignored', link.reason);
+      if (link.value === null) keep.push(p);
+      else linked.push([p, link.value]);
+    }
+    const key = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
+    const kept = new Set(keep.map(key));
+    for (const [p, link] of linked) {
+      if (isSpawnLink(facts, p, link)) {
+        scaffold.push(p);
+        continue;
       }
-      (isLink ? links : keep).push(p);
+      // A link to a keep-list file inside the worktree is judged as that file, which is kept.
+      const inside = insideTarget(facts, link);
+      if (inside !== null && kept.has(key(inside))) continue;
+      links.push({ path: p, target: link.target, missing: link.missing });
     }
     keep.sort();
-    links.sort();
+    links.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
+    scaffold.sort();
   }
   const all = await gitIn(facts, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']);
   if (all.exitCode !== 0) return notRun('ignored', failureReason('ls-files', all, facts.runner.timeoutLabel));
   // Every other ignored path, directories collapsed, is treated as regenerable.
-  const matchedAll = [...keep, ...links];
-  const holdsMatch = (entry: string): boolean => matchedAll.some((k) => k === entry || (entry.endsWith('/') && k.startsWith(entry)));
+  const holdsMatch = (entry: string): boolean => matched.some((k) => k === entry || (entry.endsWith('/') && k.startsWith(entry)));
   const others = splitNul(all.stdout).filter((entry) => !holdsMatch(entry)).sort();
-  const details = { keep, regenerable: others.length, links };
+  const details = { keep, regenerable: others.length, links, scaffold };
   const examples = others.length > 0 ? `: ${fitList(others, 40)}` : '';
-  const linkLine =
-    links.length > 0 ? `${plural(links.length, 'keep-list symlink')} not counted (cleanup never copies a link): ${fitList(links, LIST_WIDTH)}` : null;
+  const note = scaffold.length > 0 ? `   [${plural(scaffold.length, 'scaffold link')} not counted]` : '';
 
-  if (keep.length === 0) {
+  if (keep.length === 0 && links.length === 0) {
     const none = patterns.length === 0 ? 'no keep list (cleanup.keepIgnored is empty)' : 'no keep-list files';
     const rest = others.length === 0 ? 'no other ignored files' : `${plural(others.length, 'ignored path')} treated as regenerable${examples}`;
-    return check('ignored', 'ok', [`${none}; ${rest}`, ...(linkLine ? [linkLine] : [])].join('\n'), details);
+    return check('ignored', 'ok', `${none}; ${rest}${note}`, details);
   }
-  const lines = [`${plural(keep.length, 'keep-list file')} would be lost: ${fitList(keep, LIST_WIDTH)}`];
+  const lines: string[] = [];
+  if (keep.length > 0) lines.push(`${plural(keep.length, 'keep-list file')} would be lost: ${fitList(keep, LIST_WIDTH)}`);
+  // A link is data too, but `afx cleanup --keep-ignored` skips every link, so only copying it
+  // out by hand keeps it. Each is printed with its target, so the reader can judge what is at stake.
+  if (links.length > 0) {
+    const each = links.map((l) => `${l.path} -> ${l.target}${l.missing ? ' (target missing)' : ''}`).join(', ');
+    lines.push(`${plural(links.length, 'keep-list symlink')} would be lost: ${each}`);
+  }
+  lines[0] += note;
   if (others.length > 0) lines.push(`(${plural(others.length, 'other ignored path')} treated as regenerable${examples})`);
-  if (linkLine) lines.push(linkLine);
-  lines.push('→ copy them out first, or use `afx cleanup --keep-ignored`');
+  lines.push(
+    links.length === 0
+      ? '→ copy them out first, or use `afx cleanup --keep-ignored`'
+      : keep.length === 0
+        ? '→ copy them out first (`afx cleanup --keep-ignored` never copies a link)'
+        : '→ copy the symlinks out first (`afx cleanup --keep-ignored` keeps the files, never a link)',
+  );
   return check('ignored', 'attention', lines.join('\n'), details);
 }
 
@@ -413,14 +497,20 @@ async function checkIgnored(facts: Facts, patterns: readonly string[]): Promise<
 /**
  * Data only. A data check that could not run makes the verdict conservative: NOT REMOVABLE,
  * except `commits` when the local tip is on the live remote branch, which keeps every commit.
+ * Keep-list symlinks are data `afx cleanup --keep-ignored` cannot keep, so they block removal.
  */
 export function removability(checks: readonly Check[], localOnRemote: boolean): Removable {
   const status = (id: string): Check['status'] | undefined => checks.find((c) => c.id === id)?.status;
   const uncommitted = status('uncommitted');
   const commits = status('commits');
-  if (uncommitted === 'attention' || uncommitted === 'not-run' || status('ignored') === 'not-run') return 'not-removable';
+  const links = linkCount(checks.find((c) => c.id === 'ignored'));
+  if (uncommitted === 'attention' || uncommitted === 'not-run' || status('ignored') === 'not-run' || links > 0) return 'not-removable';
   if (commits === 'attention' || (commits === 'not-run' && !localOnRemote)) return 'not-removable';
   return status('ignored') === 'attention' ? 'removable-after-keeping' : 'removable';
+}
+
+function linkCount(ignored: Check | undefined): number {
+  return Array.isArray(ignored?.details.links) ? ignored.details.links.length : 0;
 }
 
 /** Whether the local tip is reachable from the live remote branch tip. */
@@ -468,7 +558,7 @@ async function buildWorktreeReport(argument: TargetArgument, options: CommandOpt
     ],
     version,
   );
-  const facts: Facts = { runner, target, pr, base, baseTip, remoteTip };
+  const facts: Facts = { runner, mainRoot: roots.mainRoot, target, pr, base, baseTip, remoteTip };
 
   const run = async (id: string, fn: () => Check | Promise<Check>): Promise<Check> => (skip(id) ? skipped(id) : fn());
   const checks = [
@@ -521,6 +611,7 @@ const VERDICT_WORDS: Record<Removable, (keep: number) => string> = {
 /**
  * What a check needing attention means, in a few words for the verdict line. Keep-list files
  * are left out: the verdict word, or the data that blocks removal anyway, already says it.
+ * Keep-list symlinks are named, as they alone can make the verdict NOT REMOVABLE.
  */
 function reasonWords(c: Check): string | null {
   if (c.status === 'not-run') return `${defaultLabel(c.id)} not run`;
@@ -530,8 +621,10 @@ function reasonWords(c: Check): string | null {
       return `${plural((d.files as unknown[]).length, 'uncommitted file')}`;
     case 'commits':
       return `${plural((d.unsafe as unknown[]).length, 'unpushed commit')}`;
-    case 'ignored':
-      return null;
+    case 'ignored': {
+      const links = linkCount(c);
+      return links > 0 ? plural(links, 'keep-list symlink') : null;
+    }
     case 'pr':
       if (d.number === undefined) return 'no PR found';
       return d.state === 'OPEN' ? `PR #${String(d.number)} open: builder not finished` : `PR #${String(d.number)} ${String(d.state)}`;

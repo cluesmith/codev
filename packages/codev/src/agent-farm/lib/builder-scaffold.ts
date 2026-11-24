@@ -10,8 +10,14 @@
  *
  * Only an untracked file is ever scaffold: a change to a tracked file is a real change,
  * whatever its path.
+ *
+ * Spawn also links files from the main checkout into the worktree (`symlinkConfigFiles`): the
+ * root `.env` and `.codev/config.json` always, and every `worktree.symlinks` entry. Each such
+ * link points at the same path in the main checkout, so a link of that shape is scaffold
+ * whichever entry made it: removing it loses nothing (`spawnLinkTarget`).
  */
 
+import { join } from 'node:path';
 import { GUARD_SCRIPT_RELPATH, GUARD_SETTINGS_RELPATH } from '../utils/worktree-write-guard.js';
 
 /** Worktree-relative path of the OpenCode harness's role-injection file. */
@@ -25,4 +31,12 @@ export const SCAFFOLD_PATHS: readonly string[] = [GUARD_SCRIPT_RELPATH, GUARD_SE
 /** Whether a worktree-relative, `/`-separated path of an untracked file is spawn's scaffold. */
 export function isBuilderScaffold(path: string): boolean {
   return (path.startsWith(BUILDER_PREFIX) && !path.includes('/')) || SCAFFOLD_PATHS.includes(path);
+}
+
+/**
+ * The target spawn gives a link at a worktree-relative, `/`-separated `path`: the same path in
+ * the main checkout. A link at `path` whose target is this is one spawn made.
+ */
+export function spawnLinkTarget(mainRoot: string, path: string): string {
+  return join(mainRoot, ...path.split('/'));
 }
