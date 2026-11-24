@@ -19,6 +19,7 @@ import { handleStats } from './commands/consult/stats.js';
 import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
+import { buildCheckCommand } from './commands/check/index.js';
 import { version } from './version.js';
 import { isCodevEntrypoint } from './lib/cli-entry.js';
 import { findWorkspaceRoot } from './agent-farm/utils/index.js';
@@ -61,6 +62,9 @@ program
       process.exit(1);
     }
   });
+
+// Check command group: read-only merge, deploy and worktree checks (Spec 1951)
+program.addCommand(buildCheckCommand());
 
 // Init command
 program

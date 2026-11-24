@@ -4,8 +4,27 @@
  */
 
 import type { CommitCheckItem } from '../../lib/forge-contracts.js';
+import type { SpawnFn } from './runner.js';
 import { InputError } from './validate.js';
 import { RunnerRefusal } from './allow-list.js';
+
+/** What every command function takes. Tests call the functions in process with these. */
+export interface CommandOptions {
+  /** Directory the command was run from. */
+  cwd: string;
+  /** Limit for each forge call and networked git call; default 30 s. */
+  timeoutMs?: number;
+  /** Extra environment for every subprocess (tests isolate git config and put stubs on PATH). */
+  env?: Record<string, string>;
+  /** Injected for tests; defaults to `child_process.spawn` inside the runner. */
+  spawn?: SpawnFn;
+}
+
+/** A command's outcome: the report (or the exit-2 error report) and the exit code. */
+export interface CommandResult<R extends Report> {
+  report: R | ErrorReport;
+  exitCode: 0 | 1 | 2;
+}
 
 export type Status = 'ok' | 'attention' | 'info' | 'not-run' | 'off' | 'skip';
 export type CommandName = 'pr' | 'deploy' | 'worktree';
@@ -41,7 +60,8 @@ export interface PrReport extends Report {
     headRef: string;
     head: string;
     baseRef: string;
-    baseTip: string;
+    /** The live tip `ls-remote` reported; null when it could not be read (the base checks are then not run). */
+    baseTip: string | null;
     localBranch: { name: string; sha: string } | null;
   };
   checks: Check[];
@@ -178,6 +198,21 @@ export function errorReport(command: CommandName, err: unknown): ErrorReport {
   }
   const message = err instanceof Error ? err.message : String(err);
   return { schema: 1, command, error: { message: `unexpected failure: ${message}` } };
+}
+
+/**
+ * As many items as fit in `width` characters (always at least one), then `… +N` for the
+ * rest. Keeps a check's line on one screen line however long the paths are.
+ */
+export function fitList(items: readonly string[], width: number): string {
+  if (items.length === 0) return '';
+  let shown = 1;
+  let length = items[0].length;
+  while (shown < items.length && length + 2 + items[shown].length <= width) {
+    length += 2 + items[shown].length;
+    shown++;
+  }
+  return shown === items.length ? items.join(', ') : `${items.slice(0, shown).join(', ')}, … +${items.length - shown}`;
 }
 
 /** `a, b, c, … +N` */

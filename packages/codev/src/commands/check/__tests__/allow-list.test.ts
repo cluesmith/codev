@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { assertConceptAllowed, assertGitArgvAllowed, RunnerRefusal } from '../allow-list.js';
-import { allowedForms, argvOf as argv, FETCH_GLOBALS, OFF_GRAMMAR_FORMS, SHA, SHA2, WRITE_FORMS } from './helpers/git-forms.js';
+import { allowedForms, argvOf as argv, FETCH_GLOBALS, OFF_GRAMMAR_FORMS, SHA, SHA2, WRITE_FORMS, type GitForm } from './helpers/git-forms.js';
 
 const ABS = process.platform === 'win32' ? 'C:\\repo' : '/repo';
 const ALLOWED = allowedForms(ABS);
@@ -48,7 +48,7 @@ describe('Spec 1951 — read-only git allow-list', () => {
   });
 
   describe('refuses the file-writing and program-running flags on every allowed subcommand', () => {
-    const cases = ALLOWED.flatMap((f) => BAD_FLAGS.map((flag) => [`${f.sub} ${flag}`, { ...f, rest: [flag, ...f.rest] }] as const));
+    const cases = ALLOWED.flatMap((f) => BAD_FLAGS.map((flag): [string, GitForm] => [`${f.sub} ${flag}`, { ...f, rest: [flag, ...f.rest] }]));
     it.each(cases)('%s', (_name, f) => {
       expect(() => assertGitArgvAllowed(argv(f))).toThrow(RunnerRefusal);
     });

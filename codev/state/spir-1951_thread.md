@@ -114,3 +114,26 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - ARCHITECT ORDER (2026-11-24 00:25): no extra consultation. The PR body (done) and the REVIEW file must list the
   commits no reviewer saw (aa7e34f58 and c42251ec5: the stub ls-remote rule, the revision-argument audit, and the
   liveTip guard) under a heading of their own, for the pr-phase reviewers.
+
+## Phase 3 — check_pr_mechanics
+- Owner ruling main-38 'ci-first' (2026-11-24 00:33): no local full suite at all until #1956; per phase run targeted
+  tests + build + type-check, push, wait for GitHub green on that head, tell the architect, skip on their word.
+- Built: `codev check pr <N> [--json]` (pr.ts, index.ts, registered in cli.ts). Checks: head, attribution, trial-merge,
+  watched, overlap, size, to-read; end-of-run re-read of pr-view then ls-remote (head/base movement).
+- Live run on PR #1958 from this worktree: CLEAR, exit 0, ~5 s; overlap found 2 files main also changed
+  (doctor.test.ts, lib/config.ts).
+- Choices / deviations to note in the review:
+  - `pr.baseTip` is `string | null` (null when ls-remote failed or origin lacks the base); the spec typed it `string`.
+    null follows the spec's own convention (`draft`, `localBranch`) instead of a sentinel.
+  - `head` compares the local branch only when origin's branch of that name IS the PR head. Otherwise info
+    "origin's main is at X, not the PR head (a fork's PR, or the branch moved)": a fork PR from its own `main` would otherwise read as
+    "local main diverged (N not pushed)". Additive details: `relation`, `behindPr`, `originBranchSha`.
+  - Behind the PR head is ok; ahead or diverged is attention ("not pushed"). An ok head prints in the header
+    (as the spec sample does); a head needing attention gets its own line.
+  - A base or head that moves (or cannot be re-read) also overrides a `check.skip` of its carrier check, so a
+    CLEAR always describes live tips.
+  - Lists on a check line are cut by width (72 chars, `fitList`), not by count.
+  - Usage errors: JSON ErrorReport only for errors on a subcommand (`pr`); group-level ones (unknown subcommand)
+    have no command name, so they stay human-only on stderr. The CLI deps take argv explicitly (commander's
+    rawArgs is untyped/internal).
+  - Fixed in place: a type error in Phase 2's allow-list.test.ts (readonly tuple), found type-checking the tests.

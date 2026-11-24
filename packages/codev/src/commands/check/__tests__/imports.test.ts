@@ -31,6 +31,10 @@ const ALLOWED: Record<string, ImportRule> = {
     names: ['loadConfig', 'findConfigSource'],
     reason: 'reads configuration files; never writes or spawns',
   },
+  commander: {
+    names: ['Command', 'CommanderError'],
+    reason: 'argument parsing for the check group (index.ts); only action-handler subcommands, never the executable form that spawns',
+  },
 };
 
 /** runner.ts alone may reach a subprocess. */
@@ -83,7 +87,9 @@ const sources = fs
 describe('Spec 1951 — audited imports in commands/check/', () => {
   it('audits every source file in the directory', () => {
     expect(sources).toEqual(
-      expect.arrayContaining(['allow-list.ts', 'git-facts.ts', 'render.ts', 'report.ts', 'roots.ts', 'runner.ts', 'settings.ts', 'validate.ts']),
+      expect.arrayContaining([
+        'allow-list.ts', 'git-facts.ts', 'index.ts', 'pr.ts', 'render.ts', 'report.ts', 'roots.ts', 'runner.ts', 'settings.ts', 'validate.ts',
+      ]),
     );
   });
 
