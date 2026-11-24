@@ -8,7 +8,7 @@ import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
-import { checkTower } from '../lib/tower-check.js';
+import { checkTower, type TowerCheck } from '../lib/tower-check.js';
 import { getTypeColor } from '../utils/display.js';
 import { currentArchitectName } from '../utils/architect-name.js';
 import { discoverBuilders, type StoredBuilderIdentity } from '../servers/overview.js';
@@ -289,7 +289,7 @@ function renderActivity(visible: Builder[], views: Map<string, BuilderLiveView>)
  * stdout in `--json` mode — safe for tooling to `JSON.parse`.
  */
 function emitStatusJson(params: {
-  towerRunning: boolean;
+  tower: TowerCheck;
   // `name` is explicitly nullable (not optional): an unregistered workspace
   // must still emit `"name": null` so the machine-readable contract is stable
   // for tooling — `JSON.stringify` would otherwise drop an `undefined` key.
@@ -305,10 +305,16 @@ function emitStatusJson(params: {
   visible: Builder[];
   views: Map<string, BuilderLiveView>;
 }): void {
-  const { towerRunning, workspace, architects, visible, views, ownerFilter, fleet, mailbox } = params;
+  const { tower, workspace, architects, visible, views, ownerFilter, fleet, mailbox } = params;
 
   const payload = {
-    tower: { running: towerRunning },
+    // `running: false` covers both a Tower that is down and one that took the connection but did
+    // not answer; `state` tells them apart and `error` says why it did not answer (#1901).
+    tower: {
+      running: tower.state === 'running',
+      state: tower.state,
+      error: tower.state === 'unresponsive' ? tower.error : null,
+    },
     workspace,
     fleet,
     mailbox,
@@ -407,7 +413,7 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       }
     }
     emitStatusJson({
-      towerRunning,
+      tower,
       workspace: { path: workspacePath, name: workspaceName ?? null, active: workspaceActive },
       architects,
       visible,

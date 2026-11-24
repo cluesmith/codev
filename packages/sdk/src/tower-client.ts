@@ -645,7 +645,7 @@ export class TowerClient {
    */
   async getAddressBook(
     caller: { workspace?: string; from?: string } = {},
-  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string; unknownRoute?: true }> {
+  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string; unknownRoute?: true; unanswered?: true }> {
     const query = new URLSearchParams();
     if (caller.workspace !== undefined) query.set('workspace', caller.workspace);
     if (caller.from !== undefined) query.set('from', caller.from);
@@ -653,7 +653,9 @@ export class TowerClient {
     const result = await this.request<AddressBookResponse>(`/api/address-book${text === '' ? '' : `?${text}`}`);
     if (!result.ok || result.data === undefined) {
       const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
-      return isUnknownRoute(result) ? { ...failure, unknownRoute: true } : failure;
+      if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+      // No HTTP answer at all (timeout, reset, refused): says nothing about which Tower it is (#1901).
+      return result.status === 0 ? { ...failure, unanswered: true } : failure;
     }
     return { ok: true, result: result.data };
   }

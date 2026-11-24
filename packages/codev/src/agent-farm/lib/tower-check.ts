@@ -21,6 +21,11 @@ export type TowerCheck =
 export interface TowerCheckOptions {
   /** The command a "not running" message tells the reader to run. */
   startCommand?: string;
+  /**
+   * Extra probes after an unresponsive one (default 1). A caller with its own retry loop passes
+   * 0, so the two do not stack.
+   */
+  retries?: number;
   retryDelayMs?: number;
 }
 
@@ -30,7 +35,7 @@ export async function checkTower(
 ): Promise<TowerCheck> {
   const startedAt = Date.now();
   let probe = await client.probeHealth();
-  if (probe.state === 'unresponsive') {
+  for (let left = options.retries ?? 1; probe.state === 'unresponsive' && left > 0; left--) {
     await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? TOWER_RETRY_DELAY_MS));
     probe = await client.probeHealth();
   }

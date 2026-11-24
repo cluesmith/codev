@@ -354,16 +354,28 @@ function namesAnArchitectInAWorkspace(to: string): boolean {
  * is the older one; a Tower that answers knows the form, and its not-found stands.
  *
  * Only on that failure, so a send that succeeds, or fails any other way, costs nothing more.
+ *
+ * Returns what to report in place of the Tower's not-found, or null when it stands. A Tower
+ * that gives no answer to the question at all is busy, not older, and its not-found cannot be
+ * judged either way, so that is said instead (#1901).
  */
-async function failedForAnOlderTower(
+async function explainNotFound(
   client: TowerClient,
   to: string,
   result: SendResult,
   caller: { workspace?: string; from: string },
-): Promise<boolean> {
-  if (result.errorCode !== 'NOT_FOUND' || !namesAnArchitectInAWorkspace(to)) return false;
+): Promise<string | null> {
+  if (result.errorCode !== 'NOT_FOUND' || !namesAnArchitectInAWorkspace(to)) return null;
   const book = await client.getAddressBook(caller);
-  return !book.ok && book.unknownRoute === true;
+  if (book.ok) return null;
+  if (book.unknownRoute) return olderTowerError('does not know an address of the form <workspace>:architect:<name>');
+  if (book.unanswered) {
+    return (
+      `Tower did not answer the address-book check (${book.error}) needed to tell whether ${to} is ` +
+      `missing or this Tower predates that address form; it appears to be up, retry`
+    );
+  }
+  return null;
 }
 
 /**
@@ -536,16 +548,18 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   }
 
   // Ensure Tower is running. The health probe sends nothing, so under --retry every failure of
-  // it may be retried.
+  // it may be retried. One loop owns the retrying (#1901): with --retry it is that budget, and
+  // the gate probes once per attempt; without it, the gate's own single retry applies.
   const client = new TowerClient();
   const retry = retryBudget(options.retry ?? 0);
-  let tower = await checkTower(client);
+  const gate = (options.retry ?? 0) > 0 ? { retries: 0 } : {};
+  let tower = await checkTower(client, gate);
   while (tower.state !== 'running') {
     const why = tower.state === 'not-running' ? 'Tower is not running' : `Tower did not answer /health (${tower.error})`;
     if (!(await retry(`${why}; nothing has been sent.`))) {
       fatal(tower.message);
     }
-    tower = await checkTower(client);
+    tower = await checkTower(client, gate);
   }
 
   if (options.all) {
@@ -588,10 +602,8 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
       }, retry);
 
       if (!result.ok) {
-        if (await failedForAnOlderTower(client, target!, result, { workspace, from })) {
-          throw new Error(olderTowerError('does not know an address of the form <workspace>:architect:<name>'));
-        }
-        throw new Error(result.error || 'Unknown error');
+        const explained = await explainNotFound(client, target!, result, { workspace, from });
+        throw new Error(explained ?? (result.error || 'Unknown error'));
       }
 
       // Report the real first outcome (Spec 1307 `--delay` + Spec 1313 mailbox). A
