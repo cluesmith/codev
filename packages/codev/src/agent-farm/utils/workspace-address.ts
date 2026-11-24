@@ -37,14 +37,35 @@ function basenameOf(workspacePath: string): string {
   return path.basename(workspacePath).toLowerCase();
 }
 
-/** Every workspace Tower knows, by path: the rows, and running workspaces that have none. */
-function everyWorkspace(registered: readonly RegisteredWorkspace[], active: Iterable<string>): Map<string, string | null> {
-  const all = new Map<string, string | null>();
-  for (const row of registered) all.set(row.workspacePath, row.explicitName);
-  for (const workspacePath of active) {
-    if (!all.has(workspacePath)) all.set(workspacePath, null);
+/** A workspace Tower knows: registered, running, or both. */
+interface KnownWorkspace {
+  /** The spelling it runs under when it is running (the key of the live terminal map), else its row's. */
+  path: string;
+  explicitName: string | null;
+  running: boolean;
+}
+
+/**
+ * Every workspace Tower knows, once each: the rows, and running workspaces that have none.
+ * Workspaces are told apart by their key (`workspaceKey`), never by the text of a path, so
+ * a row and a running workspace that spell one directory two ways are one workspace, with
+ * the row's name.
+ */
+function everyWorkspace(registered: readonly RegisteredWorkspace[], active: Iterable<string>): KnownWorkspace[] {
+  const byKey = new Map<string, KnownWorkspace>();
+  for (const row of registered) {
+    const key = workspaceKey(row.workspacePath);
+    byKey.set(key, {
+      path: row.workspacePath,
+      explicitName: row.explicitName ?? byKey.get(key)?.explicitName ?? null,
+      running: false,
+    });
   }
-  return all;
+  for (const workspacePath of active) {
+    const key = workspaceKey(workspacePath);
+    byKey.set(key, { path: workspacePath, explicitName: byKey.get(key)?.explicitName ?? null, running: true });
+  }
+  return [...byKey.values()];
 }
 
 /** A refused value quoted back: printable ASCII, and cut short. */
@@ -124,16 +145,16 @@ export function validateProposedName(
           : `'${quoted(name)}' cannot be used in an address: ${why}.`,
     };
   }
-  for (const [otherPath, otherExplicit] of everyWorkspace(registered, active)) {
-    if (isSameWorkspace(otherPath, workspacePath)) continue;
-    if (otherExplicit === name) {
-      return { ok: false, code: 'NAME_TAKEN', message: `'${name}' is already the name of the workspace ${otherPath}.` };
+  for (const other of everyWorkspace(registered, active)) {
+    if (isSameWorkspace(other.path, workspacePath)) continue;
+    if (other.explicitName === name) {
+      return { ok: false, code: 'NAME_TAKEN', message: `'${name}' is already the name of the workspace ${other.path}.` };
     }
-    if (otherExplicit === null && basenameOf(otherPath) === name) {
+    if (other.explicitName === null && basenameOf(other.path) === name) {
       return {
         ok: false,
         code: 'NAME_TAKEN',
-        message: `'${name}' is already the address of the workspace ${otherPath}, by its directory name.`,
+        message: `'${name}' is already the address of the workspace ${other.path}, by its directory name.`,
       };
     }
   }
@@ -149,8 +170,8 @@ export type WorkspaceLookup =
   | { ok: false; code: 'NOT_FOUND' | 'AMBIGUOUS'; message: string };
 
 /**
- * The running workspace that `name` (lower-cased, as the address parser leaves it) refers
- * to.
+ * The running workspace that `name` refers to, in the spelling it runs under. The name is
+ * compared lower-cased, whatever case the caller holds it in.
  *
  * - An explicit name wins, and belongs to its workspace whether or not that workspace is
  *   running. If it is not running the lookup fails saying so: the name is never handed to
@@ -160,19 +181,18 @@ export type WorkspaceLookup =
  *   basename. Two matches fail as ambiguous, naming both paths and the remedy.
  */
 export function findWorkspaceByAddressName(
-  name: string,
+  written: string,
   registered: readonly RegisteredWorkspace[],
   active: Iterable<string>,
 ): WorkspaceLookup {
-  const activePaths = [...active];
-  const all = everyWorkspace(registered, activePaths);
-  const unnamedWithBasename = (paths: Iterable<string>): string[] =>
-    [...paths].filter((p) => all.get(p) === null && basenameOf(p) === name);
-  const running = unnamedWithBasename(activePaths);
+  const name = written.toLowerCase();
+  const all = everyWorkspace(registered, active);
+  const unnamedWithBasename = all.filter((w) => w.explicitName === null && basenameOf(w.path) === name);
+  const running = unnamedWithBasename.filter((w) => w.running).map((w) => w.path);
 
-  const holder = [...all].find(([, explicit]) => explicit === name)?.[0];
+  const holder = all.find((w) => w.explicitName === name);
   if (holder !== undefined) {
-    if (activePaths.some((p) => isSameWorkspace(p, holder))) return { ok: true, workspacePath: holder };
+    if (holder.running) return { ok: true, workspacePath: holder.path };
     const shadowed = running.length === 0
       ? ''
       : ` ${running.join(', ')} has that directory name but not that name; ` +
@@ -180,7 +200,7 @@ export function findWorkspaceByAddressName(
     return {
       ok: false,
       code: 'NOT_FOUND',
-      message: `Workspace '${name}' (${holder}) is not running.${shadowed}`,
+      message: `Workspace '${name}' (${holder.path}) is not running.${shadowed}`,
     };
   }
 
@@ -196,17 +216,20 @@ export function findWorkspaceByAddressName(
   }
 
   // Nothing answers to the name. Say why when Tower knows a workspace it could have meant.
-  const renamed = [...all].find(([p, explicit]) => explicit !== null && basenameOf(p) === name);
+  const renamed = all.find((w) => w.explicitName !== null && basenameOf(w.path) === name);
   if (renamed !== undefined) {
     return {
       ok: false,
       code: 'NOT_FOUND',
-      message: `Workspace '${name}' not found. ${renamed[0]} has that directory name but is addressed as '${renamed[1]}'.`,
+      message:
+        `Workspace '${name}' not found. ${renamed.path} has that directory name but is addressed as ` +
+        `'${renamed.explicitName}'.`,
     };
   }
-  const stopped = unnamedWithBasename(all.keys());
-  if (stopped.length > 0) {
-    return { ok: false, code: 'NOT_FOUND', message: `Workspace '${name}' (${stopped.join(', ')}) is not running.` };
+  // None of these is running: a running one was answered above.
+  if (unnamedWithBasename.length > 0) {
+    const stopped = unnamedWithBasename.map((w) => w.path).join(', ');
+    return { ok: false, code: 'NOT_FOUND', message: `Workspace '${name}' (${stopped}) is not running.` };
   }
   return {
     ok: false,
@@ -242,26 +265,24 @@ export function workspaceAddressName(
   registered: readonly RegisteredWorkspace[],
   active: Iterable<string>,
 ): WorkspaceAddressName {
-  const activePaths = [...active];
-  const all = everyWorkspace(registered, activePaths);
-  const own = [...all].find(([p]) => isSameWorkspace(p, workspacePath));
-  if (own !== undefined && own[1] !== null) return { name: own[1], explicit: true };
+  const all = everyWorkspace(registered, active);
+  const own = all.find((w) => isSameWorkspace(w.path, workspacePath));
+  if (own !== undefined && own.explicitName !== null) return { name: own.explicitName, explicit: true };
 
   const basename = basenameOf(workspacePath);
-  const others = [...all].filter(([p]) => !isSameWorkspace(p, workspacePath));
-  const holder = others.find(([, explicit]) => explicit === basename);
+  const others = all.filter((w) => !isSameWorkspace(w.path, workspacePath));
+  const holder = others.find((w) => w.explicitName === basename);
   if (holder !== undefined) {
     return {
       name: null,
       reason:
-        `its directory name '${basename}' is the name of the workspace ${holder[0]}; ` +
+        `its directory name '${basename}' is the name of the workspace ${holder.path}; ` +
         `give it a name of its own: ${WORKSPACE_NAME_COMMAND}`,
     };
   }
   const sharing = others
-    .filter(([p, explicit]) => explicit === null && basenameOf(p) === basename)
-    .map(([p]) => p)
-    .filter((p) => activePaths.some((a) => isSameWorkspace(a, p)));
+    .filter((w) => w.running && w.explicitName === null && basenameOf(w.path) === basename)
+    .map((w) => w.path);
   if (sharing.length > 0) {
     return {
       name: null,

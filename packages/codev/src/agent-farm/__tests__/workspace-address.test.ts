@@ -5,7 +5,7 @@
  * answer comes out. Every rule is tested here without a Tower or a database.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { MAX_ADDRESS_LENGTH, parseAddress } from '@cluesmith/codev-sdk/address';
 import {
   findWorkspaceByAddressName,
@@ -15,6 +15,8 @@ import {
   WORKSPACE_NAME_COMMAND,
   type RegisteredWorkspace,
 } from '../utils/workspace-address.js';
+import { workspaceKey } from '../utils/workspace-path.js';
+import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
 
 const A = '/home/ana/codev';
 const B = '/home/ana/work/codev';
@@ -38,6 +40,16 @@ function refused(name: string, registered: RegisteredWorkspace[], active: string
 }
 
 describe('findWorkspaceByAddressName', () => {
+  it('compares the name lower-cased, whatever case the caller holds it in', () => {
+    const registered: RegisteredWorkspace[] = [
+      { workspacePath: '/w/a/codev', explicitName: 'core' },
+      { workspacePath: '/w/b/Notes', explicitName: null },
+    ];
+    const active = ['/w/a/codev', '/w/b/Notes'];
+    expect(findWorkspaceByAddressName('CORE', registered, active)).toEqual({ ok: true, workspacePath: '/w/a/codev' });
+    expect(findWorkspaceByAddressName('NOTES', registered, active)).toEqual({ ok: true, workspacePath: '/w/b/Notes' });
+  });
+
   it('finds an unnamed workspace by its basename, as before', () => {
     expect(found('codev', rows([A, null], [CLOUD, null]), [A, CLOUD])).toBe(A);
     expect(found('codev-cloud', rows([A, null], [CLOUD, null]), [A, CLOUD])).toBe(CLOUD);
@@ -328,6 +340,52 @@ describe('the two directions agree', () => {
           ).toEqual({ ok: true, workspacePath: other });
         }
       }
+    }
+  });
+});
+
+// Workspaces are told apart by their key, never by the text of a path (on Windows the key
+// is the canonical spelling). A row and a running workspace that spell one directory two
+// ways are ONE workspace, with the row's name.
+describe('one workspace under two spellings of its path (Windows keys)', () => {
+  const ROW = 'c:/nx-spec-1940/a/codev';
+  const LIVE = 'C:/nx-spec-1940/a/codev';
+  const OTHER = 'C:/nx-spec-1940/b/other';
+  const registered: RegisteredWorkspace[] = [
+    { workspacePath: ROW, explicitName: 'core' },
+    { workspacePath: OTHER, explicitName: null },
+  ];
+  const active = [LIVE, OTHER];
+
+  beforeEach(() => {
+    forceHostPlatform('win32');
+    expect(workspaceKey(ROW)).toBe(workspaceKey(LIVE));
+    expect(ROW).not.toBe(LIVE);
+  });
+
+  it('its name reaches it, in the spelling it runs under (the key of the live terminal map)', () => {
+    expect(findWorkspaceByAddressName('core', registered, active)).toEqual({ ok: true, workspacePath: LIVE });
+  });
+
+  it('it does not also answer to its directory name as a second, unnamed workspace', () => {
+    const result = findWorkspaceByAddressName('codev', registered, active);
+    expect(result).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    expect((result as { message: string }).message).toContain("addressed as 'core'");
+  });
+
+  it('its directory name is free for another workspace, as for any renamed workspace', () => {
+    expect(validateProposedName('codev', OTHER, registered, active)).toEqual({ ok: true, name: 'codev' });
+  });
+
+  it('its own name is its explicit name, under either spelling', () => {
+    for (const spelling of [ROW, LIVE]) {
+      expect(workspaceAddressName(spelling, registered, active)).toEqual({ name: 'core', explicit: true });
+    }
+  });
+
+  it('it may set the name it already has, under either spelling', () => {
+    for (const spelling of [ROW, LIVE]) {
+      expect(validateProposedName('core', spelling, registered, active)).toEqual({ ok: true, name: 'core' });
     }
   });
 });
