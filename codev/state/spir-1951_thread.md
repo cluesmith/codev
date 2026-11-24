@@ -411,3 +411,13 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   Scenario 29: no open ~25-file PR with a 3-commit porch tail exists (scanned 150 recent PRs); recorded.
 - Review file written; six cold lessons routed (Testing x4, Architecture, Protocol Orchestration); no hot change.
 - checkCi got its one-line skip comment (claude Phase 4 iter2 note 5).
+- PR-phase consult round 1: claude APPROVE (6 minor notes), codex REQUEST_CHANGES: (1) the end-of-run pr-view
+  compared only the head; (2) config is not validated "before any subprocess" (roots come from git first; the
+  28a test had been retitled "before any forge call", never recorded as a deviation; my miss). Took both to the
+  architect before fixing. Rulings (20:35): (1) fix: compare head, baseRef, state and draft, each change
+  ATTENTION; (2) option (a): origin check after settings, tests assert only the two discovery argv, NO edit to
+  the approved spec or plan; record as a deviation for the owner at the pr gate. Claude note 3: -z needs git
+  2.36 (Ubuntu 22.04 has 2.34), so the path is kept verbatim instead; architect agreed (20:41).
+- d5bc0b227: all of it; 6 new tests each fail under mutation. Targeted 1028/1028 (36 files), both tsc, build,
+  residue OK. Rebuttal 1951-review-iter1-rebuttals.md. One more cold lesson (Process: re-read spec criteria
+  when a plan revision changes their premise).

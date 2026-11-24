@@ -33,13 +33,16 @@ The commands are read-only by construction. One runner spawns every subprocess a
 
   The runs include a conflicting trial merge, a ref-neutral fetch of missing objects (with tags on origin), and a run from a linked worktree. The snapshots are identical before and after.
 - [x] **Live base** (Phase 3). The trial merge uses `ls-remote`'s tip, and a test deliberately leaves the local `origin/main` stale.
-- [x] **Exact head, live base, no race** (Phase 3). `pr-view` and `ls-remote` are re-read at the end. A moved head or base is attention ("head|base moved during check"), and overrides a `check.skip` of the check that carries it. There is a test for each.
+- [x] **Exact head, live base, no race** (Phase 3; widened in the PR review). `pr-view` and `ls-remote` are re-read at the end. A moved head or base is attention ("head|base moved during check"), and overrides a `check.skip` of the check that carries it. Since the PR review's round 1, a change during the run to the PR's base branch, state or draft flag is attention as well. There is a test for each.
 - [x] **Bounded time** (Phases 1–5). Every forge call, and every `ls-remote` and `fetch`, has a timeout. A hanging `commit-checks` or `workflow-runs` makes its check `not run: … timed out after Ns`. A hanging anchoring `pr-view` is exit 2.
 - [x] **Porch-only head** (Phase 4). `porch-only.ts` finds the last code commit by the plan's walk, which reads at most 11 commits and makes at most 10 lookups. The code runs show beside the head's, and they drive the verdict. Tests cover runs only on head, only on an earlier commit, on neither, a failure on either, and main merged into a porch-only branch.
 - [x] **Never reported as passing** (Phases 4–6). For each forge-dependent check, a disabled concept and a failing concept both give `not run: <concept> …` with exit 1 (Scenario 24 tests).
 - [x] **Exit codes** (Phases 3–6). Each command has tests for 0, 1 and 2, and `--json` carries the same verdict. For `check deploy`, a PR that cannot be read is a per-PR `not run` (Scenario 15a, as recorded in the deviations).
 - [x] **`--json` matches the schema** (`schema: 1`), including the `error` object on exit 2 (Phases 2–6). The report-shape helpers check every report. The fields this project added beyond the spec's schema are listed under Deviations (Phase 7), and `codev.md` documents them.
-- [x] **Input validation** (Phase 2). PR numbers, SHAs, builder ids and paths, and config strings are validated before any subprocess runs. A violation exits 2 naming the value (Scenario 28a).
+- [x] **Input validation** (Phase 2), **with one deviation for the owner to accept** (see Deviations, Review phase).
+  - PR numbers, SHAs, builder ids and paths are validated before any subprocess runs.
+  - Config values are validated before any subprocess that takes one, and before any forge or network call. Two local git calls that find the main checkout run first.
+  - A violation exits 2 naming the value (Scenario 28a).
 - [x] **Configuration** (Phases 2–6). Each `check.*` key and `cleanup.keepIgnored` changes behaviour as specified, and arrays replace the defaults. An invalid value exits 2 naming the key and the file it came from, including a fake `~/.codev/config.json` layer.
 - [x] **Forge contract** (Phase 1).
   - `pr-view` gains seven optional fields.
@@ -188,6 +191,19 @@ The architect accepted each of these when it was made. The thread log has the re
 - Cleanup's dirty notice shares `isSpawnMade` with `check worktree` (`f93aa60e1`, architect-ordered from Claude's Phase 6 iteration 3 note 3). It reads status with `-z`, so quoted paths are judged correctly (`0c02478dd`).
 
 **Review phase**
+- **For the owner to accept: when configuration is validated.**
+  - *The spec says*: config values are validated "before any subprocess runs" (Success Criteria, Input validation; the plan's Phase 2 acceptance line repeats it).
+  - *The code does this*: two local, read-only git calls run first, `git rev-parse --show-toplevel` and `git worktree list --porcelain`.
+  - *Why*: configuration is read from the main checkout, and from a builder worktree only git can name it. `findWorkspaceRoot()` returns the worktree itself; that was the plan's iteration-1 fix. Neither call takes a configuration value. No config value reaches any subprocess, forge call or network call before it is validated.
+  - *The alternative, not taken*: making the wording literally true would mean finding the main checkout without git, by parsing `.git` and `commondir` by hand. That can disagree with git. The architect agreed it would trade a wording gap for a real risk.
+  - *How it was found*: until the PR review a third call, the `origin` check, also ran first. The test was titled "before any forge call", and the difference was not recorded as a deviation. Codex found it in the PR review's round 1.
+  - *What changed*: the `origin` check now runs after validation in all three commands. The pr, deploy and worktree config-error tests record every spawn and assert exactly those two calls.
+  - The approved spec and plan text are unchanged. The architect puts this to the owner at the pr gate.
+- PR review round 1 (`d5bc0b227`):
+  - the end-of-run `pr-view` now compares the base branch, state and draft flag as well as the head;
+  - when the head moved, the forge line names the head its answer is about;
+  - `parseWorktreeList` keeps a path verbatim and reads CRLF. It does not use `-z`, which needs git 2.36; the architect agreed;
+  - `codev.md` says attribution patterns run without a time limit.
 - Three cleanup suites mocked `execFile` in its three-argument form, so the dirty notice silently took its "Unable to check status" path (`017f0baea`, Claude's Phase 7 iteration 2 note 2, architect order).
   - `air-1950-cleanup-keep-ignored` now asserts the real notice;
   - `air-1950-cleanup-keep-ignored-e2e` runs `git status` for real;
@@ -214,6 +230,7 @@ Porch force-advanced two phases at the three-iteration ceiling, so CMAP never re
     - a one-line `liveTip` branch-name guard.
   - `c42251ec5`: the `ext::` refusal case no longer uses a `/tmp` path.
   - Both are confined to `commands/check/` test helpers, apart from the one-line guard in `git-facts.ts`.
+- **PR review, round 1:** `d5bc0b227` (the fixes for Codex's two issues and Claude's notes 1–3) and the review-file commit after it were made after the PR-phase consultation. If porch runs a second PR-phase round, it reviews them. If not, the architect has Codex review them before the gate goes to the owner.
 - **Phase 6:**
   - `a1ccc442b`: spawn's native-Windows link fallbacks (a hard link, or an unchanged copy) are scaffold, and several keep-list links print one per line.
   - At the architect's request, Phase 7's reviewers reviewed this rule through `f93aa60e1`, which moved it into `agent-farm/lib/builder-scaffold.ts`. Both approved in iteration 2.
@@ -377,6 +394,20 @@ No concerns raised.
     1. Of the four new safe-direction tests, only the quoted hard-link and copy test detects a parsing regression. The lone ` M` first entry, the quoted untracked name and the staged rename pass under the old line parsing too. → **N/A**, recorded here as the architect ordered: they pin the safe direction the architect asked for, and the discriminating test is the mutation-checked one.
     2. `air-1950-cleanup-keep-ignored`'s three-argument `execFile` mock sends the notice down "Unable to check status". → **Addressed** in the review phase (`017f0baea`), with the two sibling suites that had the same shape.
 
+### Review (PR) Phase (Round 1)
+
+#### Codex — REQUEST_CHANGES
+- **Concern**: `check pr`'s end-of-run re-read compares only the head. A PR retargeted, marked draft, or closed during the run could still read CLEAR. → **Addressed** (`d5bc0b227`). The base branch, state and draft flag are compared too. Each change is attention, its line naming what changed and asking for a re-run, even when the check is skipped. There are stub tests for closed, merged, draft and retargeted PRs, and for an unchanged run staying CLEAR.
+- **Concern**: config is not validated before any subprocess, as the spec and plan say; `resolveRoots()` runs git first, and the test was weakened to "before any forge call". → **Addressed in part, and recorded as a deviation for the owner** (architect's option (a)). The `origin` check moved after validation, so only the two calls that find the main checkout precede it. The tests assert exactly those two. Removing them would mean reimplementing git's repository discovery. See Deviations, Review phase.
+
+#### Claude — APPROVE
+- **Concern**: `checkForge` may give the re-read's mergeability for a moved head without saying so. → **Addressed**: `(for the new head <sha>)`.
+- **Concern**: `check.attribution` regexes are not time-bounded. → **Addressed**: one sentence in `codev.md`, both trees. They remain trusted configuration.
+- **Concern**: `parseWorktreeList` trims lines and reads without `-z`. → **Addressed differently**: the path is kept verbatim and CRLF is handled. `-z` was not taken, because it needs git 2.36 and the commands run on older git (Ubuntu 22.04 ships 2.34); the architect agreed. A newline inside a path stays unreadable, and the code says so.
+- **Concern**: `isSpawnMade` reads same-size files whole. → **Not changed**: only an untracked entry at the same path and size as a main-checkout file is compared, which in practice is `.env` and config files.
+- **Concern**: `scaffoldOnly` has no production consumer. → **Not changed**: it predates this PR.
+- **Concern**: the recorded `check pr 1958` sample reads `"Fixes #1951"`, while the body now says `Closes #1951`. → **Not changed**: the sample is the run as it was, captured before the body was rewritten.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -419,6 +450,7 @@ No concerns raised.
 - Routed: cold, Testing: a short timeout that bounds every call of a run fails on the wrong call under load. Size it for the other calls and assert the reason names the call that hung.
 - Routed: cold, Testing: on Windows, `fs.realpathSync` keeps 8.3 short names while git prints the long path; fixture roots compared with git output need `realpathSync.native`.
 - Routed: cold, Architecture: `git status --porcelain` without `-z` C-quotes unusual paths, and a helper that trims stdout eats the first `-z` entry's leading status space.
+- Routed: cold, Process: when a plan revision changes a premise, re-read every spec criterion that rested on it, and record the conflict as a deviation rather than retitling the test.
 - Routed: cold, Protocol Orchestration: a porch review round runs rebuttal → `porch done` → `porch next` → `porch done` → `porch next`. Run `porch next` first after a round, and list the commits a force-advance left unreviewed.
 - No hot-tier change. `lessons-critical.md` is at its cap, and none of these is more cross-cutting than what it holds.
 
