@@ -765,6 +765,9 @@ stay green.
     same calls;
   - an `http:`/`https:` allowlist for external opens.
 - `panel-template.ts`: the nonce CSP.
+  - `default-src 'none'` first, as both existing webviews have it (`panel-template.ts:22`,
+    `preview-template.ts:47`). Without it, leaving out `connect-src` restricts nothing: `fetch`,
+    XHR, WebSocket and EventSource fall back to `default-src`, so `'none'` is what blocks them;
   - `script-src 'nonce-…'`;
   - `style-src ${cspSource} 'unsafe-inline'`, the same as the existing webviews
     (`contextual-panel/panel-template.ts`, `markdown-preview/preview-template.ts`).
@@ -773,8 +776,25 @@ stay green.
       those.
     - Scripts stay nonce-only. Inline *styles* do not run code;
   - `img-src ${cspSource} blob: http: https:`;
-  - no `connect-src`;
+  - no `connect-src`, so connections fall back to `default-src 'none'`;
   - `localResourceRoots` set to `dist`.
+  - **A static CSP test** (`panel-template.test.ts`) parses the generated policy and asserts:
+    - `default-src 'none'` is present;
+    - there is no `connect-src`;
+    - `script-src` is exactly the nonce, with no `'unsafe-inline'` or `'unsafe-eval'`;
+    - `img-src` and `style-src` are exactly as listed.
+- **Spec scenario 22** (no webview contact with Tower) is tested at three levels:
+  - **Source:** an ESLint `no-restricted-globals` / `no-restricted-properties` rule bans `fetch`,
+    `XMLHttpRequest`, `WebSocket`, `EventSource` and `navigator.sendBeacon` in
+    `packages/workspace-views/src` and `apps/vscode/src/workspace-views/webview`. All I/O goes
+    through the host adapter. The dashboard's fetch adapter lives in `apps/web`, outside the rule.
+  - **State:** a unit test asserts that no message the host posts to a webview carries the Tower
+    key, a Tower URL or a port. It checks each message type's payload against the key and the
+    configured base URL.
+  - **Rendered:** in the harness, Playwright records every request from the webview frames.
+    - The run passes only if each request is a `vscode-resource`/`cspSource` asset, a `blob:` URL,
+      or a remote `http(s)` item image from the fixture's decisions file.
+    - No request may go to the isolated Tower's port, and none may carry the key header.
 - `decisions-panel.ts`, a single-instance `WebviewPanel` (`retainContextWhenHidden`):
   - **Polling has one owner:** the shared `useDecisions` hook, with its existing 2 s cadence. Each
     tick calls the host adapter's `read()`, and the host makes one Tower request per call. The host
