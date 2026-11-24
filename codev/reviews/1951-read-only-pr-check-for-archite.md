@@ -53,8 +53,9 @@ The commands are read-only by construction. One runner spawns every subprocess a
   - The architect role, `risk-triage.md`, the `codev` command reference, `workflow-reference.md` and `overview.md` changed in both trees.
   - The `codev` skill changed in all four copies, and the shipped hashes were regenerated.
   - The forge skill and `forge.md` document the new concepts and fields.
-- [x] **Full test suite and Windows**, with the qualification below.
-  - Under owner ruling main-38 ("ci-first"), the builder never ran the full suite locally. GitHub's run (8/8, which includes the full unit suite on Node 22 and 24) stood in for porch's local `tests` check at every phase head. The architect confirmed each run, and each skip is listed in the PR body.
+- [x] **Full test suite and Windows.**
+  - Under owner ruling main-38 ("ci-first"), the builder ran no full local suite during Phases 1–7. GitHub's run (8/8, which includes the full unit suite on Node 22 and 24) stood in for porch's local `tests` check at every phase head. The architect confirmed each run, and each skip is listed in the PR body.
+  - The owner retired ci-first (decision main-39) once PR #1965's worker cap reached main. After merging it (`e9baeeec0`), one ordinary full local run on the final head (`30853b1fe`, the same tree as `e9baeeec0`), `npm test -- --exclude='**/e2e/**'` from `packages/codev`: 440 files passed and 14 skipped; 9,286 tests passed and 116 skipped; exit 0. Wall time 363 s; one-minute load 18.4 at the start, peak 27.7. No failures.
   - Windows runs:
     - 45462452355 failed 9 fixture-side tests (8.3 short names), fixed in `f93aa60e1`;
     - 45465468867 and 45471312317 passed;
@@ -230,7 +231,7 @@ Porch force-advanced two phases at the three-iteration ceiling, so CMAP never re
     - a one-line `liveTip` branch-name guard.
   - `c42251ec5`: the `ext::` refusal case no longer uses a `/tmp` path.
   - Both are confined to `commands/check/` test helpers, apart from the one-line guard in `git-facts.ts`.
-- **PR review, round 1:** `d5bc0b227` (the fixes for Codex's two issues and Claude's notes 1–3) and the review-file commit after it were made after the PR-phase consultation. If porch runs a second PR-phase round, it reviews them. If not, the architect has Codex review them before the gate goes to the owner.
+- **PR review, round 1:** `d5bc0b227` (the fixes for Codex's two issues and Claude's notes 1–3) and `1a6eb69dd` (review file and rebuttal) were made after the PR-phase consultation, and porch ran no second round. The architect had Codex review `d5bc0b227`: one finding, rejected by the architect (see Consultation Feedback). `1a6eb69dd` is documents only.
 - **Phase 6:**
   - `a1ccc442b`: spawn's native-Windows link fallbacks (a hard link, or an unchanged copy) are scaffold, and several keep-list links print one per line.
   - At the architect's request, Phase 7's reviewers reviewed this rule through `f93aa60e1`, which moved it into `agent-farm/lib/builder-scaffold.ts`. Both approved in iteration 2.
@@ -407,6 +408,11 @@ No concerns raised.
 - **Concern**: `isSpawnMade` reads same-size files whole. → **Not changed**: only an untracked entry at the same path and size as a main-checkout file is compared, which in practice is `.env` and config files.
 - **Concern**: `scaffoldOnly` has no production consumer. → **Not changed**: it predates this PR.
 - **Concern**: the recorded `check pr 1958` sample reads `"Fixes #1951"`, while the body now says `Closes #1951`. → **Not changed**: the sample is the run as it was, captured before the body was rewritten.
+
+#### Architect-run Codex review of `d5bc0b227`
+Porch ran no second PR-phase round, so the architect had Codex review `d5bc0b227` from the main checkout, with a brief covering the four changes and the read-only contract.
+- **Concern**: the end-of-run comparison uses normalised state words, so a first read of `OPENED` and a final read of `OPEN` would not be flagged. → **Rejected by the architect**: those are two spellings of one state (GitLab's and GitHub's), not a change, and one run reads one forge, so comparing normalised states is correct. The architect also read `pr.ts` 496–518: head, base branch and state with draft are each compared, and each flags its check.
+- Nothing else was found on the config order, the worktree-list parser or the allow-list.
 
 ## Lessons Learned
 

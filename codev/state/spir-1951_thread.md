@@ -421,3 +421,9 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
 - d5bc0b227: all of it; 6 new tests each fail under mutation. Targeted 1028/1028 (36 files), both tsc, build,
   residue OK. Rebuttal 1951-review-iter1-rebuttals.md. One more cold lesson (Process: re-read spec criteria
   when a plan revision changes their premise).
+- GitHub 8/8 + Windows 45484244459 green on 1a6eb69dd. ci-first RETIRED (owner main-39): merged origin/main
+  (fa4fc74ee, PR #1965 worker cap) as e9baeeec0, clean; ordinary porch done at load 17.8 → no second consult
+  round, GATE REQUIRED: pr (30853b1fe). Architect ran codex on d5bc0b227: one finding (normalised state words),
+  rejected by the architect (two spellings of one state; one forge per run).
+- Full local run on 30853b1fe (architect order, the local evidence): npm test -- --exclude='**/e2e/**' →
+  440 files passed / 14 skipped, 9286 tests passed / 116 skipped, exit 0, 363 s wall, load 18.4 start, 27.7 peak.
