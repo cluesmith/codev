@@ -250,16 +250,19 @@ const BLOCKED_BY: Record<string, string> = {
   CHANGES_REQUESTED: 'changes requested',
 };
 
+/** `MERGEABLE, CLEAN`; a merge state the forge did not report is said, not left out. */
 function mergeWords(view: PrView): string {
   const state = view.mergeStateStatus;
-  if (!state) return view.mergeable!;
+  if (!state) return `${view.mergeable} (merge state not reported)`;
   const why = state === 'BLOCKED' && view.reviewDecision ? BLOCKED_BY[view.reviewDecision] : undefined;
   return why ? `${view.mergeable}, BLOCKED (${why})` : `${view.mergeable}, ${state}`;
 }
 
 /**
- * The forge's own mergeability. The verdict follows `mergeable` alone; the merge state and
- * review decision are context. An `UNKNOWN` at the first read takes the re-read's value.
+ * The forge's own mergeability. The verdict follows `mergeable` alone (the architect's
+ * decision in the plan); the merge state and review decision are context, so a forge that
+ * reports no merge state (the gitea preset) still gets a verdict, and the line says the
+ * state was not reported. An `UNKNOWN` at the first read takes the re-read's value.
  */
 export function checkForge(first: PrView, reread: PrView | null): Check {
   const view = first.mergeable === 'UNKNOWN' && reread?.mergeable ? reread : first;

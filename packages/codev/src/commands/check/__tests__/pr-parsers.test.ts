@@ -137,7 +137,8 @@ describe('Spec 1951 — state and forge from pr-view', () => {
 
   it.each([
     [{}, 'ok', 'MERGEABLE, CLEAN'],
-    [{ mergeStateStatus: undefined }, 'ok', 'MERGEABLE'],
+    [{ mergeStateStatus: undefined }, 'ok', 'MERGEABLE (merge state not reported)'],
+    [{ mergeable: 'CONFLICTING', mergeStateStatus: undefined }, 'attention', 'CONFLICTING (merge state not reported)'],
     [{ mergeStateStatus: 'BLOCKED', reviewDecision: 'REVIEW_REQUIRED' }, 'ok', 'MERGEABLE, BLOCKED (review required)'],
     [{ mergeStateStatus: 'BLOCKED', reviewDecision: 'CHANGES_REQUESTED' }, 'ok', 'MERGEABLE, BLOCKED (changes requested)'],
     [{ mergeStateStatus: 'BLOCKED', reviewDecision: 'APPROVED' }, 'ok', 'MERGEABLE, BLOCKED'],

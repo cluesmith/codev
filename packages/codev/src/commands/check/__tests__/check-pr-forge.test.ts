@@ -7,10 +7,12 @@
  * read-only list ran, and the repository state is compared before and after.
  */
 
+import { spawn as realSpawn } from 'node:child_process';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkPr, renderPrHuman } from '../pr.js';
 import type { Check, CommandOptions, PrReport } from '../report.js';
+import type { SpawnFn } from '../runner.js';
 import { useFakeHome } from './helpers/fake-home.js';
 import { createFixture, snapshotRepoState, type Fixture } from './helpers/git-fixture.js';
 import {
@@ -244,6 +246,40 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: forge state and CI (stub git
       expect(byId(report, 'checks')).toMatchObject({ status: 'ok', details: { lastCodeCommit: merge, porchOnlyAbove: 0 } });
     });
 
+    it('main merged into a porch-only branch: the merge is the code commit, never a commit of main', async () => {
+      const { dir } = pushBranch(fx, [{ files: { [PORCH_FILE]: 'step: 0\n' }, message: 'chore(porch): 7 init' }]);
+      const onMain = fx.commit(fx.main, { 'later.txt': 'later\n' }, 'main moves on');
+      fx.git(fx.main, 'push', '-q', 'origin', 'main');
+      fx.git(dir, 'merge', '-q', '--no-ff', '-m', 'merge main', 'origin/main');
+      const merge = fx.git(dir, 'rev-parse', 'HEAD').trim();
+      const head = fx.commit(dir, { [PORCH_FILE]: 'step: 1\n' }, 'chore(porch): 7 next');
+      fx.git(dir, 'push', '-q', 'origin', PR_BRANCH);
+      forge.answer(prView(head));
+      ci.answer(onMain, passing(5));
+
+      const { report } = await runReadOnly();
+
+      expect(byId(report, 'checks')).toMatchObject({ status: 'attention', details: { lastCodeCommit: merge, porchOnlyAbove: 1 } });
+      expect(ci.calls()).toEqual([head, merge]);
+    });
+
+    it('a git call in the walk that fails leaves checks not run by name; the other checks are still reported', async () => {
+      const { head } = prWithPorchTail(1);
+      forge.answer(prView(head));
+      ci.answer(head, passing(2));
+      const failingDiffTree: SpawnFn = (command, args, options) =>
+        args[0] === 'diff-tree'
+          ? realSpawn(process.execPath, ['-e', 'process.stderr.write("fatal: simulated failure\\n"); process.exit(128)'], options)
+          : realSpawn(command, args, options);
+
+      const { report, exitCode } = await runReadOnly({ spawn: failingDiffTree });
+
+      expect(exitCode).toBe(1);
+      expect(byId(report, 'checks')).toMatchObject({ status: 'not-run', reason: 'git diff-tree failed: fatal: simulated failure' });
+      expect(byId(report, 'trial-merge').status).toBe('ok');
+      expect(ci.calls()).toEqual([]);
+    });
+
     it('more than 10 porch-only commits: not run, nothing looked up', async () => {
       const { head } = prWithPorchTail(11);
       forge.answer(prView(head));
@@ -395,6 +431,22 @@ describe.skipIf(isWindows)('Spec 1951 — check pr: forge state and CI (stub git
       expect(exitCode).toBe(1);
       expect(byId(report, id)).toMatchObject({ status: 'not-run', reason });
       expect(verdictLine(report)).toContain(`${id} (not run)`);
+    });
+
+    it('pr-view without mergeStateStatus (as the gitea preset): the verdict follows mergeable, and the line says so', async () => {
+      const { head } = pushBranch(fx, [{ files: { 'a.txt': 'a\n' }, message: 'a' }]);
+      const view = prView(head);
+      delete view.mergeStateStatus;
+      forge.answer(view);
+      ci.answer(head, passing(2));
+
+      const { report } = await runReadOnly();
+
+      expect(byId(report, 'forge')).toMatchObject({
+        status: 'ok',
+        summary: 'MERGEABLE (merge state not reported)',
+        details: { mergeable: 'MERGEABLE', mergeStateStatus: null },
+      });
     });
 
     it('commit-checks disabled', async () => {

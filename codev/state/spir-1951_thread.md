@@ -177,3 +177,19 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
     `5 lines: description line 118, commit 23de988 "Co-Authored-By: Claude Opus 5…", … +3`; forge
     `CONFLICTING, DIRTY` agreeing with `trial merge 5 conflicting files`; `checks head 1fe1037: porch-only, 7
     passed`. Clone refs unchanged, no FETCH_HEAD written. Main's config and ~/.codev untouched.
+- Architect verified Phase 4 (2026-11-24 01:37) from the main checkout: #1957 'ATTENTION — state (draft), checks
+  (running)', exit 1; #1965 at its pr gate CLEAR with 'checks: head 0513558: porch-only, 8 passed', in 5.4 s; two
+  controlled runs changed no ref, FETCH_HEAD byte-identical. Skip applied once under main-38 after GitHub 8/8 green
+  at 410d5ec14 (porch build-complete); noted in the PR body.
+- For the REVIEW (architect): (1) the human form leaves out the `state` line when it is ok — the header shows OPEN
+  and the JSON has the check — which differs from the spec's "one line per check": record as deliberate (same rule
+  as an ok `head`). (2) Record the ten-commit edge decision (lookups ≤ 10, C always queried).
+- Later: once PR #1965 (3-worker cap) merges, merging main gives a local suite that passes here; the owner may
+  retire ci-first. The architect will say.
+- Review iter1: claude APPROVE (non-blocking), codex REQUEST_CHANGES: "`forge` ok with mergeStateStatus absent".
+  Rebutted (the architect's decision: verdict follows `mergeable` alone; gitea's preset has no merge state, so
+  requiring it would leave `forge` not run on every Gitea PR) — but the absence is now said on the line:
+  `MERGEABLE (merge state not reported)`. Took claude's cheap ones: a git failure in the walk is `checks not run:
+  git diff-tree failed: …` instead of exit 2; one-line form by SHA, not object identity; the two new argv forms in
+  git-forms.ts; a main-merged-into-porch-only-branch fixture (C = the merge; main's commit never asked for).
+  Not taken: `countRange` in head (broken repo → exit 2); origin tip not local stays info (fold-in's scope).

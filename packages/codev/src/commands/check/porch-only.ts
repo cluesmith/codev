@@ -14,7 +14,7 @@
  */
 
 import type { CommitCheckItem, CommitCheckState } from '../../lib/forge-contracts.js';
-import type { Lookup } from './git-facts.js';
+import { failureReason, type Lookup } from './git-facts.js';
 import { short } from './render.js';
 import { check, CheckCommandError, describeRuns, notRun, summarizeRuns, type Check, type CommitRuns } from './report.js';
 import type { Runner } from './runner.js';
@@ -60,28 +60,28 @@ export type CodeCommit =
   | { kind: 'found'; sha: string; above: string[] }
   /** The walk reached the merge-base: every commit on the branch is porch-only. */
   | { kind: 'none'; porchOnly: string[] }
-  | { kind: 'too-many' };
+  | { kind: 'too-many' }
+  /** A git call in the walk failed: the check is not run, naming the call. */
+  | { kind: 'failed'; reason: string };
 
 /** Walk the head's first-parent chain toward the merge-base and find C. */
 export async function findCodeCommit(runner: Runner, head: string, mergeBase: string): Promise<CodeCommit> {
   const walk = await runner.git(['rev-list', '--first-parent', '--parents', `--max-count=${MAX_PORCH_ONLY + 1}`, head, '--not', mergeBase]);
-  if (walk.exitCode !== 0) throw new CheckCommandError(`git rev-list ${head} --not ${mergeBase} failed`, walk.stderr.trim());
+  if (walk.exitCode !== 0) return { kind: 'failed', reason: failureReason('git rev-list', walk, runner.timeoutLabel) };
   const chain = parseParents(walk.stdout);
   const above: string[] = [];
   for (const commit of chain) {
-    if (commit.parents.length === 1 && isPorchOnly(commit.parents.length, await changedInCommit(runner, commit.parents[0], commit.sha))) {
-      above.push(commit.sha);
-      continue;
+    if (commit.parents.length === 1) {
+      const changed = await runner.git(['diff-tree', '--no-ext-diff', '--no-textconv', '--no-commit-id', '--name-only', '-r', '-z', '--no-renames', commit.parents[0], commit.sha]);
+      if (changed.exitCode !== 0) return { kind: 'failed', reason: failureReason('git diff-tree', changed, runner.timeoutLabel) };
+      if (isPorchOnly(1, changed.stdout.split('\0').filter((path) => path !== ''))) {
+        above.push(commit.sha);
+        continue;
+      }
     }
     return { kind: 'found', sha: commit.sha, above };
   }
   return chain.length > MAX_PORCH_ONLY ? { kind: 'too-many' } : { kind: 'none', porchOnly: above };
-}
-
-async function changedInCommit(runner: Runner, parent: string, sha: string): Promise<string[]> {
-  const result = await runner.git(['diff-tree', '--no-ext-diff', '--no-textconv', '--no-commit-id', '--name-only', '-r', '-z', '--no-renames', parent, sha]);
-  if (result.exitCode !== 0) throw new CheckCommandError(`git diff-tree ${parent} ${sha} failed`, result.stderr.trim());
-  return result.stdout.split('\0').filter((path) => path !== '');
 }
 
 // =============================================================================
@@ -210,7 +210,7 @@ function describeSelection(range: readonly string[], selection: Selection): stri
   const codeCommit = range[range.length - 1];
   const porchOnlyAbove = range.length - 1;
   const headLine = porchOnlyAbove === 0 ? `head ${short(head.sha)}: ${describeRuns(head)}` : `head ${short(head.sha)}: porch-only, ${describeRuns(head)}`;
-  if (porchOnlyAbove === 0 || code === head) return headLine;
+  if (porchOnlyAbove === 0 || code?.sha === head.sha) return headLine;
   const codeLine = code ? `code ${short(code.sha)}: ${describeRuns(code)}` : `code ${short(codeCommit)}: no runs`;
   const tail =
     head.runs.length === 0 ? `head ${short(head.sha)}: no runs — ${plural(porchOnlyAbove, 'porch-state commit')} above the code` : headLine;
@@ -233,10 +233,11 @@ export function checksResult(range: readonly string[], selection: Selection): Ch
   return check('checks', problem === null ? 'ok' : 'attention', describeSelection(range, selection), details);
 }
 
-/** The checks the project's CI reported on the PR's code. A failing local git call throws (exit 2). */
+/** The checks the project's CI reported on the PR's code. A git call that fails leaves the check not run, by name. */
 export async function checkChecks(runner: Runner, head: string, mergeBase: string): Promise<Check> {
   const lookup: RunsLookup = (sha) => lookupRuns(runner, sha);
   const found = await findCodeCommit(runner, head, mergeBase);
+  if (found.kind === 'failed') return notRun('checks', found.reason);
   if (found.kind === 'too-many') return notRun('checks', `more than ${MAX_PORCH_ONLY} porch-only commits`);
 
   if (found.kind === 'none') {
