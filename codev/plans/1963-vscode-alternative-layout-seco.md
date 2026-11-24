@@ -448,6 +448,12 @@ is display text (`WEB (0)`), so the menu entry alone would call `removeArchitect
   - Approve Gate inline;
   - every workspace-row action;
   - Remove Architect.
+
+      The actions that shell out to the CLI (*Spawn Builder* → `afx spawn`, *Approve Gate* →
+      `porch approve`) are verified through the harness's recording stubs. The check is that the
+      extension invoked the right command line, in the right cwd, from the Cockpit row, the same
+      as from the Agents and Workspace rows. A real CLI run would reach `:4100`. Every other action
+      runs for real against the isolated Tower.
 - [ ] Another workspace's architect or builder row opens that workspace's window.
 - [ ] **Request count** (spec scenario 21). The isolated Tower's request log is compared for two
       cases:
@@ -883,59 +889,140 @@ The command stays in the palette everywhere and explains itself where it does no
 
 ## Verification harness (Phases 4, 5, 6, 7, 8)
 
-The spec requires that verification never touches the owner's live IDE or Tower. Each rendered
-checkpoint runs, and then stops, this harness:
+The spec requires that verification never touches the owner's live IDE or Tower. Every step that
+creates state is listed below with **how it reaches the isolated Tower**, as checked against the
+code. Nothing here relies on a default port.
 
-- **Isolated Tower:** the branch's built CLI starts a Tower on a non-default port (for example
-  `4199`) with `CODEV_AGENT_FARM_DIR` pointing at a fresh directory under the session scratchpad.
-  It has its own `global.db`, key and registry.
-- **Isolated VS Code:** `code serve-web` on its own port, with its own `--server-data-dir`,
-  `--user-data-dir` and `--extensions-dir` under the scratchpad. The branch's vsix is installed
-  there, and the setting `codev.towerPort` is set to the isolated Tower's port.
-- **Fixture workspaces:** two or more small git repos under the scratchpad, registered only with
-  the isolated Tower.
-  - Each fixture's `.codev/config.json` sets `shell.architect` and `shell.builder` to a plain
-    shell. So activating a workspace, or adding an architect, starts a shell session, never an AI
-    agent.
-  - **What makes a builder appear.** `/api/overview` lists a `.builders/` worktree only when:
-    - Tower's terminal registry holds a live builder session for its role id
-      (`activeBuilderRoleIds`). Directories alone render zero builders;
-    - its `spawnedByArchitect` is read from the isolated `global.db` `builders` row
-      (`spawned_by_architect`). `discoverBuilders` itself always emits `null`, so a builder with no
-      row folds into `main`.
-  - **So fixture builders are spawned for real by the branch's CLI** (`afx spawn --task "…"`, which
-    needs no GitHub issue):
-    - it runs with `cwd` in a fixture repo, against the isolated Tower;
-    - it sets `CODEV_ARCHITECT_NAME=<architect>` per spawn, the variable Tower injects into
-      architect terminals and `spawn.ts` records as `spawned_by_architect`;
-    - with the fixture's `shell.builder` set to a plain shell, this creates the worktree, the
-      `builders` row with its attribution, and a live builder terminal, and never starts an agent;
-    - this gives N=0, N=1 and N>1 builders under `main` and under a second architect, across two
-      workspaces;
-    - blocked-gate and waiting states come from the fixture builders' porch state, which is
-      synthetic test data in scratch repos, never a real project's;
-    - the null-attribution fold, which no spawn can produce, is covered by unit tests rather than
-      screenshots.
-  - **Validated before any screenshot.** The first checkpoint asserts that the isolated Tower's
-    `/api/overview` for each fixture returns the expected builders, **with their expected
-    `spawnedByArchitect` values**, and the expected architects.
-    - If spawning does not produce them, verification stops and the architect is told.
-    - It does not fall back to faked data, nor to hand-written database rows.
-  - **Driving the harness.** It goes through Tower's HTTP API (activation, terminals,
-    add-architect), using the isolated key. Where the CLI is needed (a second architect, or creating
-    the decisions file as `afx decisions init` does), the branch's built CLI runs with `cwd` in a
-    fixture repo and the isolated port and `CODEV_AGENT_FARM_DIR`. It never runs from this
-    worktree or against :4100.
-- **Driver:** Python/Node Playwright, headless Chromium, with screenshots saved to the scratchpad
-  and attached to the PR.
+### Why not `afx spawn` (or any Tower-contacting CLI command)
+
+The CLI has no way to target a non-default Tower for spawning:
+
+- `spawn.ts:110` and `spawn-worktree.ts:738` call `getTowerClient()` with no port;
+- the CLI client falls back to `DEFAULT_TOWER_PORT`, a literal `4100` (`packages/sdk/src/constants.ts`);
+- there is no env override (`CODEV_TOWER_PORT` is read only by the lifecycle reporter), and
+  `afx spawn` has no `--port`.
+
+`getTowerClient(port)` does cache a non-default client, so an in-process driver could pre-seed it.
+That still leaks:
+
+- spawn shells out to `porch init` (`spawn-worktree.ts:490`);
+- porch's CLI dispatcher then posts `refreshOverview` through `new TowerClient()`, which has no port
+  and so goes to `:4100` (`commands/porch/index.ts:1505`, `init` is in `MUTATING_COMMANDS`);
+- and the `porch` it runs is whatever is first on `PATH`.
+
+The same default-port `getTowerClient()` / `new TowerClient()` is used by
+`workspace-add-architect.ts:51`, `start.ts:31` and `notifications.ts:82`. So **the harness runs no
+`afx` / `porch` CLI command that talks to Tower.** It uses only:
+
+- explicit HTTP calls to the isolated port;
+- the product's own in-process state writers;
+- one file-only CLI command.
+
+This needs no product change.
+
+### Isolated Tower
+
+Started directly, the way the isolation e2e test does (`bugfix-1515-tower-isolation.e2e.test.ts:87`):
+
+```
+node packages/codev/dist/agent-farm/servers/tower-server.js -p $PORT
+```
+
+It runs with this environment:
+
+- `CODEV_AGENT_FARM_DIR=<scratch>/af`: its own `global.db`, `local-key` (`core/src/auth.ts:6`) and
+  registry;
+- `SHELLPER_SOCKET_DIR=<scratch>/run`: the default is the owner's `~/.codev/run`
+  (`tower-server.ts:599`), so it must be overridden.
+
+It is not started with `afx tower start`, because `start.ts` checks through the default-port client.
+
+### Fixtures, and how each is created
+
+| What | How | Reaches the isolated Tower by |
+|---|---|---|
+| Workspace activation (starts `main`) | `POST http://127.0.0.1:$PORT/api/workspaces/<enc>/activate` (`tower-routes.ts:955`) with the isolated key | explicit port |
+| A second architect | `POST …:$PORT/api/workspaces/<enc>/architects` `{ name }` (`tower-routes.ts:791`), not `afx workspace add-architect` | explicit port |
+| A builder's worktree | `git worktree add` in the fixture repo | no Tower contact |
+| A builder's porch state (phase, a pending gate for the blocked state) | porch's in-process `createInitialState` / `writeState` (`commands/porch/state.ts:229,159`), not the porch CLI, whose dispatcher posts to `:4100` | no Tower contact |
+| A builder's `builders` row, with `spawned_by_architect` | the product's in-process `upsertBuilder` (`agent-farm/state.ts:193`), the call `spawn` itself makes, in a driver process whose `CODEV_AGENT_FARM_DIR` is the isolated dir (`db/index.ts` resolves `global.db` from it at import). No hand-written SQL | isolated `global.db` |
+| A builder's live terminal | `POST …:$PORT/api/terminals` `{ type: 'builder', roleId: 'builder-<id>', workspacePath, cwd, command }` with a plain shell command (`tower-routes.ts:1032-1093`, which registers `entry.builders`) | explicit port |
+| A decisions file | `node packages/codev/bin/afx.js decisions init`, with `cwd` in the fixture. `decisions.ts` imports only fs, path, config and the template, and the decisions e2e does the same (`decisions-tab.test.ts:390`) | no Tower contact |
+
+Each fixture's `.codev/config.json` sets `shell.architect` and `shell.builder` to a plain shell, so
+every session is a shell, never an agent.
+
+This yields N=0, N=1 and N>1 builders under `main` and under a second architect, across two
+workspaces, plus a blocked and a waiting builder. The null-attribution fold, which only a legacy row
+can produce, is unit-tested.
+
+### Isolated VS Code
+
+`code serve-web` runs on its own port, with `--server-data-dir`, `--user-data-dir` and
+`--extensions-dir` all under the scratchpad, and the branch's vsix installed there.
+
+- **Settings** in that profile:
+  - `codev.towerPort = $PORT`;
+  - `codev.autoStartTower = false`. Auto-start runs `afx tower start`, which would target `:4100`.
+- **Environment** of the serve-web process:
+  - `CODEV_TOWER_KEY=<isolated key>`. Without it the extension reads `~/.agent-farm/local-key`
+    (`sdk/src/node/local-key.ts:20,34`);
+  - `PATH` prefixed with a stub directory holding **recording stubs** for `afx`, `porch` and
+    `codev`. The extension shells out to these via `PATH` (`resolveSpawnable` in
+    `cli-process.ts`), for `afx spawn` (`commands/spawn.ts:46`), `porch approve`
+    (`commands/approve.ts:357`), `afx cleanup` (`commands/cleanup.ts:48`), Tower auto-start, and
+    preflight's `codev --version` (`preflight/preflight-core.ts:50`).
+  - Each stub appends its argv and cwd to a log and exits 0. `codev --version` prints the branch's
+    version, so preflight passes.
+- **Everything else the extension does** goes through `ConnectionManager`'s client, which follows
+  `codev.towerPort`: overview, fleet, terminals, dev, architects, decisions and activation.
+
+So in the harness, *Spawn Builder*, *Approve Gate* and *Cleanup* are verified as "the extension
+invoked the CLI with the right arguments and cwd", from the stub log. The CLI is not changed by this
+project.
+
+### Pre-flight (run before anything creates state; any failure stops the run)
+
+1. `$PORT` is set, numeric and **not 4100**, and nothing is listening on it before the start.
+2. `CODEV_AGENT_FARM_DIR` and `SHELLPER_SOCKET_DIR` are set, resolve under the session scratchpad,
+   and are not `~/.agent-farm` or `~/.codev/run`.
+3. The driver imports `AGENT_FARM_DIR` from the branch's built `@cluesmith/codev-core/constants`
+   and asserts that it equals the isolated dir. This proves the in-process `upsertBuilder` and
+   porch writes land there.
+4. After the start, the listener on `$PORT` (`lsof`) is the PID the harness spawned, and
+   `GET http://127.0.0.1:$PORT/api/version` answers with the isolated key.
+5. The serve-web profile's `settings.json` holds `codev.towerPort = $PORT` and
+   `codev.autoStartTower = false`, and in the serve-web environment `afx`, `porch` and `codev`
+   resolve to the stubs.
+6. Before any screenshot, the isolated Tower's `/api/overview` for each fixture returns the
+   expected builders, **with their expected `spawnedByArchitect` values**, and the expected
+   architects. If not, verification stops and the architect is told. There is no fallback to faked
+   data.
+
+### During and after
+
+- **Tripwire.** Throughout the run, the harness samples established TCP connections to `:4100`
+  (`lsof -nP -iTCP:4100 -sTCP:ESTABLISHED`). It fails the run if any belongs to its own process
+  tree: the driver, the isolated Tower and its shellpers, serve-web and its extension host. The
+  owner's `:4100` is never probed or requested.
+- **"Tower unreachable" scenario.** It stops the *harness's* Tower by the PID the harness started.
+  Auto-start is off and stubbed, so nothing restarts a Tower.
+- **Teardown.** It kills only:
+  - the isolated Tower PID;
+  - the shellper PIDs that the isolated Tower lists at `GET :$PORT/api/terminals`, whose sockets
+    are in the isolated socket dir;
+  - the serve-web PID.
+
+  Nothing is killed by name pattern. The scratch dirs are removed afterwards.
+- **Driver.** Python/Node Playwright drives headless Chromium. Screenshots go to the scratchpad and
+  are attached to the PR.
   - **Never `playwright install` on this machine.** It hangs at extraction and wedges the shared
     browser cache.
   - Use the Chromium already in the Playwright cache. If none is usable, install it by hand with
     `curl -L` + `unzip` + the `INSTALLATION_COMPLETE` marker, and ask first.
 
-The harness is one extra Tower process and one VS Code web server, with no builders. The architect
-is told before its first start. Anything that would touch port 4100, `~/.agent-farm` or the owner's
-`/ide/` is out of bounds.
+The harness is one extra Tower process and one VS Code web server, with no agents. The architect is
+told before its first start.
 
 ## Risks and Mitigation
 
@@ -946,10 +1033,10 @@ is told before its first start. Anything that would touch port 4100, `~/.agent-f
 | The layout primitive closes or discards an editor | Low | High | The Phase 8 spike before any arrange code, with the add/reuse-only rule from the spec if it fails; the dirty/untitled/modified scenario rendered |
 | Moving components changes the dashboard | Medium | Medium | Wrappers keep `lib/api.ts`; the moved tests are unchanged in intent; the dashboard integration tests stay; a rendered before/after comparison |
 | A source-exported TSX package does not type-check under one host's config | Low | Medium | `jsx: react-jsx` added to the webview tsconfig; if a host still cannot consume it, the package gains a `tsdown` build like `codev-artifact-canvas`. That is a build-wiring change, not scope, and it is named in the PR |
-| The harness accidentally touches the owner's Tower or IDE | Low | High | Non-default port, isolated `CODEV_AGENT_FARM_DIR` and VS Code data dirs, no `afx` against :4100; the architect is told before the first start |
+| The harness accidentally touches the owner's Tower or IDE | Medium (several CLI paths default to `:4100`) | High | No Tower-contacting CLI commands. Every state-creating step names its route to the isolated port (harness table). Extension shell-outs are recording stubs, and auto-start is off. `CODEV_TOWER_KEY` is set, as are isolated state, socket and VS Code dirs. A pre-flight refuses 4100 and checks the listener PID, and a `:4100` connection tripwire runs throughout. The architect is told before the first start |
 | CSS moved out of `index.css` misses a rule, so the dashboard looks different | Medium | Low | A selector inventory before the move, and the rendered dashboard comparison |
 | `prepublish-workspace-deps.test.ts` or the vsix packaging misses the new workspace dependency | Medium | Medium | Run it at Phase 6, and build the vsix in the harness from Phase 4 onward |
-| Fixture builders do not appear because Tower lists only builders with a live terminal | High if missed | Medium | Each fixture builder gets a real worktree plus a registered builder terminal, and `/api/overview` is asserted before any screenshot (harness section) |
+| Fixture builders do not appear, or appear without attribution | High if missed | Medium | Each fixture builder gets a real worktree, porch state, a `builders` row through the product's `upsertBuilder`, and a registered builder terminal. `/api/overview` is asserted, attribution included, before any screenshot |
 | Path containment behaves differently on Windows (case, separators, UNC, junctions) | Medium | High | `realpath` + `path.relative` (no prefix compare), `path.win32` table tests, and the on-demand Windows workflow linked in the PR |
 
 ## Documentation Updates
