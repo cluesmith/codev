@@ -20,8 +20,8 @@ These are required for Agent Farm to function.
 
 | Requirement | Value |
 |-------------|-------|
-| Minimum Version | 20.0.0 (native Windows: 22 or 24) |
-| Recommended | 22 |
+| Minimum Version | 22.0.0 |
+| Tested | 22 |
 | Purpose | Runtime for Agent Farm server |
 
 Codev's native dependencies (node-pty, better-sqlite3) install from prebuilt binaries where one
@@ -30,9 +30,9 @@ needs a C/C++ toolchain:
 
 - **Linux and WSL:** node-pty compiles from source, so install `build-essential` and `python3`
   before `npm install -g @cluesmith/codev`.
-- **Native Windows:** Node 22 and 24 (x64 and ARM64) are supported. On a Node version with no
-  Windows prebuild (Node 20, for example) the install stops and names the supported versions,
-  rather than starting a source build.
+- **Native Windows:** Node 22 (x64 and ARM64) is supported. On a Node version with no
+  Windows prebuild the install stops and names the supported version, rather than starting a
+  source build.
 
 **Installation:**
 
@@ -44,10 +44,10 @@ brew install node
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs build-essential python3
 
-# Windows: the Node.js 22 or 24 installer from https://nodejs.org
+# Windows: the Node.js 22 installer from https://nodejs.org
 
 # Verify
-node --version  # Should show v20.x or higher (v22.x or v24.x on native Windows)
+node --version  # Should show v22.x or newer
 ```
 
 ### git
@@ -173,7 +173,7 @@ codex --version
 
 | Dependency | Minimum Version | Required? |
 |------------|-----------------|-----------|
-| Node.js | 20.0.0 (native Windows: 22 or 24) | Yes |
+| Node.js | 22.0.0 | Yes |
 | git | 2.5.0 (native Windows: Git for Windows) | Yes |
 | jq | any | Native Windows only |
 | gh | latest | Yes |
@@ -202,8 +202,11 @@ xcode-select --install
 Most dependencies are available via apt:
 
 ```bash
+# Node.js 22 from NodeSource (the distribution's nodejs package is older than 22)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+
 # Core dependencies (build-essential and python3 build node-pty)
-sudo apt install nodejs npm git build-essential python3
+sudo apt install nodejs git build-essential python3
 
 # gh requires adding GitHub's apt repository (see above)
 ```
@@ -218,13 +221,13 @@ Codev runs directly on Windows 10 22H2 or Windows 11, x64 or ARM64, with no admi
 
 | Prerequisite | Notes |
 |--------------|-------|
-| Node.js 22 or 24 | Node 20 is not supported on native Windows: better-sqlite3 has no Windows prebuild for it |
+| Node.js 22 | The supported and tested version; Node 20 is not supported |
 | [Git for Windows](https://git-scm.com/download/win) | Provides `git` and Git Bash, the shell Codev uses for its scripts |
 | jq | `winget install jqlang.jq`; the forge scripts need it |
 | gh | `winget install GitHub.cli`, then `gh auth login` |
 
 ```powershell
-# After installing Node.js 22 or 24 from https://nodejs.org
+# After installing Node.js 22 from https://nodejs.org
 winget install Git.Git
 winget install jqlang.jq
 winget install GitHub.cli
@@ -314,7 +317,7 @@ On native Windows, npm's global bin directory is `npm config get prefix` itself 
 
 ### Install fails on native Windows with "supported Node versions"
 
-Your Node version has no prebuilt better-sqlite3 for Windows. Install Node 22 or 24 and run the
+Your Node version has no prebuilt better-sqlite3 for Windows. Install Node 22 and run the
 install again.
 
 ### Terminal connection issues

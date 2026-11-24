@@ -186,15 +186,11 @@ async function registerTerminal(
       type,
       roleId,
       // Register via the shellper (persistent) backend — the same path Tower
-      // uses for real builders/architects. The non-persistent fallback spawns
-      // node-pty directly via `await import('node-pty')`, which resolves the
-      // module's live named bindings to `undefined` inside Tower's deep ESM
-      // graph when run from the built `dist/` (a pre-existing Node ESM↔CJS
-      // interop quirk in `terminal/pty-session.ts`, unrelated to Spec 1313 —
-      // `terminal/shellper-main.ts` already works around it with createRequire).
-      // Shellper spawns in its own process, so it is immune. A shellper-backed
-      // session reports `command: ''` (see pty-manager.createSessionRaw), which
-      // still resolves to `no-profile` for the held-behavior assertion below.
+      // uses for real builders/architects. A shellper-backed session reports
+      // `command: ''` (see pty-manager.createSessionRaw), which still resolves
+      // to `no-profile` for the held-behavior assertion below. (The
+      // non-persistent path once failed here because `import('node-pty')`
+      // returned empty bindings; #1944 replaced it with terminal/node-pty-loader.ts.)
       persistent: true,
     }),
   });
