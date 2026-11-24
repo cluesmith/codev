@@ -23,6 +23,7 @@ import { isPortConflictError } from './db/errors.js';
 // helper (Bugfix #826 iter-6). Aliased to `canonicalize` for the local callsites.
 import { normalizeWorkspacePath as canonicalize, workspaceKey } from './utils/workspace-path.js';
 import { hostPaths } from '../lib/platform/host-paths.js';
+import type { RegisteredWorkspace } from './utils/workspace-address.js';
 
 /**
  * Derive a builder's owning workspace from its worktree path (Issue #1118).
@@ -510,12 +511,17 @@ export function getArchitect(workspacePath: string): ArchitectState | null {
  * eliminating the cross-workspace leak by construction: a workspace's
  * `launchInstance` only sees its own architect rows, regardless of which other
  * workspaces this Tower process is serving.
+ *
+ * Order: `main` first, then the others in registration order (`started_at`), as `loadState`
+ * and `getArchitect` have it. Callers read "the first registered" off this list, so it must
+ * not be name order (Issue #1633): sorted by id, an offline hold named the alphabetically
+ * first architect where a live send reached the first registered.
  */
 export function getArchitects(workspacePath: string): ArchitectState[] {
   const db = getDb();
   const ws = canonicalize(workspacePath);
   const rows = db
-    .prepare('SELECT * FROM architect WHERE workspace_path = ? ORDER BY id')
+    .prepare("SELECT * FROM architect WHERE workspace_path = ? ORDER BY (id != 'main'), started_at")
     .all(ws) as DbArchitect[];
   return rows.map(dbArchitectToArchitectState);
 }
@@ -572,6 +578,33 @@ export function lookupBuilderSpawningArchitect(
   }
   if (!row) return undefined;
   return row.spawned_by_architect;
+}
+
+/**
+ * Every workspace Tower has registered, running or not, with its explicit address name
+ * (Spec 1940). The rules that read these rows are in `utils/workspace-address.ts`.
+ *
+ * `db` lets a caller supply its own connection, as {@link lookupBuilderSpawningArchitect}
+ * does, so a read-only caller never opens global.db read-write.
+ */
+export function getRegisteredWorkspaces(db: Database.Database = getDb()): RegisteredWorkspace[] {
+  const rows = db.prepare('SELECT workspace_path, address_name FROM known_workspaces').all() as Array<{
+    workspace_path: string;
+    address_name: string | null;
+  }>;
+  return rows.map((row) => ({ workspacePath: row.workspace_path, explicitName: row.address_name }));
+}
+
+/**
+ * Store a workspace's explicit address name, or clear it with `null` (Spec 1940). The
+ * caller has already checked the name against the naming rules. Returns false when Tower
+ * has no row for the workspace: only a registered workspace can be named.
+ */
+export function setWorkspaceAddressName(workspacePath: string, name: string | null): boolean {
+  const result = getDb()
+    .prepare('UPDATE known_workspaces SET address_name = ? WHERE workspace_path = ?')
+    .run(name, workspaceKey(workspacePath));
+  return result.changes > 0;
 }
 
 // Re-export closeDb for cleanup

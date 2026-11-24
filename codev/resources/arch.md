@@ -339,7 +339,8 @@ A workspace can host more than one architect terminal. Each architect has a stab
 - Every architect terminal Tower spawns has `CODEV_ARCHITECT_NAME` injected into its env (see all three creation points above + Spec 786 Phase 2 which re-injects on shellper auto-restart).
 - `afx spawn` reads the variable and tags the new builder row with `spawned_by_architect = <name>`.
 - `afx send architect` from a builder uses the recorded name (via `tower-messages.ts:320-342`'s spawning-architect chain) to route back to the correct architect; falls back to `main` when the spawning architect is gone (Spec 786 OQ-A).
-- `afx send architect:<name>` is the explicit-target form; works from any sender.
+- `afx send architect:<name>` is the explicit-target form inside a workspace; works from any sender (a builder may name only its own spawning architect).
+- `afx send <workspace>:architect:<name>` names an architect in another workspace on the Tower (Spec 1940); see "Address Resolution" under Inter-Agent Messaging.
 
 **Lifecycle (Spec 786 Phase 3 / OQ-B)**:
 - **Add**: `afx workspace add-architect [--name <name>]`. Validator at `utils/architect-name.ts` enforces `[a-z][a-z0-9-]*` (max 64), rejects `main` as reserved (Spec 786). Auto-numbers via `autoNumberArchitectName` when `--name` is omitted (smallest unused `architect-<N>` integer ≥ 2).
@@ -813,15 +814,15 @@ A workspace can host more than one architect terminal. The data model:
 The routing chain when a builder runs `afx send architect "..."`:
 
 1. **CLI** — `commands/send.ts` populates the request body's `from` field with the builder's ID (detected from the worktree path).
-2. **handleSend** (`tower-routes.ts`) — receives the request, forwards `from` to the resolver via `resolveTarget(to, workspace, from)`. The third arg was added in Spec 755; older callers (`tower-cron.ts`, etc.) pass nothing and see unchanged behavior.
-3. **resolveTarget** (`tower-messages.ts`) — splits `architect:<name>` from `<agent>` via a special-case intercept (the `parseAddress` grammar can't distinguish `project:agent` cross-workspace addresses from `architect:<name>` per-architect addresses, so the resolver does it). For plain `architect`, calls `resolveAgentInWorkspace`.
+2. **handleSend** (`tower-routes.ts`) — parses `to` once with the shared parser (`parseAddress`, `@cluesmith/codev-sdk/address`, through `parseTarget`) into a structured `AgentAddress`, and passes it with the sender (`from` id and its workspace) to the resolvers. A string that does not parse is refused with the parser's reason; nothing downstream sees address text.
+3. **resolveTarget** (`tower-messages.ts`) — finds the workspace the address names (`locateWorkspace`: by address name, else the sender's own), then the agent in it: a named architect by name after the builder rule, bare `architect` via `resolveAgentInWorkspace`, anything else as a builder id (exact, then tail) and then a shell id. `resolveAgentInRegistry` takes the same address and applies the same workspace lookup and the same builder rule against global.db, which is what lets mail for an agent with no live terminal be held.
 4. **resolveAgentInWorkspace** — applies four rules:
    - Single-architect fast path (`size === 1 && has('main')`) returns the `main` terminal without touching `state.db`. Guarantees latency parity for solo-architect users.
    - Builder sender with matching `spawnedByArchitect` → that architect.
    - Builder sender with `spawnedByArchitect` no longer registered → `main` fallback; if `main` is absent, verbatim "architect-gone" error.
    - Builder sender with NULL `spawnedByArchitect` (legacy row) → `main` fallback; if `main` is absent, verbatim "legacy-builder" error.
    - Non-builder sender → `main` (or first registered).
-5. **architect:<name>** — same builder-context check; if the sender's `spawnedByArchitect` doesn't match `<name>`, rejected with the spoofing error.
+5. **architect:<name>** — same builder-context check; if the sender's `spawnedByArchitect` doesn't match `<name>`, rejected with the spoofing error. A named architect in ANOTHER workspace is never the builder's own, so it is refused (`REFUSED`) with that workspace's front door in the message (`refusalToNameArchitect`).
 
 **Builder-context detection** is via SQLite row presence: `lookupBuilderSpawningArchitect(builderId, workspacePath)` returns `string | null | undefined` distinguishing "explicit name" / "legacy row" / "not a builder." Tower side opens the workspace's `state.db` readonly (mirrors the `servers/overview.ts` pattern); CLI side falls back to the singleton `getDb()`.
 
@@ -2010,6 +2011,37 @@ Terminal rows (delivered/superseded/dismissed) are pruned after `mailbox.retenti
 #### Address Resolution
 
 `afx send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting. With no live PTY, resolution falls back to the global.db agent registry so the message holds (`no-live-pty`) instead of 404ing.
+
+**One structured address, one parser (Spec 1940, stage 1).** An address is text only at the edges. `parseAddress` in `packages/sdk/src/address.ts` (exported as `@cluesmith/codev-sdk/address`) is the only parser: the CLI, Tower and the VS Code extension all call it, and a shared table of addresses (`address-conformance.test.ts` in `packages/codev` and in `apps/vscode`, beside the SDK's own tests) holds them to one result. It returns an `AgentAddress` (`codev-types`, `messaging.ts`): where the agent is (`owner?`, `tower?`, `workspace?`) and which agent (`{ kind: 'architect', name? }` or `{ kind: 'id', name }`). `formatAddress` is its inverse. The local forms are:
+
+| Text | Meaning |
+|---|---|
+| `architect` | From a builder in its own workspace: its spawning architect. Otherwise the front door: `main`, else the first registered |
+| `architect:<name>` | A named architect in the sender's workspace |
+| `<id>` | A builder (exact id, then a unique tail) or a shell, in the sender's workspace |
+| `<workspace>:architect` | The front door of another workspace, whoever sends |
+| `<workspace>:architect:<name>` | A named architect in another workspace |
+| `<workspace>:<id>` | A builder or shell in another workspace |
+
+The grammar already has room for a Tower (`afx://<tower>/…`, `afx://<owner>@<tower>/…`), and the type carries `tower` and `owner`, so stages 2 and 3 need no second migration. Stage 1 refuses any address that names a Tower (`CROSS_TOWER_UNAVAILABLE`, in `locateWorkspace`): a Tower delivers only to itself and does not yet know its own name. `architect`, `arch` and `builder` are reserved and cannot be a workspace's explicit name; a directory called `arch` or `builder` keeps resolving by its two-part local forms as before.
+
+**The builder rule.** Permission and affinity are separate questions. *Permission* (is the sender a builder, and which architect may it name) is asked of the sender's own workspace for every target: a builder may name only its spawning architect, with or without its workspace written in front, and reaches any other workspace through that workspace's front door. *Affinity* (bare `architect` goes to the architect that spawned the sender) applies only inside the sender's workspace. Architects and humans may name any architect on the Tower. `refusalToAddress` exposes the permission half alone, and the reply footer and the address book both ask it, so neither can print an address the resolver would refuse.
+
+**Workspace address names** (`utils/workspace-address.ts`, the only place the rules live). The name an address uses for a workspace is its explicit name (`known_workspaces.address_name`, migration v20, set with `afx workspace name`) or else its directory basename, compared lower-cased. Two running workspaces that share a basename have no address name until one is given an explicit one: an address using it fails `AMBIGUOUS`, listing both. The table is read only when an address names a workspace, so a same-workspace send costs no query. `printableAddressName` decides what may ever be PRINTED as an address (a frame, the listing, `afx whoami`): a name outside the component rule (`[a-z0-9][a-z0-9._-]*`) still resolves as before but is never printed.
+
+**Cross-workspace frames.** When the sender is an agent in another workspace, `formatCrossWorkspaceMessage` (`utils/message-format.ts`) names it by full address and puts the reply on the footer line, keeping the frame at three lines:
+
+```
+### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###
+hello
+###############################  (reply: afx send codev:architect:review "…")
+```
+
+`crossWorkspaceOrigin` (`tower-messages.ts`) chooses the reply: the sender's own address when the recipient may use it; for a builder written to by a named architect, that workspace's front door, and only when the front door resolves to that architect now; otherwise `reply through your architect`; and `no reply address` when the sender's workspace has no printable name. The frame is composed when the message is stored, so held mail carries the sender's name as it was then. A same-workspace send never enters this code: its frame is byte-identical to before (snapshot-tested).
+
+**The address book.** `GET /api/address-book?workspace=<path>&from=<id>` (`servers/tower-address-book.ts`) lists every registered workspace and, for the running ones, their agents as addresses, for the caller. `sendable` is not a second copy of the rules: each address is written as text, parsed, and resolved as the caller through the real resolvers, and is true only when that reaches the agent on that line. That costs about one small query per listed agent, and is the price of the listing never disagreeing with a send; do not make it faster by copying the permission rules into the listing. `afx workspace list` prints it. `afx whoami` derives the caller's own address from the same naming module on its read-only global.db handle, counting a workspace as running when it has a `terminal_sessions` row (a stale row after a crash therefore counts a stopped workspace as running).
+
+**A CLI newer than the running Tower.** Right after an upgrade the Tower already running is the old one. Its catch-all 404 is plain text with no error code, which is how the SDK tells "this Tower has no such route" (`unknownRoute`) from a route's own 404; `afx workspace list` and `afx workspace name` then say the Tower is older and how to restart it. `afx whoami` checks for the `address_name` column and says the database has not been migrated by a Tower of this version. An older Tower answers a send too, but with its own parser: it reads `<workspace>:architect:<name>` as a builder called `architect:<name>` and says it was not found. So when a send of that form comes back `NOT_FOUND`, and only then, `afx send` asks the address-book route: no such route means the Tower is older, and an answer means the not-found is genuine (`failedForAnOlderTower`, `commands/send.ts`).
 
 #### Sender attribution (message headers)
 

@@ -19,6 +19,7 @@ vi.mock('../servers/tower-terminals.js', () => ({
 }));
 
 import {
+  parseTarget,
   resolveTarget,
   isResolveError,
   addSubscriber,
@@ -27,6 +28,17 @@ import {
   getSubscriberCount,
 } from '../servers/tower-messages.js';
 import type { MessageFrame } from '../servers/tower-messages.js';
+
+/**
+ * Resolve address text the way the send route does (Spec 1940): read it once with the
+ * shared parser, then resolve the structured address for a sender. `workspace` is the
+ * sender's workspace, which is also where an address that names none is read.
+ */
+function resolve(target: string, workspace?: string, sender?: string) {
+  const address = parseTarget(target);
+  if (isResolveError(address)) return address;
+  return resolveTarget(address, { id: sender, workspace });
+}
 
 // ============================================================================
 // Helpers
@@ -65,7 +77,7 @@ describe('resolveTarget', () => {
       const ws = makeWorkspaceTerminals({ architect: 'term-arch-001' });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('architect', '/home/user/project');
+      const result = resolve('architect', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       expect(result).toEqual({
         terminalId: 'term-arch-001',
@@ -78,7 +90,7 @@ describe('resolveTarget', () => {
       const ws = makeWorkspaceTerminals({ architect: 'term-arch-001' });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('arch', '/home/user/project');
+      const result = resolve('arch', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       expect(result).toEqual({
         terminalId: 'term-arch-001',
@@ -91,7 +103,7 @@ describe('resolveTarget', () => {
       const ws = makeWorkspaceTerminals();
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('architect', '/home/user/project');
+      const result = resolve('architect', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NOT_FOUND');
@@ -106,7 +118,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('builder-spir-109', '/home/user/project');
+      const result = resolve('builder-spir-109', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       expect(result).toEqual({
         terminalId: 'term-b109',
@@ -121,7 +133,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('BUILDER-SPIR-109', '/home/user/project');
+      const result = resolve('BUILDER-SPIR-109', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       if (!isResolveError(result)) {
         expect(result.terminalId).toBe('term-b109');
@@ -136,7 +148,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('109', '/home/user/project');
+      const result = resolve('109', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       if (!isResolveError(result)) {
         expect(result.terminalId).toBe('term-b109');
@@ -150,7 +162,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('0109', '/home/user/project');
+      const result = resolve('0109', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       if (!isResolveError(result)) {
         expect(result.terminalId).toBe('term-b109');
@@ -163,7 +175,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('bugfix-42', '/home/user/project');
+      const result = resolve('bugfix-42', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       if (!isResolveError(result)) {
         expect(result.terminalId).toBe('term-bf42');
@@ -179,7 +191,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('42', '/home/user/project');
+      const result = resolve('42', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('AMBIGUOUS');
@@ -196,7 +208,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('shell-1', '/home/user/project');
+      const result = resolve('shell-1', '/home/user/project');
       expect(isResolveError(result)).toBe(false);
       if (!isResolveError(result)) {
         expect(result.terminalId).toBe('term-sh1');
@@ -212,7 +224,7 @@ describe('resolveTarget', () => {
         new Map([['/home/user/other-project', ws]]),
       );
 
-      const result = resolveTarget('other-project:architect');
+      const result = resolve('other-project:architect');
       expect(isResolveError(result)).toBe(false);
       if (!isResolveError(result)) {
         expect(result.terminalId).toBe('term-arch-ext');
@@ -223,7 +235,7 @@ describe('resolveTarget', () => {
     it('returns NOT_FOUND for unknown project', () => {
       mockGetWorkspaceTerminals.mockReturnValue(new Map());
 
-      const result = resolveTarget('nonexistent:architect');
+      const result = resolve('nonexistent:architect');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NOT_FOUND');
@@ -241,7 +253,7 @@ describe('resolveTarget', () => {
         ]),
       );
 
-      const result = resolveTarget('project:architect');
+      const result = resolve('project:architect');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('AMBIGUOUS');
@@ -251,7 +263,7 @@ describe('resolveTarget', () => {
 
   describe('no context', () => {
     it('returns NO_CONTEXT when no fallback workspace and no project prefix', () => {
-      const result = resolveTarget('architect');
+      const result = resolve('architect');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NO_CONTEXT');
@@ -259,7 +271,7 @@ describe('resolveTarget', () => {
     });
 
     it('returns NO_CONTEXT when fallback workspace is undefined', () => {
-      const result = resolveTarget('builder-spir-109', undefined);
+      const result = resolve('builder-spir-109', undefined);
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NO_CONTEXT');
@@ -274,7 +286,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('unknown-agent', '/home/user/project');
+      const result = resolve('unknown-agent', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NOT_FOUND');
@@ -284,7 +296,7 @@ describe('resolveTarget', () => {
     it('returns NOT_FOUND for workspace with no terminals registered', () => {
       mockGetWorkspaceTerminals.mockReturnValue(new Map());
 
-      const result = resolveTarget('architect', '/home/user/missing');
+      const result = resolve('architect', '/home/user/missing');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NOT_FOUND');
@@ -293,28 +305,28 @@ describe('resolveTarget', () => {
   });
 
   describe('malformed addresses', () => {
-    it('rejects empty agent after project: as NO_CONTEXT (malformed address)', () => {
-      // parseAddress('project:') returns { project: 'project', agent: '' }
-      // Empty agent is caught early as a malformed address → NO_CONTEXT → 400 INVALID_PARAMS
+    // Spec 1940: text that is not an address has its own code. It was NO_CONTEXT, which
+    // also meant "no workspace to read this in"; the status is 400 either way.
+    it('rejects empty agent after project: as MALFORMED_ADDRESS', () => {
       const ws = makeWorkspaceTerminals({ architect: 'term-1' });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('project:', '/home/user/project');
+      const result = resolve('project:', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
-        expect(result.code).toBe('NO_CONTEXT');
+        expect(result.code).toBe('MALFORMED_ADDRESS');
         expect(result.message).toContain('empty');
       }
     });
 
-    it('rejects whitespace-only target as NO_CONTEXT (malformed address)', () => {
+    it('rejects whitespace-only target as MALFORMED_ADDRESS', () => {
       const ws = makeWorkspaceTerminals();
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget(' ', '/home/user/project');
+      const result = resolve(' ', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
-        expect(result.code).toBe('NO_CONTEXT');
+        expect(result.code).toBe('MALFORMED_ADDRESS');
       }
     });
   });
@@ -322,7 +334,7 @@ describe('resolveTarget', () => {
   describe('error code contract', () => {
     it('NO_CONTEXT errors map to 400 status (INVALID_PARAMS in handler)', () => {
       // Verify the error code is NO_CONTEXT at the resolver level
-      const result = resolveTarget('architect');
+      const result = resolve('architect');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NO_CONTEXT');
@@ -339,7 +351,7 @@ describe('resolveTarget', () => {
       });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      const result = resolveTarget('99', '/home/user/project');
+      const result = resolve('99', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('AMBIGUOUS');
@@ -352,7 +364,7 @@ describe('resolveTarget', () => {
       const ws = makeWorkspaceTerminals();
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/myproject', ws]]));
 
-      const result = resolveTarget('nonexistent', '/home/user/myproject');
+      const result = resolve('nonexistent', '/home/user/myproject');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
         expect(result.code).toBe('NOT_FOUND');

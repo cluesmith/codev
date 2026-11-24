@@ -16,6 +16,13 @@
  * The identity helpers are imported from ./send.js rather than relocated:
  * they are already exported and tested there, and whoami is only their second
  * consumer (extraction deferred until a third appears).
+ *
+ * Spec 1940: it also prints the caller's own ADDRESS, in the form another workspace on
+ * this Tower would type (`codev:architect:review`, `codev:builder-spir-7`). The
+ * workspace's name comes from the same naming module Tower resolves addresses with
+ * (`utils/workspace-address.ts`), fed from global.db on the read-only handle, so whoami
+ * still does not need Tower. The address is informational, as `workspace` is: when it
+ * cannot be given the line says why, and identity and exit code are unaffected.
  */
 
 import { basename } from 'node:path';
@@ -23,9 +30,13 @@ import Database from 'better-sqlite3';
 import { openDatabase } from '../../lib/sqlite.js';
 import { rethrowIfNativeLoadFailure } from '../../lib/native-deps.js';
 import { detectCurrentBuilderId, detectWorkspaceRoot, BuilderIdResolutionError } from './send.js';
-import { lookupBuilderSpawningArchitect } from '../state.js';
+import { tryFormatAddress } from '@cluesmith/codev-sdk/address';
+import type { AgentAddress } from '@cluesmith/codev-types';
+import { getRegisteredWorkspaces, lookupBuilderSpawningArchitect } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { printableAddressName } from '../utils/workspace-address.js';
+import { TOWER_RESTART_COMMAND } from '../utils/older-tower.js';
 
 export interface WhoamiOptions {
   json?: boolean;
@@ -38,9 +49,19 @@ export interface WhoamiOptions {
  * but no matching `architect` table row exists — surfaced as a stderr
  * warning, never a failure (rows are legitimately absent after crashes).
  */
-export type WhoamiIdentity =
+export type WhoamiIdentity = (
   | { type: 'builder'; workspace: string; name: string; architect?: string }
-  | { type: 'architect'; workspace: string; name: string; rowMissing?: boolean };
+  | { type: 'architect'; workspace: string; name: string; rowMissing?: boolean }
+) &
+  WhoamiAddress;
+
+/**
+ * The caller's own address as another workspace on this Tower types it (Spec 1940), or
+ * why there is none to give: exactly one of the two is set.
+ */
+export type WhoamiAddress =
+  | { address: string; addressUnavailable?: undefined }
+  | { address?: undefined; addressUnavailable: string };
 
 /** Thrown when no identity signal resolves. Message is the user-facing text. */
 export class WhoamiError extends Error {
@@ -88,6 +109,68 @@ function workspaceDisplayName(workspaceRoot: string | null, db: Database.Databas
 }
 
 /**
+ * The workspaces that have a terminal, as global.db records them: Tower writes a
+ * `terminal_sessions` row when it starts a terminal and deletes a workspace's rows when
+ * the workspace stops. This is whoami's stand-in for Tower's own list of running
+ * workspaces, which only Tower holds; the caller's own workspace is counted as running,
+ * since the caller is in it.
+ */
+function workspacesWithTerminals(db: Database.Database, ownWorkspace: string): string[] {
+  const rows = db.prepare('SELECT DISTINCT workspace_path FROM terminal_sessions').all() as Array<{
+    workspace_path: string;
+  }>;
+  return [...rows.map((row) => row.workspace_path), ownWorkspace];
+}
+
+/**
+ * Whether this global.db holds workspace address names: the `address_name` column that
+ * migration v20 adds. Only Tower migrates the database, so one that lacks it has not been
+ * opened by a Tower of this version, whether or not an older Tower is running on it now.
+ */
+function holdsWorkspaceNames(db: Database.Database): boolean {
+  const columns = db.prepare('PRAGMA table_info(known_workspaces)').all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === 'address_name');
+}
+
+/**
+ * The address of `agent` in the workspace at `workspaceRoot`, or why it has none. The
+ * workspace's name is the one a frame or `afx workspace list` would print for it
+ * ({@link printableAddressName}); a workspace with no usable name has no address, and the
+ * reason carries the remedy.
+ */
+function ownAddress(agent: AgentAddress, workspaceRoot: string | null, db: Database.Database | null): WhoamiAddress {
+  if (workspaceRoot === null) {
+    return { addressUnavailable: 'the current directory is not inside a workspace' };
+  }
+  if (db === null) {
+    return { addressUnavailable: 'global.db could not be read, so the name of this workspace is not known' };
+  }
+  // The spelling the registry stores, as the lookups above use it.
+  const root = normalizeWorkspacePath(workspaceRoot);
+  let named: ReturnType<typeof printableAddressName>;
+  try {
+    if (!holdsWorkspaceNames(db)) {
+      return {
+        addressUnavailable:
+          'global.db has not been migrated by a Tower of this version, so it holds no workspace names; ' +
+          `restarting Tower migrates it: ${TOWER_RESTART_COMMAND}`,
+      };
+    }
+    named = printableAddressName(root, getRegisteredWorkspaces(db), workspacesWithTerminals(db, root));
+  } catch (err) {
+    // Any other failure is reported as itself: advice for a cause it is not would mislead.
+    const cause = err instanceof Error ? err.message : String(err);
+    return { addressUnavailable: `the name of this workspace could not be read from global.db: ${cause}` };
+  }
+  if (named.name === null) return { addressUnavailable: `this workspace has no address name: ${named.reason}` };
+  const formatted = tryFormatAddress({ ...agent, workspace: named.name });
+  if (!formatted.ok) {
+    return { addressUnavailable: `'${formatted.text}' does not read back as this agent's address` };
+  }
+  return { address: formatted.text };
+}
+
+/**
  * Resolve the current terminal's identity per the spec precedence.
  *
  * Throws `BuilderIdResolutionError` when cwd IS a builder worktree whose
@@ -107,6 +190,7 @@ export function resolveIdentity(env: NodeJS.ProcessEnv = process.env): WhoamiIde
         type: 'builder',
         workspace: workspaceDisplayName(workspaceRoot, db),
         name: builderId,
+        ...ownAddress({ kind: 'id', name: builderId }, workspaceRoot, db),
       };
       if (db) {
         try {
@@ -129,6 +213,7 @@ export function resolveIdentity(env: NodeJS.ProcessEnv = process.env): WhoamiIde
         type: 'architect',
         workspace: workspaceDisplayName(workspaceRoot, db),
         name: architectName,
+        ...ownAddress({ kind: 'architect', name: architectName }, workspaceRoot, db),
       };
       // Best-effort cross-check against the architect table (diagnostics
       // only): a missing row is a warning, never a failure — rows are
@@ -165,10 +250,18 @@ export function formatIdentity(identity: WhoamiIdentity): string {
   if (identity.type === 'builder' && identity.architect) {
     lines.push(`architect: ${identity.architect}`);
   }
+  // Added after the lines that were there before (Spec 1940): those keep their order.
+  lines.push(
+    identity.address !== undefined ? `address: ${identity.address}` : `address: none (${identity.addressUnavailable})`,
+  );
   return lines.join('\n');
 }
 
-/** Format an identity as the JSON payload (`architect` omitted when unknown). */
+/**
+ * Format an identity as the JSON payload (`architect` omitted when unknown). `address` is
+ * the caller's own address; when there is none it is absent and `addressUnavailable` says
+ * why.
+ */
 export function identityToJson(identity: WhoamiIdentity): Record<string, string> {
   const payload: Record<string, string> = {
     workspace: identity.workspace,
@@ -178,6 +271,8 @@ export function identityToJson(identity: WhoamiIdentity): Record<string, string>
   if (identity.type === 'builder' && identity.architect) {
     payload.architect = identity.architect;
   }
+  if (identity.address !== undefined) payload.address = identity.address;
+  else payload.addressUnavailable = identity.addressUnavailable;
   return payload;
 }
 

@@ -747,6 +747,92 @@ export type DecisionsRuleResponse =
   | { ok: true; document: DecisionsDocument }
   | { ok: false; code: DecisionsRefusalCode; message: string };
 
+// --- Workspace address name (PUT /api/workspaces/:encodedPath/address-name) ---
+
+/**
+ * Body of `PUT /api/workspaces/:encodedPath/address-name` (Spec 1940): the explicit name
+ * other workspaces address this one by. `null` clears it, and the workspace is addressed
+ * by its directory basename again.
+ */
+export interface SetWorkspaceAddressNameRequest {
+  name: string | null;
+}
+
+/**
+ * The 200 response: what the workspace is addressed by now. A refusal is the usual Tower
+ * error body, `{ error, message }`, with `error` one of `INVALID_NAME` or `RESERVED_NAME`
+ * (400), `NAME_TAKEN` (409), or `NOT_FOUND` (404, a workspace Tower has not registered).
+ */
+export interface SetWorkspaceAddressNameResponse {
+  /** The explicit name now stored, lower-cased; `null` after a clear. */
+  explicitName: string | null;
+  /**
+   * The name that reaches this workspace now: the explicit name, else its basename.
+   * `null` when it has none, which can only follow a clear (its basename is another
+   * workspace's name, or is shared with another running workspace).
+   */
+  addressName: string | null;
+  /** Why it has no address name. Present exactly when `addressName` is `null`. */
+  unaddressableReason?: string;
+}
+
+// --- Address book (GET /api/address-book) ---
+
+/**
+ * One agent in the address book (Spec 1940, Decision 6): an architect, a builder or a
+ * shell, with the address the caller would type to reach it.
+ */
+export interface AddressBookAgent {
+  kind: 'architect' | 'builder' | 'shell';
+  /** An architect's name, or a builder's or a shell's id. */
+  name: string;
+  /**
+   * The address of this agent as the caller writes it: `<workspace>:architect:<name>` or
+   * `<workspace>:<id>`, and the form with no workspace for an agent in the caller's own
+   * workspace when that workspace has no usable name. `null` when there is no address to
+   * give: the workspace has no usable name and is not the caller's, or the agent's own
+   * name cannot be written in an address.
+   */
+  address: string | null;
+  /** Does it have a live terminal now? Mail to one that does not is held for it. */
+  live: boolean;
+  /**
+   * Does `afx send <address>`, run by this caller now, reach this agent? Tower answers by
+   * resolving the address as the caller, the way the send route does. Always `false` when
+   * `address` is `null`.
+   */
+  sendable: boolean;
+  /**
+   * When the caller is not allowed to name this agent (a builder and an architect that did
+   * not spawn it): the address that is the way in. Absent when the caller may name it, and
+   * when that address reaches nobody either.
+   */
+  reachThrough?: string;
+}
+
+/** One workspace in the address book: every workspace Tower has registered is listed. */
+export interface AddressBookWorkspace {
+  path: string;
+  /** Whether it is running. A workspace that is not has no agents listed and takes no mail. */
+  running: boolean;
+  /** The name other workspaces write before the colon; `null` when it has none it can be written by. */
+  addressName: string | null;
+  /** Why it has no address name, with the remedy. Present exactly when `addressName` is `null`. */
+  unaddressableReason?: string;
+  /** Architects, then builders, then shells. Empty for a workspace that is not running. */
+  agents: AddressBookAgent[];
+}
+
+/**
+ * The 200 response of `GET /api/address-book?workspace=<path>&from=<id>`: every workspace
+ * on this Tower and its agents, as addresses for the caller the query names. `workspace`
+ * and `from` are the caller's, as `POST /api/send` takes them; both are optional, and a
+ * caller that gives neither is treated as a sender outside every workspace.
+ */
+export interface AddressBookResponse {
+  workspaces: AddressBookWorkspace[];
+}
+
 // --- Tunnel (GET /api/tunnel/status) ---
 
 export interface TunnelStatus {

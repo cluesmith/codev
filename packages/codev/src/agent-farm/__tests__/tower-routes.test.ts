@@ -14,17 +14,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
-import { handleRequest } from '../servers/tower-routes.js';
+import { handleRequest, deliverCronMessage } from '../servers/tower-routes.js';
 import { resetHostPlatformForTests } from '../../lib/platform.js';
 import { setGitBashForTests } from '../../lib/platform/windows/git-bash-launch.js';
 import { getWorkspaceTerminals } from '../servers/tower-terminals.js';
 import type { DbMailbox } from '../db/types.js';
-import { setArchitectByName } from '../state.js';
+import { setArchitectByName, upsertBuilder } from '../state.js';
 import { DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
+import type { AddressBookResponse } from '@cluesmith/codev-types';
 import type { RouteContext } from '../servers/tower-routes.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as mailbox from '../db/mailbox.js';
 import { MAX_MESSAGE_BYTES, MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
+import { workspaceKey } from '../utils/workspace-path.js';
 import { SessionScreen } from '../../terminal/session-screen.js';
 // Issue #1473: a REAL PtySession for the raw-write route test. The claim under test is that the
 // route's bytes reach the gate's input signal, and a session double cannot make that claim —
@@ -131,7 +133,16 @@ vi.mock('../servers/tower-tunnel.js', () => ({
   }),
 }));
 
-vi.mock('../servers/tower-messages.js', () => ({
+vi.mock('../servers/tower-messages.js', async (importOriginal) => ({
+  // Spec 1940: the route reads the address text itself, once, with the real parser, and
+  // hands the resolvers the structured address. Only the resolvers are faked.
+  parseTarget: (await importOriginal<typeof import('../servers/tower-messages.js')>()).parseTarget,
+  // The real one: it decides whether a frame is a cross-workspace one, from the registry
+  // and the terminal map, and never calls the faked resolvers.
+  crossWorkspaceOrigin: (await importOriginal<typeof import('../servers/tower-messages.js')>()).crossWorkspaceOrigin,
+  // The address book asks the permission rule on its own; it is the real one, as the
+  // resolvers behind the route are wherever the address book is tested.
+  refusalToAddress: (await importOriginal<typeof import('../servers/tower-messages.js')>()).refusalToAddress,
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
   resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
@@ -1207,6 +1218,14 @@ describe('tower-routes', () => {
             status: 'delivered',
           });
           expect(rows[0].formatted_message).toMatch(/^### \[USER via Decisions tab → main \| .+\] ###\nRULED main-11: accept\n/);
+          // Spec 1940: the notice is Tower's own, to the `main` of the same workspace. It is the
+          // one frame call site with no sending agent, and its frame is the whole of today's.
+          expect(rows[0].formatted_message.replace(/\| \d{4}-\d\d-\d\dT[\d:.]+Z\]/, '| <time>]')).toBe(
+            '### [USER via Decisions tab → main | <time>] ###\n' +
+              'RULED main-11: accept\nship it\nno new limits\n' +
+              '###############################',
+          );
+          expect(rows[0].from_workspace).toBe(workspace);
           expect(writes.main.mock.calls.map(([data]) => data).join('')).toContain('RULED main-11: accept');
           expect(ctx.log).toHaveBeenCalledWith('INFO', expect.stringMatching(/^Decisions notice delivered → main @ /));
         });
@@ -2024,7 +2043,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockResolveTarget).toHaveBeenCalledWith('architect', '/tmp/ws', 'spir-100');
+      expect(mockResolveTarget).toHaveBeenCalledWith({ kind: 'architect' }, { id: 'spir-100', workspace: '/tmp/ws' });
     });
 
     it('forwards undefined `from` when sender is not supplied (non-builder send)', async () => {
@@ -2042,7 +2061,7 @@ describe('tower-routes', () => {
       const { res } = makeRes();
       await handleRequest(req, res, makeCtx());
 
-      expect(mockResolveTarget).toHaveBeenCalledWith('architect', '/tmp/ws', undefined);
+      expect(mockResolveTarget).toHaveBeenCalledWith({ kind: 'architect' }, { id: undefined, workspace: '/tmp/ws' });
     });
 
     it('returns 200 delivered:true on a successful send to a clean prompt (Spec 1313)', async () => {
@@ -2207,7 +2226,7 @@ describe('tower-routes', () => {
 
       it('passes the architect sender to resolveTarget unchanged (affinity routing still sees it)', async () => {
         await heldRowFrom('architect:main');
-        expect(mockResolveTarget).toHaveBeenCalledWith('spir-9', '/tmp/ws', 'architect:main');
+        expect(mockResolveTarget).toHaveBeenCalledWith({ kind: 'id', name: 'spir-9' }, { id: 'architect:main', workspace: '/tmp/ws' });
       });
 
       // Maintainer review (PR #1486): `from` was the one unguarded field on this route.
@@ -2422,6 +2441,1101 @@ describe('tower-routes', () => {
     });
 
     // Issue #1567: the interrupt bypasses the GATE, not the per-harness write strategy.
+    // Spec 1940 phase 2. Every other test in this file fakes the two resolvers; these run
+    // the REAL ones behind the route, against the in-memory registry and a fake terminal
+    // map, so what is asserted is what `afx send` gets back: the address is read once, the
+    // recipient is found or held or refused, and each refusal has its own status.
+    describe('addresses across workspaces (Spec 1940), with the real resolvers', () => {
+      let root: string;
+      let CODEV: string;
+      let CLOUD: string;
+      const BUILDER = 'builder-spir-100';
+      const allRows = () => sendDbHolder.db.prepare('SELECT * FROM mailbox').all() as DbMailbox[];
+
+      /**
+       * Give these agents live terminals at a clean prompt. Returns each one's write spy,
+       * keyed `<workspace basename>/<agent>`.
+       */
+      function liveAgents(agents: Record<string, { architects?: string[]; builders?: string[]; shells?: string[] }>) {
+        const writes: Record<string, ReturnType<typeof vi.fn>> = {};
+        const terminals = new Map<string, ReturnType<typeof vi.fn>>();
+        const map = new Map(Object.entries(agents).map(([ws, { architects = [], builders = [], shells = [] }]) => {
+          const ids = (names: string[]) => new Map(names.map((name) => {
+            const key = `${path.basename(ws)}/${name}`;
+            writes[key] = vi.fn();
+            terminals.set(`term-${key}`, writes[key]);
+            return [name, `term-${key}`] as const;
+          }));
+          return [ws, { architects: ids(architects), builders: ids(builders), shells: ids(shells), fileTabs: new Map() }] as const;
+        }));
+        vi.mocked(getWorkspaceTerminals).mockImplementation(() => map as any);
+        mockGetTerminalManager.mockReturnValue({
+          listSessions: mockListSessions.mockReturnValue([]),
+          getSession: (id: string) => (terminals.has(id) ? gateSession(terminals.get(id)!, '❯ ', true, id) : null),
+        });
+        return writes;
+      }
+
+      /** POST /api/send as `from`, whose workspace is codev unless said otherwise. */
+      async function send(to: string, from: string | undefined, extra: Record<string, unknown> = {}) {
+        mockParseJsonBody.mockResolvedValue({ to, message: 'hello', from, workspace: CODEV, fromWorkspace: CODEV, ...extra });
+        const { res, statusCode, body } = makeRes();
+        await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+        return { status: statusCode(), body: JSON.parse(body()) };
+      }
+
+      beforeEach(async () => {
+        const actual = await vi.importActual<typeof import('../servers/tower-messages.js')>('../servers/tower-messages.js');
+        mockResolveTarget.mockImplementation(actual.resolveTarget as (...args: unknown[]) => unknown);
+        mockResolveAgentInRegistry.mockImplementation(actual.resolveAgentInRegistry as (...args: unknown[]) => unknown);
+
+        // realpath: on macOS the temp dir sits behind a symlink, and the registry keys rows
+        // by the path as it is given. workspaceKey: on Windows the route keys a workspace by
+        // its canonical spelling, and the temp dir is handed out in its short one
+        // (`RUNNER~1` for `runneradmin`), so rows seeded under the
+        // short spelling would belong to a workspace the route never looks up.
+        root = workspaceKey(fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'spec1940-routes-')));
+        CODEV = path.join(root, 'codev');
+        CLOUD = path.join(root, 'codev-cloud');
+        fs.mkdirSync(path.join(CODEV, '.builders', 'spir-100'), { recursive: true });
+        fs.mkdirSync(CLOUD);
+
+        const architect = (name: string) => ({ name, cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+        for (const name of ['main', 'review']) setArchitectByName(CODEV, name, architect(name));
+        for (const name of ['main', 'review', 'tunnel']) setArchitectByName(CLOUD, name, architect(name));
+        upsertBuilder({
+          id: BUILDER,
+          name: BUILDER,
+          status: 'implementing',
+          phase: 'implement',
+          worktree: path.join(CODEV, '.builders', 'spir-100'),
+          branch: 'builder/spir-100',
+          type: 'spec',
+          spawnedByArchitect: 'review',
+        });
+        liveAgents({
+          [CODEV]: { architects: ['main', 'review'] },
+          [CLOUD]: { architects: ['main', 'review', 'tunnel'], shells: ['shell-7'] },
+        });
+      });
+
+      afterEach(() => {
+        mockResolveTarget.mockReset();
+        mockResolveAgentInRegistry.mockReset();
+        vi.mocked(getWorkspaceTerminals).mockImplementation(() => new Map());
+        fs.rmSync(root, { recursive: true, force: true });
+      });
+
+      it('delivers <workspace>:architect:<name> to that architect, as a same-workspace send would be', async () => {
+        const writes = liveAgents({
+          [CODEV]: { architects: ['main', 'review'] },
+          [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+        });
+        const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+        await vi.waitFor(() => expect(writes['codev-cloud/tunnel'].mock.calls.at(-1)?.[0]).toBe('\r'));
+        expect(writes['codev-cloud/tunnel'].mock.calls.map((c) => c[0]).join('')).toContain('hello');
+        for (const other of ['codev-cloud/main', 'codev-cloud/review', 'codev/main', 'codev/review']) {
+          expect(writes[other]).not.toHaveBeenCalled();
+        }
+        expect(allRows()).toHaveLength(1);
+        expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', from_agent: 'architect:review' });
+      });
+
+      // Issue #1633. With no `main`, the front door is the first registered. The live resolver
+      // reads that off the terminal map and the registry off `getArchitects`, which sorted by
+      // name: the same address reached `zeta` with terminals up and was held for `alpha` with
+      // them down.
+      describe('the front door of a workspace with no main, where name order is not registration order', () => {
+        beforeEach(() => {
+          for (const name of ['main', 'review', 'tunnel']) setArchitectByName(CLOUD, name, null);
+          setArchitectByName(CLOUD, 'zeta', { name: 'zeta', cmd: 'claude', startedAt: '2026-01-01T00:00:00.000Z' });
+          setArchitectByName(CLOUD, 'alpha', { name: 'alpha', cmd: 'claude', startedAt: '2026-06-01T00:00:00.000Z' });
+        });
+
+        it('delivers to the first registered when its terminal is live', async () => {
+          const writes = liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['zeta', 'alpha'] } });
+          const { body } = await send('codev-cloud:architect', 'architect:review');
+
+          expect(body).toMatchObject({ ok: true, resolvedTo: 'zeta' });
+          expect(writes['codev-cloud/alpha']).not.toHaveBeenCalled();
+        });
+
+        it('holds for that same architect when no architect there has a live terminal', async () => {
+          // The workspace is still known to Tower (a shell is up); its architects are not.
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { shells: ['shell-7'] } });
+          const { status, body } = await send('codev-cloud:architect', 'architect:review');
+
+          expect(status).toBe(200);
+          expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', resolvedTo: 'zeta' });
+          expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'zeta')).toHaveLength(1);
+          expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'alpha')).toHaveLength(0);
+        });
+      });
+
+      it('holds it (no-live-pty) when the architect is registered and has no live terminal', async () => {
+        const writes = liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+        const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', resolvedTo: 'tunnel' });
+        expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'tunnel')).toHaveLength(1);
+        // Held for `tunnel`, and not rerouted to the front door.
+        expect(writes['codev-cloud/main']).not.toHaveBeenCalled();
+        expect(mailbox.findHeldForAgent(sendDbHolder.db, CLOUD, 'main')).toHaveLength(0);
+      });
+
+      it('schedules it on the --delay path too, with no live terminal', async () => {
+        liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+        const { status, body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { deliverAfter: 30 } });
+
+        expect(status).toBe(200);
+        expect(body).toMatchObject({ ok: true, scheduled: true, resolvedTo: 'tunnel', terminalId: null });
+        const row = mailbox.getById(sendDbHolder.db, body.mailboxId);
+        expect(row).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', status: 'held', terminal_id: null });
+        expect(row?.not_before).toBe(body.notBefore);
+      });
+
+      it('fails for an unknown architect name with a 404 that names the workspace, its architects and its front door', async () => {
+        const { status, body } = await send('codev-cloud:architect:ghost', 'architect:review');
+        expect(status).toBe(404);
+        expect(body.error).toBe('NOT_FOUND');
+        expect(body.message).toBe(
+          "Architect 'ghost' not found in workspace 'codev-cloud'. " +
+            'Architects there: main, review, tunnel. Front door: codev-cloud:architect.',
+        );
+        expect(allRows()).toHaveLength(0);
+      });
+
+      describe('the builder rule', () => {
+        it('refuses a builder naming an architect in another workspace: 403, the front door named, nothing stored', async () => {
+          for (const options of [undefined, { deliverAfter: 30 }]) {
+            const { status, body } = await send('codev-cloud:architect:tunnel', BUILDER, options ? { options } : {});
+            expect(status).toBe(403);
+            expect(body.error).toBe('REFUSED');
+            expect(body.message).toBe(
+              `builder ${BUILDER} may only address its own spawning architect; ` +
+                'reach that workspace through its front door: afx send codev-cloud:architect "…"',
+            );
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('refuses the same when the architect has no live terminal: it is refused, not held', async () => {
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main'] } });
+          const { status, body } = await send('codev-cloud:architect:tunnel', BUILDER);
+          expect(status).toBe(403);
+          expect(body.error).toBe('REFUSED');
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('refuses <own workspace>:architect:<other> exactly as Spec 755 does: 404 and its message', async () => {
+          for (const to of ['architect:main', 'codev:architect:main']) {
+            const { status, body } = await send(to, BUILDER);
+            expect(status).toBe(404);
+            expect(body).toEqual({ error: 'NOT_FOUND', message: `builder ${BUILDER} may only address its own spawning architect` });
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('lets the builder reach its own architect by name, with or without its workspace in front', async () => {
+          for (const to of ['architect:review', 'codev:architect:review']) {
+            const { status, body } = await send(to, BUILDER);
+            expect(status).toBe(200);
+            expect(body.resolvedTo).toBe('review');
+          }
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CODEV, CODEV]);
+        });
+
+        it('sends <other workspace>:architect from the builder to main there, not to a namesake of its own architect', async () => {
+          // The builder was spawned by codev's `review`; codev-cloud has a `review` as well.
+          const { status, body } = await send('codev-cloud:architect', BUILDER);
+          expect(status).toBe(200);
+          expect(body.resolvedTo).toBe('main');
+          expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'main' });
+        });
+
+        it('keeps affinity for <own workspace>:architect', async () => {
+          const { body } = await send('codev:architect', BUILDER);
+          expect(body.resolvedTo).toBe('review');
+        });
+
+        // The live resolver refuses this with NOT_FOUND, which is also what sends the route to
+        // the registry. The registry must refuse it too: answering with "the first registered"
+        // held the builder's mail for an architect it has nothing to do with.
+        it('refuses bare architect when the builder\'s architect has gone and there is no main, and stores nothing', async () => {
+          setArchitectByName(CODEV, 'main', null);
+          setArchitectByName(CODEV, 'review', null);
+          for (const name of ['alpha', 'beta']) setArchitectByName(CODEV, name, { name, cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          const writes = liveAgents({ [CODEV]: { architects: ['alpha', 'beta'] } });
+
+          for (const options of [undefined, { deliverAfter: 30 }]) {
+            const { status, body } = await send('architect', BUILDER, options ? { options } : {});
+            expect(status).toBe(404);
+            expect(body).toEqual({
+              error: 'NOT_FOUND',
+              message:
+                `builder ${BUILDER} was spawned by architect review, which is no longer registered, ` +
+                "and no 'main' architect is registered (registered: alpha, beta)",
+            });
+          }
+          expect(allRows()).toHaveLength(0);
+          expect(writes['codev/alpha']).not.toHaveBeenCalled();
+          expect(writes['codev/beta']).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('malformed addresses are a 400 that names the expected shape', () => {
+        it('a Tower written as a second workspace', async () => {
+          const { status, body } = await send('devvm:codev:architect', 'architect:review');
+          expect(status).toBe(400);
+          expect(body.error).toBe('MALFORMED_ADDRESS');
+          expect(body.message).toBe(
+            'Malformed address: a local address has at most a workspace before `architect`. ' +
+              'Expected [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.',
+          );
+        });
+
+        it.each(['a:b:c', ':architect', 'codev::architect', 'codev:architect:a:b'])('%s (was a 404 "not found")', async (to) => {
+          const { status, body } = await send(to, 'architect:review');
+          expect(status).toBe(400);
+          expect(body.error).toBe('MALFORMED_ADDRESS');
+          expect(body.message).toContain('Expected [<workspace>:]architect[:<name>]');
+        });
+
+        it('is refused before anything is resolved or stored, on the immediate and the delayed path', async () => {
+          await send('a:b:c', 'architect:review');
+          await send('a:b:c', 'architect:review', { options: { deliverAfter: 30 } });
+          expect(mockResolveTarget).not.toHaveBeenCalled();
+          expect(mockResolveAgentInRegistry).not.toHaveBeenCalled();
+          expect(allRows()).toHaveLength(0);
+        });
+      });
+
+      describe('an afx:// address', () => {
+        const UNAVAILABLE =
+          'Cross-Tower messaging is not available in this version: an afx:// address cannot be delivered yet. ' +
+          'Use a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.';
+
+        it.each([
+          ['never connected to Codev Cloud', null],
+          ['connected to Codev Cloud', { tower_id: 't-1', tower_name: 'mbp', server_url: 'https://cloud.example', api_key: 'k' }],
+        ])('is refused as cross-Tower messaging not available on a Tower %s', async (_note, cloud) => {
+          mockReadCloudConfig.mockReturnValue(cloud);
+          for (const to of ['afx://devvm/codev:architect', 'afx://mbp/codev-cloud:architect:tunnel', 'afx://sam@studio/codev:architect:data']) {
+            const { status, body } = await send(to, 'architect:review');
+            expect(status).toBe(400);
+            expect(body).toEqual({ error: 'CROSS_TOWER_UNAVAILABLE', message: UNAVAILABLE });
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('is refused on the delayed path, and for an interrupt (`afx interrupt`), by Tower itself', async () => {
+          for (const options of [{ deliverAfter: 30 }, { escape: true }, { interrupt: true }]) {
+            const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review', { options });
+            expect(status).toBe(400);
+            expect(body.error).toBe('CROSS_TOWER_UNAVAILABLE');
+          }
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it.each(['afx://devvm', 'afx://devvm/architect', 'afx://devvm:4100/codev:architect', 'afx:/devvm/codev:architect'])(
+          'that is malformed (%s) fails as malformed, not as unavailable',
+          async (to) => {
+            const { status, body } = await send(to, 'architect:review');
+            expect(status).toBe(400);
+            expect(body.error).toBe('MALFORMED_ADDRESS');
+            expect(body.message).toContain('Expected afx://');
+          },
+        );
+      });
+
+      it('resolves a shell id as <workspace>:<shell-id>, as today', async () => {
+        const { status, body } = await send('codev-cloud:shell-7', 'architect:review');
+        expect(status).toBe(200);
+        expect(body.resolvedTo).toBe('shell-7');
+      });
+
+      // Spec 1940 phase 4. These frames were recorded on the commit before the phase (the test
+      // was written and run against that code first), with the timestamp masked. A send that
+      // stays inside one workspace, or whose sender has no workspace or is not an agent, must
+      // produce the frame it produced then, byte for byte.
+      describe('frames that Spec 1940 does not change', () => {
+        const BUILDER_2 = 'builder-spir-200';
+        const FOOTER = '###############################';
+        const HINT = `${FOOTER}  (reply: afx send architect "…")`;
+
+        /** The frame stored for the last send, with its timestamp masked. */
+        const lastFrame = () =>
+          allRows().at(-1)!.formatted_message.replace(/\| \d{4}-\d\d-\d\dT[\d:.]+Z\]/, '| <time>]');
+
+        beforeEach(() => {
+          liveAgents({
+            [CODEV]: { architects: ['main', 'review'], builders: [BUILDER, BUILDER_2], shells: ['shell-1'] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'], builders: ['builder-spir-300'] },
+          });
+        });
+
+        // [sender, address, header]. A builder may name only its own architect, so it writes
+        // bare `architect` and reaches `review`.
+        const toAnArchitect: Array<[string | undefined, string, string]> = [
+          ['architect:review', 'architect:main', '### [ARCHITECT:review MESSAGE → main | <time>] ###'],
+          ['architect', 'architect:main', '### [ARCHITECT MESSAGE → main | <time>] ###'],
+          [BUILDER, 'architect', `### [BUILDER ${BUILDER} MESSAGE → review | <time>] ###`],
+          ['af-cron', 'architect:main', '### [BUILDER af-cron MESSAGE → main | <time>] ###'],
+          ['vscode-user', 'architect:main', '### [USER via VS Code → main | <time>] ###'],
+          [DECISIONS_TAB_SENDER, 'architect:main', '### [USER via Decisions tab → main | <time>] ###'],
+          [undefined, 'architect:main', '### [ARCHITECT INSTRUCTION → main | <time>] ###'],
+        ];
+        it.each(toAnArchitect)('same workspace, %s to an architect (%s)', async (from, to, header) => {
+          expect((await send(to, from)).status).toBe(200);
+          expect(lastFrame()).toBe(`${header}\nhello\n${FOOTER}`);
+        });
+
+        const toABuilderOrShell: Array<[string | undefined, string]> = [
+          ['architect:review', 'ARCHITECT:review'],
+          ['architect', 'ARCHITECT'],
+          [BUILDER, 'ARCHITECT'],
+          ['af-cron', 'ARCHITECT'],
+          ['vscode-user', 'ARCHITECT'],
+          [DECISIONS_TAB_SENDER, 'ARCHITECT'],
+          [undefined, 'ARCHITECT'],
+        ];
+        it.each(toABuilderOrShell)('same workspace, %s to a builder and to a shell', async (from, label) => {
+          for (const to of [BUILDER_2, 'shell-1']) {
+            expect((await send(to, from)).status).toBe(200);
+            expect(lastFrame()).toBe(`### [${label} INSTRUCTION → ${to} | <time>] ###\nhello\n${HINT}`);
+          }
+        });
+
+        it('same workspace with the workspace written in front of the address', async () => {
+          expect((await send('codev:architect:main', 'architect:review')).status).toBe(200);
+          expect(lastFrame()).toBe(`### [ARCHITECT:review MESSAGE → main | <time>] ###\nhello\n${FOOTER}`);
+        });
+
+        // Tower does not claim a message came from elsewhere when it does not know where it
+        // came from: neither field given, and the literal `unknown` the route falls back to.
+        it.each([
+          ['no sender workspace', { workspace: undefined, fromWorkspace: undefined }],
+          ['the sender workspace `unknown`', { workspace: undefined, fromWorkspace: 'unknown' }],
+        ])('another workspace addressed with %s', async (_label, fields) => {
+          expect((await send('codev-cloud:architect:tunnel', 'architect:review', fields)).status).toBe(200);
+          expect(lastFrame()).toBe(`### [ARCHITECT:review MESSAGE → tunnel | <time>] ###\nhello\n${FOOTER}`);
+          expect((await send('codev-cloud:builder-spir-300', 'architect:review', fields)).status).toBe(200);
+          expect(lastFrame()).toBe(`### [ARCHITECT:review INSTRUCTION → builder-spir-300 | <time>] ###\nhello\n${HINT}`);
+        });
+
+        // None of these has an address to reply to, whichever workspace the target is in.
+        const notAgents: Array<[string | undefined, string, string]> = [
+          ['af-cron', '### [BUILDER af-cron MESSAGE → tunnel | <time>] ###', 'ARCHITECT'],
+          ['vscode-user', '### [USER via VS Code → tunnel | <time>] ###', 'ARCHITECT'],
+          [DECISIONS_TAB_SENDER, '### [USER via Decisions tab → tunnel | <time>] ###', 'ARCHITECT'],
+          [undefined, '### [ARCHITECT INSTRUCTION → tunnel | <time>] ###', 'ARCHITECT'],
+        ];
+        it.each(notAgents)('another workspace, from %s, which is not an agent', async (from, header, label) => {
+          expect((await send('codev-cloud:architect:tunnel', from)).status).toBe(200);
+          expect(lastFrame()).toBe(`${header}\nhello\n${FOOTER}`);
+          expect((await send('codev-cloud:builder-spir-300', from)).status).toBe(200);
+          expect(lastFrame()).toBe(`### [${label} INSTRUCTION → builder-spir-300 | <time>] ###\nhello\n${HINT}`);
+        });
+
+        it('a raw send has no frame, in the same workspace and across workspaces', async () => {
+          for (const to of ['architect:main', 'codev-cloud:architect:tunnel', 'codev-cloud:builder-spir-300']) {
+            expect((await send(to, 'architect:review', { options: { raw: true } })).status).toBe(200);
+            expect(allRows().at(-1)!.formatted_message).toBe('hello');
+          }
+        });
+      });
+
+      // Spec 1940 phase 4. A message from an agent in another workspace says where it came
+      // from and how to answer. What is read here is the stored `formatted_message`: the
+      // text the recipient's terminal is given.
+      describe('a message from another workspace (Spec 1940 phase 4)', () => {
+        const CLOUD_BUILDER = 'builder-spir-300';
+        const FOOTER = '###############################';
+        const HEADER = '### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###';
+        const REPLY = `${FOOTER}  (reply: afx send codev:architect:review "…")`;
+        const mask = (frame: string) => frame.replace(/\| \d{4}-\d\d-\d\dT[\d:.]+Z\]/, '| <time>]');
+        const lastFrame = () => mask(allRows().at(-1)!.formatted_message);
+
+        /** Everything live, with a builder in each workspace. Returns the write spies. */
+        function everyoneLive() {
+          return liveAgents({
+            [CODEV]: { architects: ['main', 'review'], builders: [BUILDER] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'], builders: [CLOUD_BUILDER], shells: ['shell-7'] },
+          });
+        }
+
+        beforeEach(() => {
+          fs.mkdirSync(path.join(CLOUD, '.builders', 'spir-300'), { recursive: true });
+          upsertBuilder({
+            id: CLOUD_BUILDER,
+            name: CLOUD_BUILDER,
+            status: 'implementing',
+            phase: 'implement',
+            worktree: path.join(CLOUD, '.builders', 'spir-300'),
+            branch: 'builder/spir-300',
+            type: 'spec',
+            spawnedByArchitect: 'tunnel',
+          });
+          everyoneLive();
+        });
+
+        // The five places a message from an agent is framed. Each must know the sender's
+        // workspace: one that did not would give this message a same-workspace header on
+        // that path only.
+        describe('carries the sender\'s qualified address and a reply command on every path', () => {
+          it('delivered to a live terminal', async () => {
+            const writes = everyoneLive();
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+            // What was stored is what was typed.
+            expect(mask(writes['codev-cloud/tunnel'].mock.calls[0][0])).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('scheduled with --delay', async () => {
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { deliverAfter: 30 } });
+            expect(body).toMatchObject({ ok: true, scheduled: true, resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('held for a registered recipient with no terminal (the registry hold)', async () => {
+            liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('held for a recipient whose terminal session is gone (the dead-session hold)', async () => {
+            mockGetTerminalManager.mockReturnValue({ listSessions: () => [], getSession: () => null });
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', terminalId: 'term-codev-cloud/tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('held for a recipient whose terminal is not writable (the unwritable-session hold)', async () => {
+            mockGetTerminalManager.mockReturnValue({
+              listSessions: () => [],
+              getSession: (id: string) => gateSession(vi.fn(), '❯ ', false, id),
+            });
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(body).toMatchObject({ ok: true, held: true, reason: 'no-live-pty', terminalId: 'term-codev-cloud/tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+
+          it('written with --interrupt, which bypasses the gate and not the frame', async () => {
+            const { body } = await send('codev-cloud:architect:tunnel', 'architect:review', { options: { interrupt: true } });
+            expect(body).toMatchObject({ ok: true, resolvedTo: 'tunnel' });
+            expect(lastFrame()).toBe(`${HEADER}\nhello\n${REPLY}`);
+          });
+        });
+
+        it('names a builder sender BUILDER, and an architect writing to a builder gives an INSTRUCTION', async () => {
+          await send('codev-cloud:architect', BUILDER);
+          expect(lastFrame()).toBe(
+            `### [BUILDER codev:${BUILDER} MESSAGE → main | <time>] ###\nhello\n${FOOTER}  (reply: afx send codev:${BUILDER} "…")`,
+          );
+          await send(`codev-cloud:${CLOUD_BUILDER}`, 'architect:main');
+          expect(lastFrame()).toBe(
+            `### [ARCHITECT codev:architect:main INSTRUCTION → ${CLOUD_BUILDER} | <time>] ###\nhello\n${FOOTER}  (reply: afx send codev:architect "…")`,
+          );
+        });
+
+        it('keeps what the mailbox row holds: the sender\'s local id and its workspace path', async () => {
+          const { body } = await send('codev-cloud:architect:tunnel', 'architect:review');
+          expect(mailbox.getById(sendDbHolder.db, body.mailboxId)).toMatchObject({
+            from_agent: 'architect:review',
+            from_workspace: CODEV,
+            workspace_path: CLOUD,
+            to_agent: 'tunnel',
+            body: 'hello',
+          });
+          // And so what `afx inbox` is given is what it was given before.
+          const { res, body: shown } = makeRes();
+          await handleRequest(makeReq('GET', `/api/inbox/${body.mailboxId}`), res, makeCtx());
+          expect(JSON.parse(shown())).toMatchObject({ fromAgent: 'architect:review', fromWorkspace: CODEV });
+        });
+
+        /**
+         * The footer table, end to end: each command is taken from the frame the recipient
+         * was given, sent by that recipient unchanged, and must be typed into the terminal
+         * of the agent that sent the first message.
+         */
+        describe('the reply command, pasted unchanged by the recipient, reaches the original sender', () => {
+          const rows: Array<{ row: string; from: string; to: string; replier: string; command: string; lands: string }> = [
+            { row: 'an architect answers a named architect', from: 'architect:review', to: 'codev-cloud:architect:tunnel', replier: 'architect:tunnel', command: 'codev:architect:review', lands: 'codev/review' },
+            // A builder reaches another workspace through its front door, which here is `main`.
+            { row: 'an architect answers a builder', from: BUILDER, to: 'codev-cloud:architect', replier: 'architect:main', command: `codev:${BUILDER}`, lands: `codev/${BUILDER}` },
+            { row: 'a builder answers a builder', from: BUILDER, to: `codev-cloud:${CLOUD_BUILDER}`, replier: CLOUD_BUILDER, command: `codev:${BUILDER}`, lands: `codev/${BUILDER}` },
+            { row: 'a builder answers the front door', from: 'architect:main', to: `codev-cloud:${CLOUD_BUILDER}`, replier: CLOUD_BUILDER, command: 'codev:architect', lands: 'codev/main' },
+          ];
+          it.each(rows)('$row', async ({ from, to, replier, command, lands }) => {
+            const writes = everyoneLive();
+            expect((await send(to, from)).status).toBe(200);
+            const offered = /\(reply: afx send (\S+) "…"\)$/.exec(lastFrame())?.[1];
+            expect(offered).toBe(command);
+
+            const reply = await send(offered!, replier, { message: 'the answer', workspace: CLOUD, fromWorkspace: CLOUD });
+            expect(reply.body).toMatchObject({ ok: true, delivered: true });
+            expect(writes[lands].mock.calls.map((c) => c[0]).join('')).toContain('the answer');
+            expect(allRows().at(-1)).toMatchObject({ workspace_path: CODEV, from_workspace: CLOUD });
+          });
+
+          it('a builder is not given a command for a named architect that is not its own, and the address is refused if it tries', async () => {
+            await send(`codev-cloud:${CLOUD_BUILDER}`, 'architect:review');
+            expect(lastFrame()).toBe(
+              `### [ARCHITECT codev:architect:review INSTRUCTION → ${CLOUD_BUILDER} | <time>] ###\nhello\n` +
+                `${FOOTER}  (reply through your architect: afx send architect "…")`,
+            );
+            const tried = await send('codev:architect:review', CLOUD_BUILDER, { workspace: CLOUD, fromWorkspace: CLOUD });
+            expect(tried.status).toBe(403);
+            // The way it is told to reply works: its own architect.
+            const writes = everyoneLive();
+            const through = await send('architect', CLOUD_BUILDER, { message: 'the answer', workspace: CLOUD, fromWorkspace: CLOUD });
+            expect(through.body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'tunnel' });
+            expect(writes['codev-cloud/tunnel']).toHaveBeenCalled();
+          });
+        });
+
+        it('types a cross-workspace frame with a 40-byte body as one short write, not as a paste', async () => {
+          const writes = everyoneLive();
+          const message = 'x'.repeat(40);
+          await send('codev-cloud:architect:tunnel', 'architect:review', { message });
+          await vi.waitFor(() => expect(writes['codev-cloud/tunnel'].mock.calls.at(-1)?.[0]).toBe('\r'));
+          const written = writes['codev-cloud/tunnel'].mock.calls.map((c) => c[0]);
+          expect(written).toHaveLength(2);
+          expect(mask(written[0])).toBe(`${HEADER}\n${message}\n${REPLY}`);
+          expect(written.join('')).not.toContain(PASTE_BEGIN);
+        });
+
+        describe('when the sender\'s workspace has no usable address name', () => {
+          it('marks the sender as in another workspace, prints no directory name and no command', async () => {
+            // A second directory called `codev`: neither has a name of its own.
+            const WORK = path.join(root, 'work', 'codev');
+            fs.mkdirSync(WORK, { recursive: true });
+            setArchitectByName(WORK, 'review', { name: 'review', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+            liveAgents({
+              [CODEV]: { architects: ['main', 'review'] },
+              [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+              [WORK]: { architects: ['review'] },
+            });
+            await send('codev-cloud:architect:tunnel', 'architect:review', { workspace: WORK, fromWorkspace: WORK });
+            expect(lastFrame()).toBe(
+              '### [ARCHITECT architect:review (another workspace) MESSAGE → tunnel | <time>] ###\nhello\n' +
+                `${FOOTER}  (no reply address; the sender's workspace needs: afx workspace name <name>)`,
+            );
+          });
+
+          it('never puts a directory name in a frame unless it fits the component rule', async () => {
+            const ODD = path.join(root, 'x] ### [ARCHITECT');
+            fs.mkdirSync(ODD);
+            liveAgents({
+              [CODEV]: { architects: ['main', 'review'] },
+              [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+              [ODD]: { architects: ['main'] },
+            });
+            await send('codev-cloud:architect:tunnel', 'architect:main', { workspace: ODD, fromWorkspace: ODD });
+            const frame = allRows().at(-1)!.formatted_message;
+            expect(mask(frame).split('\n')[0]).toBe('### [ARCHITECT architect:main (another workspace) MESSAGE → tunnel | <time>] ###');
+            expect(frame.match(/### \[/g)).toHaveLength(1);
+            expect(frame).not.toContain('afx send');
+          });
+
+          it('uses the explicit name once the workspace has one', async () => {
+            sendDbHolder.db
+              .prepare('INSERT INTO known_workspaces (workspace_path, name, address_name) VALUES (?, ?, ?)')
+              .run(CODEV, 'codev', 'core');
+            await send('codev-cloud:architect:tunnel', 'architect:review');
+            expect(lastFrame()).toBe(
+              `### [ARCHITECT core:architect:review MESSAGE → tunnel | <time>] ###\nhello\n${FOOTER}  (reply: afx send core:architect:review "…")`,
+            );
+          });
+        });
+      });
+
+      // Cron resolves a task's target through the same two resolvers when the task fires.
+      describe('a cron task\'s target', () => {
+        const task = (target: string) => ({ name: 'Nightly Report', target, workspacePath: CODEV });
+
+        it('reaches a named architect in another workspace, and holds for one with no live terminal', async () => {
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [CLOUD]: { architects: ['main', 'review'] } });
+          const log = vi.fn();
+
+          const result = await deliverCronMessage(task('codev-cloud:architect:tunnel'), 'report ready', log);
+
+          expect(result).toMatchObject({ outcome: 'held', reason: 'no-live-pty' });
+          expect(allRows()).toHaveLength(1);
+          expect(allRows()[0]).toMatchObject({ workspace_path: CLOUD, to_agent: 'tunnel', body: 'report ready' });
+        });
+
+        it('goes to the front door for bare architect, in its own workspace and in another', async () => {
+          await deliverCronMessage(task('architect'), 'one', vi.fn());
+          await deliverCronMessage(task('codev-cloud:architect'), 'two', vi.fn());
+          expect(allRows().map((r) => [r.workspace_path, r.to_agent])).toEqual([[CODEV, 'main'], [CLOUD, 'main']]);
+        });
+
+        it('is not delivered, and says why, when it is not an address', async () => {
+          const log = vi.fn();
+          const result = await deliverCronMessage(task('devvm:codev:architect'), 'report ready', log);
+
+          expect(result).toMatchObject({ outcome: 'unresolved', mailboxId: null });
+          expect(log).toHaveBeenCalledWith('WARN', expect.stringMatching(/^Cron 'Nightly Report': target 'devvm:codev:architect' is not an address \(Malformed address: /));
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('is not delivered for an afx:// address, should one get past the loader', async () => {
+          const log = vi.fn();
+          const result = await deliverCronMessage(task('afx://devvm/codev:architect'), 'report ready', log);
+
+          expect(result).toMatchObject({ outcome: 'unresolved', mailboxId: null });
+          expect(log).toHaveBeenCalledWith('WARN', expect.stringContaining("target 'afx://devvm/codev:architect' not found"));
+          expect(allRows()).toHaveLength(0);
+        });
+      });
+
+      // Spec 1940 phase 5. The listing and the send route against the same registry and the
+      // same terminal map: every address the listing gives a caller is then SENT, as that
+      // caller, through `POST /api/send`. What is asserted is what `afx workspace list`
+      // prints and what `afx send` then does with each line of it.
+      describe('the address book (GET /api/address-book)', () => {
+        let SCRATCH: string;
+
+        async function book(query: Record<string, string>) {
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('GET', `/api/address-book?${new URLSearchParams(query).toString()}`), res, makeCtx());
+          return { status: statusCode(), body: JSON.parse(body()) as AddressBookResponse & { error?: string; message?: string } };
+        }
+
+        /** `<address> <live|held> <sendable|through …|not sendable>` for each agent of a workspace. */
+        const linesOf = (listing: AddressBookResponse, workspace: string) =>
+          listing.workspaces
+            .find((w) => w.path === workspace)!
+            .agents.map((a) => {
+              let outcome = 'sendable';
+              if (!a.sendable) outcome = a.reachThrough === undefined ? 'not sendable' : `through ${a.reachThrough}`;
+              return `${a.address} ${a.live ? 'live' : 'no-terminal'} ${outcome}`;
+            });
+
+        beforeEach(() => {
+          SCRATCH = path.join(root, 'scratch');
+          // Registered with Tower and not running.
+          sendDbHolder.db
+            .prepare('INSERT OR IGNORE INTO known_workspaces (workspace_path, name) VALUES (?, ?)')
+            .run(SCRATCH, 'scratch');
+          // codev: both architects and the builder live. codev-cloud: `tunnel` is registered
+          // and has no terminal; a shell is up.
+          liveAgents({
+            [CODEV]: { architects: ['main', 'review'], builders: [BUILDER] },
+            [CLOUD]: { architects: ['main', 'review'], shells: ['shell-7'] },
+          });
+        });
+
+        it('lists every workspace and agent for an architect, each as an address it may send to', async () => {
+          const { status, body } = await book({ workspace: CODEV, from: 'architect:main' });
+
+          expect(status).toBe(200);
+          expect(body.workspaces.map((w) => [w.path, w.addressName, w.running])).toEqual([
+            [CODEV, 'codev', true],
+            [CLOUD, 'codev-cloud', true],
+            [SCRATCH, 'scratch', false],
+          ]);
+          expect(linesOf(body, CODEV)).toEqual([
+            'codev:architect:main live sendable',
+            'codev:architect:review live sendable',
+            `codev:${BUILDER} live sendable`,
+          ]);
+          expect(linesOf(body, CLOUD)).toEqual([
+            'codev-cloud:architect:main live sendable',
+            'codev-cloud:architect:review live sendable',
+            'codev-cloud:architect:tunnel no-terminal sendable',
+            'codev-cloud:shell-7 live sendable',
+          ]);
+          expect(linesOf(body, SCRATCH)).toEqual([]);
+        });
+
+        it('lists the same agents for a builder, with the architects it may not name marked and the way in beside each', async () => {
+          const { body } = await book({ workspace: CODEV, from: BUILDER });
+
+          expect(linesOf(body, CODEV)).toEqual([
+            'codev:architect:main live through architect',
+            'codev:architect:review live sendable',
+            `codev:${BUILDER} live sendable`,
+          ]);
+          expect(linesOf(body, CLOUD)).toEqual([
+            'codev-cloud:architect:main live through codev-cloud:architect',
+            'codev-cloud:architect:review live through codev-cloud:architect',
+            'codev-cloud:architect:tunnel no-terminal through codev-cloud:architect',
+            'codev-cloud:shell-7 live sendable',
+          ]);
+        });
+
+        describe.each([
+          ['an architect', 'architect:main', 7],
+          ['a builder', BUILDER, 3],
+        ])('sent back through POST /api/send as %s', (_who, from, readyToPaste) => {
+          it('every address ready to paste is accepted and is stored for the agent it was printed for', async () => {
+            const { body } = await book({ workspace: CODEV, from });
+            let sent = 0;
+            for (const workspace of body.workspaces) {
+              for (const agent of workspace.agents.filter((a) => a.sendable)) {
+                const before = allRows().length;
+                const answer = await send(agent.address!, from);
+                expect(answer.status, agent.address!).toBe(200);
+                expect(answer.body, agent.address!).toMatchObject({ ok: true, resolvedTo: agent.name });
+                // Delivered to a live terminal, held for one with none: as the listing said.
+                expect(answer.body.held === true && answer.body.reason === 'no-live-pty', agent.address!).toBe(!agent.live);
+                const stored = allRows().slice(before);
+                expect(stored, agent.address!).toHaveLength(1);
+                expect(stored[0], agent.address!).toMatchObject({ workspace_path: workspace.path, to_agent: agent.name });
+                sent++;
+              }
+            }
+            expect(sent).toBe(readyToPaste);
+          });
+
+          it('every address not ready to paste is refused and stores nothing; the way in beside it is accepted', async () => {
+            const { body } = await book({ workspace: CODEV, from });
+            for (const agent of body.workspaces.flatMap((w) => w.agents).filter((a) => !a.sendable)) {
+              const before = allRows().length;
+              const refused = await send(agent.address!, from);
+              expect([403, 404], agent.address!).toContain(refused.status);
+              expect(allRows(), agent.address!).toHaveLength(before);
+
+              const wayIn = await send(agent.reachThrough!, from);
+              expect(wayIn.status, agent.reachThrough!).toBe(200);
+            }
+          });
+        });
+
+        it('a builder is refused four architects and no architect is refused any', async () => {
+          const asBuilder = (await book({ workspace: CODEV, from: BUILDER })).body.workspaces.flatMap((w) => w.agents);
+          const asArchitect = (await book({ workspace: CODEV, from: 'architect:main' })).body.workspaces.flatMap((w) => w.agents);
+          expect(asBuilder.filter((a) => !a.sendable).map((a) => a.address)).toEqual([
+            'codev:architect:main',
+            'codev-cloud:architect:main',
+            'codev-cloud:architect:review',
+            'codev-cloud:architect:tunnel',
+          ]);
+          expect(asArchitect.filter((a) => !a.sendable)).toEqual([]);
+          // Nothing is hidden from the builder: the same agents, in the same order.
+          expect(asBuilder.map((a) => a.address)).toEqual(asArchitect.map((a) => a.address));
+        });
+
+        it('answers a caller that says nothing about itself, as a sender outside every workspace', async () => {
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('GET', '/api/address-book'), res, makeCtx());
+          expect(statusCode()).toBe(200);
+          const agents = (JSON.parse(body()) as AddressBookResponse).workspaces.flatMap((w) => w.agents);
+          expect(agents.length).toBe(7);
+          expect(agents.every((a) => a.sendable)).toBe(true);
+        });
+
+        it('refuses a sender id that /api/send would refuse, with the same rule', async () => {
+          const { status, body } = await book({ workspace: CODEV, from: 'bad id\n### forged' });
+          expect(status).toBe(400);
+          expect(body.error).toBe('INVALID_PARAMS');
+          expect(body.message).toContain('Invalid "from" parameter');
+        });
+
+        it('stores nothing and writes to no terminal: it only reads', async () => {
+          const writes = liveAgents({
+            [CODEV]: { architects: ['main', 'review'], builders: [BUILDER] },
+            [CLOUD]: { architects: ['main', 'review'], shells: ['shell-7'] },
+          });
+          await book({ workspace: CODEV, from: BUILDER });
+          expect(allRows()).toHaveLength(0);
+          for (const write of Object.values(writes)) expect(write).not.toHaveBeenCalled();
+        });
+      });
+
+      // Spec 1940 phase 3. The naming route and the send route against the same registry:
+      // what is asserted is what `afx workspace name` and then `afx send` get back.
+      describe('explicit workspace names (PUT /api/workspaces/:path/address-name)', () => {
+        let WORK: string;
+
+        /** Register a workspace with Tower (a `known_workspaces` row), as activating it does. */
+        function register(...workspaces: string[]) {
+          for (const ws of workspaces) {
+            sendDbHolder.db
+              .prepare('INSERT OR IGNORE INTO known_workspaces (workspace_path, name) VALUES (?, ?)')
+              .run(ws, path.basename(ws));
+          }
+        }
+
+        async function setName(workspace: string, name: unknown, method = 'PUT') {
+          mockParseJsonBody.mockResolvedValue(name === undefined ? {} : { name });
+          const { res, statusCode, body } = makeRes();
+          const encoded = Buffer.from(workspace).toString('base64url');
+          await handleRequest(makeReq(method, `/api/workspaces/${encoded}/address-name`), res, makeCtx());
+          return { status: statusCode(), body: JSON.parse(body()) };
+        }
+
+        const storedName = (workspace: string) =>
+          (sendDbHolder.db.prepare('SELECT address_name FROM known_workspaces WHERE workspace_path = ?').get(workspace) as
+            | { address_name: string | null }
+            | undefined)?.address_name;
+
+        /** All three workspaces running, each with a `main`. Returns the write spies. */
+        function allRunning() {
+          return liveAgents({
+            [CODEV]: { architects: ['main', 'review'] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+            [WORK]: { architects: ['main'] },
+          });
+        }
+
+        beforeEach(() => {
+          // A second directory called `codev`.
+          WORK = path.join(root, 'work', 'codev');
+          fs.mkdirSync(WORK, { recursive: true });
+          setArchitectByName(WORK, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          register(CODEV, CLOUD, WORK);
+          allRunning();
+        });
+
+        it('two workspaces share a basename: the address fails listing both; after one is named, both resolve', async () => {
+          const ambiguous = await send('codev:architect', 'architect:main', { workspace: CLOUD, fromWorkspace: CLOUD });
+          expect(ambiguous.status).toBe(409);
+          expect(ambiguous.body.error).toBe('AMBIGUOUS');
+          expect(ambiguous.body.message).toContain(CODEV);
+          expect(ambiguous.body.message).toContain(WORK);
+          expect(ambiguous.body.message).toContain('afx workspace name <name>');
+          expect(allRows()).toHaveLength(0);
+
+          const named = await setName(WORK, 'work');
+          expect(named).toEqual({ status: 200, body: { explicitName: 'work', addressName: 'work' } });
+
+          const writes = allRunning();
+          const toCodev = await send('codev:architect', 'architect:main', { workspace: CLOUD, fromWorkspace: CLOUD });
+          const toWork = await send('work:architect', 'architect:main', { workspace: CLOUD, fromWorkspace: CLOUD });
+          expect(toCodev.body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'main' });
+          expect(toWork.body).toMatchObject({ ok: true, delivered: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CODEV, WORK]);
+          await vi.waitFor(() => expect(writes['codev/main'].mock.calls.length).toBeGreaterThan(0));
+        });
+
+        it('stores the name lower-cased, whatever case it was given in', async () => {
+          const { status, body } = await setName(WORK, 'Work-2');
+          expect(status).toBe(200);
+          expect(body).toEqual({ explicitName: 'work-2', addressName: 'work-2' });
+          expect(storedName(WORK)).toBe('work-2');
+        });
+
+        it.each([
+          ['a reserved word', 'architect', 400, 'RESERVED_NAME'],
+          ['a reserved word in another case', 'Builder', 400, 'RESERVED_NAME'],
+          ['the alias arch', 'arch', 400, 'RESERVED_NAME'],
+          ['a character outside the allowed set', 'my notes', 400, 'INVALID_NAME'],
+          ['a colon', 'a:b', 400, 'INVALID_NAME'],
+          ['an empty name', '', 400, 'INVALID_NAME'],
+          ['a name too long to be written in an address', 'x'.repeat(600), 400, 'INVALID_NAME'],
+          ['the basename of another workspace', 'codev-cloud', 409, 'NAME_TAKEN'],
+          ['that basename in another letter case', 'Codev-Cloud', 409, 'NAME_TAKEN'],
+        ])('refuses %s, with the reason, and stores nothing', async (_what, name, status, code) => {
+          const result = await setName(WORK, name);
+          expect(result.status).toBe(status);
+          expect(result.body.error).toBe(code);
+          expect(typeof result.body.message).toBe('string');
+          expect(storedName(WORK)).toBeNull();
+        });
+
+        it('accepts a long name: the only length limit is that it fits in an address', async () => {
+          const long = 'x'.repeat(200);
+          expect(await setName(WORK, long)).toEqual({ status: 200, body: { explicitName: long, addressName: long } });
+          expect(storedName(WORK)).toBe(long);
+        });
+
+        // The two answers left for when the table disagrees with the validation that just
+        // passed. Neither can be reached through the route on POSIX (it takes a row stored
+        // under another spelling of the path), so a trigger stands in for the disagreement.
+        describe('when the write does not store what validation allowed', () => {
+          afterEach(() => {
+            sendDbHolder.db.exec('DROP TRIGGER IF EXISTS test_name_race; DROP TRIGGER IF EXISTS test_name_ignored;');
+          });
+
+          it('the unique index refuses the name: 409 NAME_TAKEN, and nothing is stored', async () => {
+            // Another workspace takes the name between the check and the write.
+            sendDbHolder.db.exec(`
+              CREATE TRIGGER test_name_race BEFORE UPDATE OF address_name ON known_workspaces
+              WHEN NEW.address_name = 'raced' AND OLD.workspace_path <> '${CLOUD}'
+              BEGIN UPDATE known_workspaces SET address_name = 'raced' WHERE workspace_path = '${CLOUD}'; END;
+            `);
+            const result = await setName(WORK, 'raced');
+            expect(result.status).toBe(409);
+            expect(result.body.error).toBe('NAME_TAKEN');
+            expect(result.body.message).toContain("'raced'");
+            expect(storedName(WORK)).toBeNull();
+            expect(storedName(CLOUD)).toBeNull();
+          });
+
+          it('the write matches no row: 500, not a success that names nothing', async () => {
+            sendDbHolder.db.exec(`
+              CREATE TRIGGER test_name_ignored BEFORE UPDATE OF address_name ON known_workspaces
+              BEGIN SELECT RAISE(IGNORE); END;
+            `);
+            const result = await setName(WORK, 'work');
+            expect(result.status).toBe(500);
+            expect(result.body.error).toBe('INTERNAL_ERROR');
+            expect(result.body.message).toContain('was not stored');
+            expect(result.body.explicitName).toBeUndefined();
+            expect(storedName(WORK)).toBeNull();
+          });
+        });
+
+        it('an error about a named workspace calls it what the sender wrote, not its directory', async () => {
+          await setName(CLOUD, 'cloud');
+          const result = await send('cloud:architect:ghost', 'architect:main');
+          expect(result.status).toBe(404);
+          expect(result.body.message).toContain("workspace 'cloud'");
+          expect(result.body.message).toContain('Front door: cloud:architect');
+          expect(result.body.message).not.toContain('codev-cloud');
+        });
+
+        it('refuses the explicit name of another workspace, in any letter case', async () => {
+          expect((await setName(CLOUD, 'cloud')).status).toBe(200);
+          for (const name of ['cloud', 'CLOUD']) {
+            const result = await setName(WORK, name);
+            expect(result.status).toBe(409);
+            expect(result.body.error).toBe('NAME_TAKEN');
+            expect(result.body.message).toContain(CLOUD);
+          }
+          expect(storedName(WORK)).toBeNull();
+          expect(storedName(CLOUD)).toBe('cloud');
+        });
+
+        it('refuses the basename of a workspace that is registered but not running', async () => {
+          // CLOUD is registered and stopped.
+          liveAgents({ [CODEV]: { architects: ['main'] }, [WORK]: { architects: ['main'] } });
+          const result = await setName(WORK, 'codev-cloud');
+          expect(result.status).toBe(409);
+          expect(result.body.error).toBe('NAME_TAKEN');
+          expect(result.body.message).toContain(CLOUD);
+        });
+
+        it('names a workspace that is registered but not running', async () => {
+          liveAgents({ [CODEV]: { architects: ['main'] } });
+          expect(await setName(WORK, 'work')).toEqual({ status: 200, body: { explicitName: 'work', addressName: 'work' } });
+        });
+
+        it('refuses a workspace Tower has not registered (404), a body with no name (400) and another method (405)', async () => {
+          const unknown = await setName(path.join(root, 'nowhere'), 'x');
+          expect(unknown.status).toBe(404);
+          expect(unknown.body.error).toBe('NOT_FOUND');
+
+          for (const bad of [undefined, 7, { a: 1 }]) {
+            const result = await setName(WORK, bad);
+            expect(result.status).toBe(400);
+            expect(result.body.error).toBe('INVALID_PARAMS');
+          }
+          expect((await setName(WORK, 'work', 'POST')).status).toBe(405);
+          expect(storedName(WORK)).toBeNull();
+        });
+
+        it('lets a workspace set the name it already has, and change it; the old name stops resolving at once', async () => {
+          await setName(WORK, 'work');
+          expect((await setName(WORK, 'work')).status).toBe(200);
+          expect((await setName(WORK, 'office')).body).toEqual({ explicitName: 'office', addressName: 'office' });
+
+          const old = await send('work:architect', 'architect:main');
+          expect(old.status).toBe(404);
+          expect(old.body.error).toBe('NOT_FOUND');
+          expect((await send('office:architect', 'architect:main')).body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([WORK]);
+          // ...and the name it gave up is free for another workspace.
+          expect((await setName(CLOUD, 'work')).status).toBe(200);
+        });
+
+        it('a named workspace no longer answers to its basename', async () => {
+          await setName(CLOUD, 'cloud');
+          const result = await send('codev-cloud:architect', 'architect:main');
+          expect(result.status).toBe(404);
+          expect(result.body.message).toContain("addressed as 'cloud'");
+          expect(allRows()).toHaveLength(0);
+        });
+
+        it('--clear: the workspace resolves by its basename again, and the name is free', async () => {
+          await setName(CLOUD, 'cloud');
+          const cleared = await setName(CLOUD, null);
+          expect(cleared).toEqual({ status: 200, body: { explicitName: null, addressName: 'codev-cloud' } });
+          expect(storedName(CLOUD)).toBeNull();
+
+          expect((await send('cloud:architect', 'architect:main')).status).toBe(404);
+          expect((await send('codev-cloud:architect', 'architect:main')).body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect((await setName(WORK, 'cloud')).status).toBe(200);
+        });
+
+        it('--clear on a workspace whose basename is shared says it now has no address name, and why', async () => {
+          await setName(WORK, 'work');
+          const cleared = await setName(WORK, null);
+          expect(cleared.status).toBe(200);
+          expect(cleared.body.explicitName).toBeNull();
+          expect(cleared.body.addressName).toBeNull();
+          expect(cleared.body.unaddressableReason).toContain(CODEV);
+          expect(cleared.body.unaddressableReason).toContain('afx workspace name <name>');
+        });
+
+        it('a workspace registered later whose basename equals an existing explicit name does not take the name', async () => {
+          // CLOUD is named `extra` while no directory is called that.
+          expect((await setName(CLOUD, 'extra')).status).toBe(200);
+          // Then a workspace whose directory is `extra` arrives.
+          const EXTRA = path.join(root, 'extra');
+          fs.mkdirSync(EXTRA);
+          setArchitectByName(EXTRA, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          register(EXTRA);
+          const writes = liveAgents({
+            [CODEV]: { architects: ['main'] },
+            [CLOUD]: { architects: ['main'] },
+            [EXTRA]: { architects: ['main'] },
+          });
+
+          // The name keeps reaching the workspace that holds it.
+          expect((await send('extra:architect', 'architect:main')).body).toMatchObject({ ok: true, delivered: true });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CLOUD]);
+          expect(writes['extra/main']).not.toHaveBeenCalled();
+
+          // With the holder stopped the address fails: it is never delivered to the newcomer,
+          // which is reported as needing a name of its own.
+          liveAgents({ [CODEV]: { architects: ['main'] }, [EXTRA]: { architects: ['main'] } });
+          const stopped = await send('extra:architect', 'architect:main');
+          expect(stopped.status).toBe(404);
+          expect(stopped.body.message).toContain(`Workspace 'extra' (${CLOUD}) is not running.`);
+          expect(stopped.body.message).toContain(EXTRA);
+          expect(stopped.body.message).toContain('a name of its own');
+          expect(allRows()).toHaveLength(1);
+
+          // Given one, the newcomer is reached by it.
+          expect((await setName(EXTRA, 'extra-2')).status).toBe(200);
+          expect((await send('extra-2:architect', 'architect:main')).body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([CLOUD, EXTRA]);
+        });
+
+        it('a workspace whose basename has a space is still reached by its local address', async () => {
+          const NOTES = path.join(root, 'My Notes');
+          fs.mkdirSync(NOTES);
+          setArchitectByName(NOTES, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          register(NOTES);
+          liveAgents({ [CODEV]: { architects: ['main'] }, [NOTES]: { architects: ['main'] } });
+
+          const { status, body } = await send('My Notes:architect', 'architect:main');
+          expect(status).toBe(200);
+          expect(body).toMatchObject({ ok: true, resolvedTo: 'main' });
+          expect(allRows().map((r) => r.workspace_path)).toEqual([NOTES]);
+        });
+
+        it('a builder reaches its own architect with its workspace\'s explicit name in front', async () => {
+          await setName(CODEV, 'core');
+          const own = await send('core:architect:review', BUILDER);
+          expect(own.body).toMatchObject({ ok: true, resolvedTo: 'review' });
+          // Affinity too: `core:architect` from the builder is its spawning architect, not `main`.
+          expect((await send('core:architect', BUILDER)).body).toMatchObject({ ok: true, resolvedTo: 'review' });
+          expect(allRows().map((r) => [r.workspace_path, r.to_agent])).toEqual([[CODEV, 'review'], [CODEV, 'review']]);
+        });
+      });
+    });
+
     describe('interrupt honours the per-harness write strategy (Issue #1567)', () => {
       const LONG = 'u'.repeat(300); // over BRACKET_MIN_BYTES → the bracketed/chunked path
 

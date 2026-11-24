@@ -184,6 +184,25 @@ describe('GET /api/inbox', () => {
     expect(rows[0]).not.toHaveProperty('formattedMessage');
   });
 
+  // Spec 1940: a message from another workspace is stored as before. The sender's address
+  // is composed for the frame only; the row keeps the local id and the local path, which
+  // is what this list and `afx inbox` read.
+  it('lists a message from another workspace under the sender\'s local id, not an address', async () => {
+    const row = seedHeld({ toAgent: 'tunnel', fromAgent: 'architect:review', fromWorkspace: '/home/user/codev' });
+    const res = makeRes();
+    await handleRequest(makeReq('GET', '/api/inbox'), res, makeCtx());
+    expect((JSON.parse(res._body) as Array<Record<string, unknown>>)[0]).toMatchObject({
+      id: row.id,
+      workspacePath: WS,
+      toAgent: 'tunnel',
+      fromAgent: 'architect:review',
+    });
+
+    const shown = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox/${row.id}`), shown, makeCtx());
+    expect(JSON.parse(shown._body)).toMatchObject({ fromAgent: 'architect:review', fromWorkspace: '/home/user/codev' });
+  });
+
   it('normalizes the escalated flag from SQLite 0/1 to a boolean', async () => {
     const row = seedHeld();
     mailbox.markEscalated(holder.db, row.id, 2000);

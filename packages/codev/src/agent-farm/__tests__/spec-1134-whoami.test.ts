@@ -14,13 +14,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import Database from 'better-sqlite3';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+import { runGlobalMigrations } from '../db/migrations.js';
 // Spec 1658 (M6): fixtures keyed the way the code keys them (Windows canonical, POSIX realpath).
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
+import { parseAddress } from '@cluesmith/codev-sdk/address';
+import { findWorkspaceByAddressName } from '../utils/workspace-address.js';
 
 // Redirect global.db to a per-test temp file (Issue #1118 pattern).
 const dbState = vi.hoisted(() => ({ globalDbPath: '' }));
@@ -60,12 +63,21 @@ describe('Spec 1134 — afx whoami', () => {
     db.close();
   }
 
-  function seedKnownWorkspace(name: string): void {
+  function seedKnownWorkspace(name: string, addressName: string | null = null): void {
     const db = openDb();
-    db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(
+    db.prepare('INSERT INTO known_workspaces (workspace_path, name, address_name) VALUES (?, ?, ?)').run(
       normalizeWorkspacePath(workspacePath),
       name,
+      addressName,
     );
+    db.close();
+  }
+
+  /** Another workspace Tower has registered and has a terminal for: a running one. */
+  function seedRunningWorkspace(path: string): void {
+    const db = openDb();
+    db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(path, basename(path));
+    db.prepare("INSERT INTO terminal_sessions (id, workspace_path, type) VALUES (?, ?, 'architect')").run(`term-${path}`, path);
     db.close();
   }
 
@@ -202,24 +214,46 @@ describe('Spec 1134 — afx whoami', () => {
   // Output formats.
   describe('output formats', () => {
     it('formats the human-readable lines exactly as specified', () => {
+      // Spec 1940 added the `address` line, after the lines that were there before it.
       expect(
-        formatIdentity({ type: 'builder', workspace: 'codev', name: 'builder-spir-984', architect: 'main' }),
-      ).toBe('workspace: codev\ntype: builder\nname: builder-spir-984\narchitect: main');
-      expect(formatIdentity({ type: 'architect', workspace: 'codev', name: 'main' })).toBe(
-        'workspace: codev\ntype: architect\nname: main',
-      );
+        formatIdentity({
+          type: 'builder',
+          workspace: 'codev',
+          name: 'builder-spir-984',
+          architect: 'main',
+          address: 'codev:builder-spir-984',
+        }),
+      ).toBe('workspace: codev\ntype: builder\nname: builder-spir-984\narchitect: main\naddress: codev:builder-spir-984');
+      expect(
+        formatIdentity({ type: 'architect', workspace: 'codev', name: 'main', address: 'codev:architect:main' }),
+      ).toBe('workspace: codev\ntype: architect\nname: main\naddress: codev:architect:main');
+    });
+
+    it('says why when there is no address to give, on the same line', () => {
+      expect(
+        formatIdentity({ type: 'architect', workspace: 'codev', name: 'main', addressUnavailable: 'no name' }),
+      ).toBe('workspace: codev\ntype: architect\nname: main\naddress: none (no name)');
     });
 
     it('emits the JSON schema with architect omitted (not null) when unknown', () => {
-      expect(identityToJson({ type: 'builder', workspace: 'codev', name: 'b', architect: 'main' })).toEqual({
+      expect(
+        identityToJson({ type: 'builder', workspace: 'codev', name: 'b', architect: 'main', address: 'codev:b' }),
+      ).toEqual({
         workspace: 'codev',
         type: 'builder',
         name: 'b',
         architect: 'main',
+        address: 'codev:b',
       });
-      const withoutArchitect = identityToJson({ type: 'builder', workspace: 'codev', name: 'b' });
-      expect(withoutArchitect).toEqual({ workspace: 'codev', type: 'builder', name: 'b' });
+      const withoutArchitect = identityToJson({ type: 'builder', workspace: 'codev', name: 'b', address: 'codev:b' });
+      expect(withoutArchitect).toEqual({ workspace: 'codev', type: 'builder', name: 'b', address: 'codev:b' });
       expect(JSON.stringify(withoutArchitect)).not.toContain('architect');
+    });
+
+    it('emits addressUnavailable in place of address when there is none (never a null address)', () => {
+      const payload = identityToJson({ type: 'architect', workspace: 'codev', name: 'main', addressUnavailable: 'no name' });
+      expect(payload).toEqual({ workspace: 'codev', type: 'architect', name: 'main', addressUnavailable: 'no name' });
+      expect(payload).not.toHaveProperty('address');
     });
   });
 
@@ -260,6 +294,7 @@ describe('Spec 1134 — afx whoami', () => {
         type: 'builder',
         name: 'builder-spir-984',
         architect: 'main',
+        address: 'workspace:builder-spir-984',
       });
     });
 
@@ -297,6 +332,216 @@ describe('Spec 1134 — afx whoami', () => {
       expect(process.exitCode).toBeUndefined();
       expect(stderr.join('')).toContain('no matching architect row');
       expect(stdout.join('')).toContain('name: ghost');
+    });
+
+    // Spec 1940: the address is one added line; the lines before it and the exit code are as they were.
+    it('adds the address as the last line and changes no line before it', async () => {
+      seedBuilder('builder-spir-984', 'main');
+      process.chdir(worktreePath);
+      await whoami({});
+      expect(process.exitCode).toBeUndefined();
+      expect(stdout.join('')).toBe(
+        'workspace: workspace\ntype: builder\nname: builder-spir-984\narchitect: main\naddress: workspace:builder-spir-984\n',
+      );
+    });
+
+    it('still exits 0, with the reason on the address line, when the workspace has no address name', async () => {
+      seedBuilder('builder-spir-984', 'main');
+      seedRunningWorkspace(join(tmpRoot, 'elsewhere', 'workspace'));
+      process.chdir(worktreePath);
+      await whoami({});
+      expect(process.exitCode).toBeUndefined();
+      const lines = stdout.join('').trimEnd().split('\n');
+      expect(lines.slice(0, 4)).toEqual(['workspace: workspace', 'type: builder', 'name: builder-spir-984', 'architect: main']);
+      expect(lines[4]).toMatch(/^address: none \(this workspace has no address name: .*afx workspace name <name>\)$/);
+      expect(stderr.join('')).toBe('');
+    });
+  });
+
+  // Spec 1940: the caller's own address, in the form another workspace on this Tower types.
+  describe('the caller\'s own address (Spec 1940)', () => {
+    const key = () => normalizeWorkspacePath(workspacePath);
+
+    it.each([
+      ['the main architect', 'main', 'workspace:architect:main'],
+      ['a named architect', 'review', 'workspace:architect:review'],
+    ])('gives %s as <workspace>:architect:<name>', (_who, name, address) => {
+      openDb().close();
+      process.chdir(workspacePath);
+      expect(resolveIdentity(archEnv(name)).address).toBe(address);
+    });
+
+    it('gives a builder as <workspace>:<builder id>', () => {
+      seedBuilder('builder-spir-984', 'review');
+      process.chdir(worktreePath);
+      expect(resolveIdentity(noEnv).address).toBe('workspace:builder-spir-984');
+    });
+
+    it('uses the workspace\'s explicit address name, not the display name or the directory name', () => {
+      seedKnownWorkspace('Display Name', 'core');
+      process.chdir(workspacePath);
+      const identity = resolveIdentity(archEnv('main'));
+      expect(identity.workspace).toBe('Display Name');
+      expect(identity.address).toBe('core:architect:main');
+    });
+
+    it('is the address the naming rules resolve back to this workspace', () => {
+      seedKnownWorkspace('workspace', 'core');
+      process.chdir(workspacePath);
+      const { address } = resolveIdentity(archEnv('review'));
+      const parsed = parseAddress(address!);
+      if (!parsed.ok) throw new Error(parsed.error.message);
+      expect(parsed.address).toMatchObject({ kind: 'architect', name: 'review' });
+      // The workspace part of what whoami printed, looked up the way Tower looks it up.
+      expect(
+        findWorkspaceByAddressName(parsed.address.workspace!, [{ workspacePath: key(), explicitName: 'core' }], [key()]),
+      ).toEqual({ ok: true, workspacePath: key() });
+    });
+
+    it('has none while another running workspace shares the directory name, and says how to get one', () => {
+      openDb().close();
+      seedRunningWorkspace(join(tmpRoot, 'elsewhere', 'workspace'));
+      process.chdir(workspacePath);
+      const identity = resolveIdentity(archEnv('main'));
+      expect(identity).toMatchObject({ type: 'architect', name: 'main' });
+      expect(identity.address).toBeUndefined();
+      expect(identity.addressUnavailable).toContain('shares the directory name');
+      expect(identity.addressUnavailable).toContain('afx workspace name <name>');
+    });
+
+    it('keeps its address when the workspace sharing its directory name is not running', () => {
+      const db = openDb();
+      db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(
+        join(tmpRoot, 'elsewhere', 'workspace'),
+        'workspace',
+      );
+      db.close();
+      process.chdir(workspacePath);
+      expect(resolveIdentity(archEnv('main')).address).toBe('workspace:architect:main');
+    });
+
+    it('has none when its directory name is another workspace\'s explicit name', () => {
+      const db = openDb();
+      db.prepare('INSERT INTO known_workspaces (workspace_path, name, address_name) VALUES (?, ?, ?)').run(
+        join(tmpRoot, 'other'),
+        'other',
+        'workspace',
+      );
+      db.close();
+      process.chdir(workspacePath);
+      const identity = resolveIdentity(archEnv('main'));
+      expect(identity.address).toBeUndefined();
+      expect(identity.addressUnavailable).toContain(`is the name of the workspace ${join(tmpRoot, 'other')}`);
+    });
+
+    it('has none when the directory name cannot be written in an address', () => {
+      const spaced = join(tmpRoot, 'My Notes');
+      mkdirSync(join(spaced, '.git'), { recursive: true });
+      openDb().close();
+      process.chdir(spaced);
+      const identity = resolveIdentity(archEnv('main'));
+      expect(identity.address).toBeUndefined();
+      expect(identity.addressUnavailable).toContain('cannot be written in an address');
+    });
+
+    it('says global.db could not be read when it is missing; the identity is unaffected', () => {
+      process.chdir(workspacePath);
+      const identity = resolveIdentity(archEnv('main'));
+      expect(identity).toMatchObject({ type: 'architect', name: 'main' });
+      expect(identity.address).toBeUndefined();
+      expect(identity.addressUnavailable).toContain('global.db could not be read');
+    });
+
+    describe('a global.db at schema 19: a Tower of this version has not opened it yet', () => {
+      /**
+       * The database as the Tower before Spec 1940 left it: every table of today's schema,
+       * `known_workspaces` in its shape before migration v20 (no `address_name`), and the
+       * markers 1 to 19. That older Tower may well be running on it, with terminals.
+       */
+      function seedSchema19(): void {
+        const db = openDb();
+        db.exec(`
+          DROP INDEX idx_known_workspaces_address_name;
+          DROP TABLE known_workspaces;
+          CREATE TABLE known_workspaces (
+            workspace_path TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+        `);
+        for (let version = 1; version <= 19; version++) {
+          db.prepare('INSERT INTO _migrations (version) VALUES (?)').run(version);
+        }
+        const path = normalizeWorkspacePath(workspacePath);
+        db.prepare('INSERT INTO known_workspaces (workspace_path, name) VALUES (?, ?)').run(path, 'workspace');
+        db.prepare("INSERT INTO terminal_sessions (id, workspace_path, type) VALUES ('term-1', ?, 'architect')").run(path);
+        db.close();
+      }
+
+      it('says the database has not been migrated and that restarting Tower fixes it, with the commands', () => {
+        seedSchema19();
+        process.chdir(workspacePath);
+
+        const identity = resolveIdentity(archEnv('main'));
+
+        expect(identity).toMatchObject({ type: 'architect', name: 'main', workspace: 'workspace' });
+        expect(identity.address).toBeUndefined();
+        expect(identity.addressUnavailable).toBe(
+          'global.db has not been migrated by a Tower of this version, so it holds no workspace names; ' +
+            'restarting Tower migrates it: afx tower stop && afx tower start',
+        );
+        expect(formatIdentity(identity).split('\n').at(-1)).toBe(`address: none (${identity.addressUnavailable})`);
+      });
+
+      it('does not tell someone whose Tower is running to start it', () => {
+        seedSchema19();
+        process.chdir(workspacePath);
+        expect(resolveIdentity(archEnv('main')).addressUnavailable).not.toContain('afx workspace start');
+      });
+
+      it('gives the address once Tower\'s own migration has run on that database', () => {
+        seedSchema19();
+        const db = new Database(dbState.globalDbPath);
+        runGlobalMigrations(db, { log: () => {}, runDir: join(tmpRoot, 'run') });
+        db.close();
+        process.chdir(workspacePath);
+
+        expect(resolveIdentity(archEnv('main')).address).toBe('workspace:architect:main');
+      });
+
+      it('says the same for a builder; its identity is unaffected', () => {
+        seedBuilder('builder-spir-984', 'main');
+        seedSchema19();
+        process.chdir(worktreePath);
+
+        const identity = resolveIdentity(noEnv);
+
+        expect(identity).toMatchObject({ type: 'builder', name: 'builder-spir-984', architect: 'main' });
+        expect(identity.addressUnavailable).toContain('has not been migrated by a Tower of this version');
+      });
+    });
+
+    it('reports any other failure to read the names as itself, not as a database to migrate', () => {
+      seedKnownWorkspace('workspace');
+      const db = new Database(dbState.globalDbPath);
+      db.exec('DROP TABLE terminal_sessions');
+      db.close();
+      process.chdir(workspacePath);
+
+      const identity = resolveIdentity(archEnv('main'));
+
+      expect(identity.address).toBeUndefined();
+      expect(identity.addressUnavailable).toBe(
+        'the name of this workspace could not be read from global.db: no such table: terminal_sessions',
+      );
+    });
+
+    it('never opens global.db for writing', () => {
+      seedKnownWorkspace('workspace', 'core');
+      const before = statSync(dbState.globalDbPath).mtimeMs;
+      process.chdir(workspacePath);
+      resolveIdentity(archEnv('main'));
+      expect(statSync(dbState.globalDbPath).mtimeMs).toBe(before);
     });
   });
 });

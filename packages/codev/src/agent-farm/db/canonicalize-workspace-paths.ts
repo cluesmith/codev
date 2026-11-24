@@ -26,7 +26,8 @@
  *   alive wins; else the later `started_at`; a full tie keeps the row already
  *   under the canonical key. Agent rows are settled before terminal rows, so a
  *   surviving agent's terminal is the live one whenever exactly one is live.
- * - `known_workspaces`: one row survives, with the later `last_launched_at`.
+ * - `known_workspaces`: one row survives, with the later `last_launched_at`, and with the
+ *   explicit address name (Spec 1940): its own, else the dropped row's.
  * - `cron_tasks`, per (workspace, task_name): the later `last_run` wins; a moved
  *   row's id is recomputed, because cron ids hash the workspace path.
  * - `mailbox`, `file_tabs`: no workspace-scoped key, so every row moves (the
@@ -116,13 +117,15 @@ function terminalAlive(db: Database.Database, terminalId: string | null, opts: C
 }
 
 function moveKnownWorkspace(db: Database.Database, from: string, to: string, report: CanonicalizeReport): void {
-  const old = db.prepare('SELECT last_launched_at FROM known_workspaces WHERE workspace_path = ?').get(from) as
-    | { last_launched_at: string }
-    | undefined;
+  // `address_name` (Spec 1940) is read only where the column exists: this runs against
+  // whatever shape the database has reached.
+  const named = (db.prepare('PRAGMA table_info(known_workspaces)').all() as Array<{ name: string }>)
+    .some((c) => c.name === 'address_name');
+  type Row = { last_launched_at: string; address_name?: string | null };
+  const select = `SELECT last_launched_at${named ? ', address_name' : ''} FROM known_workspaces WHERE workspace_path = ?`;
+  const old = db.prepare(select).get(from) as Row | undefined;
   if (!old) return;
-  const existing = db.prepare('SELECT last_launched_at FROM known_workspaces WHERE workspace_path = ?').get(to) as
-    | { last_launched_at: string }
-    | undefined;
+  const existing = db.prepare(select).get(to) as Row | undefined;
   if (!existing) {
     db.prepare('UPDATE known_workspaces SET workspace_path = ? WHERE workspace_path = ?').run(to, from);
     return;
@@ -130,7 +133,11 @@ function moveKnownWorkspace(db: Database.Database, from: string, to: string, rep
   if (old.last_launched_at > existing.last_launched_at) {
     db.prepare('UPDATE known_workspaces SET last_launched_at = ? WHERE workspace_path = ?').run(old.last_launched_at, to);
   }
+  // The dropped row goes first: its name is unique, and the survivor may be about to take it.
   db.prepare('DELETE FROM known_workspaces WHERE workspace_path = ?').run(from);
+  if (named && !existing.address_name && old.address_name) {
+    db.prepare('UPDATE known_workspaces SET address_name = ? WHERE workspace_path = ?').run(old.address_name, to);
+  }
   report.dropped.push({ table: 'known_workspaces', key: from });
 }
 

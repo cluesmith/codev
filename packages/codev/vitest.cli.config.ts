@@ -10,9 +10,11 @@
  */
 
 import { defineConfig } from 'vitest/config';
+import { MAX_WORKERS } from './vitest-workers';
 
 export default defineConfig({
   test: {
+    maxWorkers: MAX_WORKERS,  // #1956; see vitest-workers.ts
     // Sandboxes the real agy binary and the user-global metrics DB (#1323).
     // Spawned CLI children inherit the pins via `{ ...process.env }`.
     setupFiles: ['./vitest-setup.ts'],

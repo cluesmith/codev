@@ -497,6 +497,35 @@ describe('State Management', () => {
 
   // Spec 786 Phase 1: removeArchitect helper and clearRuntime variant.
   // Bugfix #826: scoped by workspace_path.
+  // Issue #1633: callers take "the first registered" off this list.
+  describe('getArchitects order', () => {
+    const at = (name: string, startedAt: string) => ({ name, cmd: 'claude', startedAt });
+
+    it('is registration order, not name order', () => {
+      state.setArchitectByName(WS, 'zeta', at('zeta', '2026-01-01T00:00:00.000Z'));
+      state.setArchitectByName(WS, 'alpha', at('alpha', '2026-06-01T00:00:00.000Z'));
+      state.setArchitectByName(WS, 'mid', at('mid', '2026-03-01T00:00:00.000Z'));
+
+      expect(state.getArchitects(WS).map((a) => a.name)).toEqual(['zeta', 'mid', 'alpha']);
+    });
+
+    it('puts main first whenever it was registered', () => {
+      state.setArchitectByName(WS, 'alpha', at('alpha', '2026-01-01T00:00:00.000Z'));
+      state.setArchitectByName(WS, 'main', at('main', '2026-06-01T00:00:00.000Z'));
+
+      expect(state.getArchitects(WS).map((a) => a.name)).toEqual(['main', 'alpha']);
+    });
+
+    it('agrees with getArchitect and loadState on who is first', () => {
+      state.setArchitectByName(WS, 'zeta', at('zeta', '2026-01-01T00:00:00.000Z'));
+      state.setArchitectByName(WS, 'alpha', at('alpha', '2026-06-01T00:00:00.000Z'));
+
+      expect(state.getArchitects(WS)[0].name).toBe('zeta');
+      expect(state.getArchitect(WS)?.name).toBe('zeta');
+      expect(state.loadState(WS).architects[0].name).toBe('zeta');
+    });
+  });
+
   describe('removeArchitect (Spec 786 + Bugfix #826)', () => {
     it('removes a named architect row from state.db', () => {
       state.setArchitectByName(WS, 'ob-refine', {

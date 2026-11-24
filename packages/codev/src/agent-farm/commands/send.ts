@@ -25,6 +25,8 @@ import { TowerClient } from '../lib/tower-client.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
+import { parseAddress } from '@cluesmith/codev-sdk/address';
+import { olderTowerError } from '../utils/older-tower.js';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
@@ -328,6 +330,41 @@ async function sendWithRetry(
   }
 }
 
+/** Whether `to` is written `<workspace>:architect:<name>`, the form Spec 1940 added. */
+function namesAnArchitectInAWorkspace(to: string): boolean {
+  const parsed = parseAddress(to);
+  if (!parsed.ok) return false;
+  const { address } = parsed;
+  return (
+    address.tower === undefined &&
+    address.workspace !== undefined &&
+    address.kind === 'architect' &&
+    address.name !== undefined
+  );
+}
+
+/**
+ * Whether a failed send failed because the running Tower is from before Spec 1940.
+ *
+ * Such a Tower reads `<workspace>:architect:<name>` with its own parser, as a builder
+ * called `architect:<name>`, and answers that it was not found: true of the address it
+ * read, and no help to someone who has just upgraded and typed the new form. So when that
+ * form comes back not found, the address book is asked. A Tower that has no address book
+ * is the older one; a Tower that answers knows the form, and its not-found stands.
+ *
+ * Only on that failure, so a send that succeeds, or fails any other way, costs nothing more.
+ */
+async function failedForAnOlderTower(
+  client: TowerClient,
+  to: string,
+  result: SendResult,
+  caller: { workspace?: string; from: string },
+): Promise<boolean> {
+  if (result.errorCode !== 'NOT_FOUND' || !namesAnArchitectInAWorkspace(to)) return false;
+  const book = await client.getAddressBook(caller);
+  return !book.ok && book.unknownRoute === true;
+}
+
 /**
  * Read message from stdin
  */
@@ -547,6 +584,9 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
       }, retry);
 
       if (!result.ok) {
+        if (await failedForAnOlderTower(client, target!, result, { workspace, from })) {
+          throw new Error(olderTowerError('does not know an address of the form <workspace>:architect:<name>'));
+        }
         throw new Error(result.error || 'Unknown error');
       }
 

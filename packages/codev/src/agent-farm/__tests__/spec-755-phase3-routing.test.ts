@@ -35,6 +35,7 @@ vi.mock('../state.js', () => ({
 }));
 
 import {
+  parseTarget,
   resolveTarget,
   isResolveError,
   legacyBuilderErrorMessage,
@@ -43,6 +44,17 @@ import {
 } from '../servers/tower-messages.js';
 
 const WS = '/home/user/project';
+
+/**
+ * Resolve address text the way the send route does (Spec 1940): read it once with the
+ * shared parser, then resolve the structured address for a sender. `workspace` is the
+ * sender's workspace, which is also where an address that names none is read.
+ */
+function resolve(target: string, workspace?: string, sender?: string) {
+  const address = parseTarget(target);
+  if (isResolveError(address)) return address;
+  return resolveTarget(address, { id: sender, workspace });
+}
 
 function mkEntry(architects: Record<string, string>, builders: Record<string, string> = {}): WorkspaceTerminals {
   return {
@@ -65,7 +77,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS, mkEntry({ main: 'term-main' }, { 'spir-100': 'term-b' })]]));
     // Fast path doesn't even touch state.db, so spawningArchitect lookup must not be called.
 
-    const result = resolveTarget('architect', WS, 'spir-100');
+    const result = resolve('architect', WS, 'spir-100');
     expect(isResolveError(result)).toBe(false);
     if (!isResolveError(result)) {
       expect(result.terminalId).toBe('term-main');
@@ -85,7 +97,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('main');
 
-    const result = resolveTarget('architect', WS, 'spir-100');
+    const result = resolve('architect', WS, 'spir-100');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-main');
   });
@@ -97,7 +109,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('sibling');
 
-    const result = resolveTarget('architect', WS, 'spir-100');
+    const result = resolve('architect', WS, 'spir-100');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-sibling');
     expect(result.terminalId).not.toBe('term-main');
@@ -113,7 +125,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue(null); // legacy row
 
-    const result = resolveTarget('architect', WS, 'legacy-1');
+    const result = resolve('architect', WS, 'legacy-1');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-main');
   });
@@ -125,7 +137,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue(null);
 
-    const result = resolveTarget('architect', WS, 'legacy-1');
+    const result = resolve('architect', WS, 'legacy-1');
     expect(isResolveError(result)).toBe(true);
     if (isResolveError(result)) {
       expect(result.code).toBe('NOT_FOUND');
@@ -144,7 +156,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('sibling');
 
-    const result = resolveTarget('architect', WS, 'spir-100');
+    const result = resolve('architect', WS, 'spir-100');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-main');
   });
@@ -157,7 +169,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('sibling');
 
-    const result = resolveTarget('architect', WS, 'spir-100');
+    const result = resolve('architect', WS, 'spir-100');
     expect(isResolveError(result)).toBe(true);
     if (isResolveError(result)) {
       expect(result.code).toBe('NOT_FOUND');
@@ -178,7 +190,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('sibling');
 
-    let result = resolveTarget('architect', WS, 'spir-100');
+    let result = resolve('architect', WS, 'spir-100');
     if (isResolveError(result)) throw new Error('unexpected');
     expect(result.terminalId).toBe('term-1');
 
@@ -189,7 +201,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
       { 'spir-100': 'term-b' },
     )]]));
 
-    result = resolveTarget('architect', WS, 'spir-100');
+    result = resolve('architect', WS, 'spir-100');
     if (isResolveError(result)) throw new Error('unexpected');
     expect(result.terminalId).toBe('term-2-after-reconnect');
   });
@@ -202,7 +214,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
       { main: 'term-main', sibling: 'term-sibling' },
     )]]));
     // sender is undefined.
-    const result = resolveTarget('architect', WS);
+    const result = resolve('architect', WS);
     if (isResolveError(result)) throw new Error('unexpected');
     expect(result.terminalId).toBe('term-main');
     expect(mockLookupBuilderSpawningArchitect).not.toHaveBeenCalled();
@@ -210,16 +222,16 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
 
   // Spoofing rejection / per-architect-by-name routing is exercised
   // end-to-end through the `architect:<name>` parsing block below. The
-  // plain-name lookup variants (e.g. resolveTarget('sibling', WS, ...))
+  // plain-name lookup variants (e.g. resolve('sibling', WS, ...))
   // are intentionally NOT supported: 'sibling' is not a workspace-local
   // agent name, it's an architect's name, and the per-name route must
   // go through the `architect:` prefix.
 
   // ------------------------------------------------------------------
-  // End-to-end `architect:<name>` parsing — Codex caught that parseAddress
-  // was splitting these incorrectly as `project:agent` cross-workspace
-  // addresses. resolveTarget now special-cases `architect:` as the project
-  // prefix and applies the spoofing check.
+  // End-to-end `architect:<name>` parsing — Codex caught that the old two-slot
+  // parser was splitting these incorrectly as `project:agent` cross-workspace
+  // addresses. The shared parser (Spec 1940) reads `architect:<name>` as a named
+  // architect, and the resolver applies the spoofing check.
   // ------------------------------------------------------------------
   it('routes architect:<name> through resolveArchitectByName (allowed when matches)', () => {
     mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS, mkEntry(
@@ -228,7 +240,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('sibling');
 
-    const result = resolveTarget('architect:sibling', WS, 'spir-100');
+    const result = resolve('architect:sibling', WS, 'spir-100');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-sibling');
     expect(result.agent).toBe('sibling');
@@ -241,7 +253,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('main');
 
-    const result = resolveTarget('architect:sibling', WS, 'spir-100');
+    const result = resolve('architect:sibling', WS, 'spir-100');
     expect(isResolveError(result)).toBe(true);
     if (isResolveError(result)) {
       expect(result.code).toBe('NOT_FOUND');
@@ -255,7 +267,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue(undefined); // not a builder
 
-    const result = resolveTarget('architect:sibling', WS, 'architect');
+    const result = resolve('architect:sibling', WS, 'architect');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-sibling');
   });
@@ -265,7 +277,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
       { main: 'term-main' },
     )]]));
 
-    const result = resolveTarget('architect:ghost', WS);
+    const result = resolve('architect:ghost', WS);
     expect(isResolveError(result)).toBe(true);
     if (isResolveError(result)) {
       expect(result.code).toBe('NOT_FOUND');
@@ -276,7 +288,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
   it('returns NO_CONTEXT for architect:<name> without a workspace context', () => {
     mockGetWorkspaceTerminals.mockReturnValue(new Map());
 
-    const result = resolveTarget('architect:sibling');
+    const result = resolve('architect:sibling');
     expect(isResolveError(result)).toBe(true);
     if (isResolveError(result)) {
       expect(result.code).toBe('NO_CONTEXT');
@@ -294,7 +306,7 @@ describe('Spec 755 Phase 3 — routing matrix', () => {
     )]]));
     mockLookupBuilderSpawningArchitect.mockReturnValue('feature-team');
 
-    const result = resolveTarget('architect', WS, 'spir-100');
+    const result = resolve('architect', WS, 'spir-100');
     if (isResolveError(result)) throw new Error(`unexpected: ${result.message}`);
     expect(result.terminalId).toBe('term-ft');
     // Fast path should have been skipped (size === 1 but not 'main' key).

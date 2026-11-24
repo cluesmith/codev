@@ -13,7 +13,10 @@
  * optional: a frame that silently omits the recipient is exactly the defect.
  */
 
+import type { AgentAddress } from '@cluesmith/codev-types';
+import { formatAddress, isAddressComponent } from '@cluesmith/codev-sdk/address';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from './architect-name.js';
+import { WORKSPACE_NAME_COMMAND } from './workspace-address.js';
 
 /**
  * The header label for an architect-framed message (issue #1478).
@@ -298,4 +301,104 @@ export function formatBuilderMessage(builderId: string, toAgent: string, message
   return `### [${senderHeaderLabel(builderId)} MESSAGE${recipient(toAgent)} | ${timestamp}] ###
 ${content}
 ${FOOTER}`;
+}
+
+// ============================================================================
+// Frames for a message from another workspace (Spec 1940, Decision 7, case 2)
+// ============================================================================
+
+/**
+ * How the recipient of a message from another workspace can reply (Spec 1940). The footer
+ * never offers an address the recipient may not use, so the choice is made by Tower, which
+ * knows the rules; this type only carries the answer to the formatter.
+ */
+export type ReplyRoute =
+  /** A command that works when pasted unchanged: `(reply: afx send <address> "…")`. */
+  | { how: 'address'; address: AgentAddress }
+  /** A builder that may not address the sender: it replies through its own architect. */
+  | { how: 'through-architect' }
+  /** The sender's workspace has no address name, so nothing can be sent back to it yet. */
+  | { how: 'no-address' }
+  /** Nothing to say: the plain footer. */
+  | { how: 'none' };
+
+/**
+ * Who sent a message from another workspace, and how to answer it.
+ *
+ * `sender` is the sender's address as the recipient writes it: its `workspace` is the
+ * sending workspace's address name, and is ABSENT when that workspace has no usable one
+ * (an ambiguous or shadowed directory name, or one that does not fit the component rule).
+ */
+export interface CrossWorkspaceOrigin {
+  sender: AgentAddress;
+  reply: ReplyRoute;
+}
+
+/**
+ * An address as text, for a frame. Every part is checked against the component rule here,
+ * whatever the caller checked, so nothing reaches `### [...] ###` framing that could forge
+ * it: a workspace's directory name is the one part of a frame that no route validates. An
+ * address that fails is a caller's mistake and throws, before anything is stored.
+ */
+function addressForFrame(address: AgentAddress): string {
+  if (address.tower !== undefined || address.owner !== undefined) {
+    throw new Error('Cannot format a cross-workspace frame for an address that names a Tower.');
+  }
+  for (const part of [address.workspace, address.name]) {
+    if (part !== undefined && !isAddressComponent(part)) {
+      throw new Error('Cannot format a cross-workspace frame: a part of the address does not fit the address component rule.');
+    }
+  }
+  return formatAddress(address);
+}
+
+function replyFooter(reply: ReplyRoute): string {
+  switch (reply.how) {
+    case 'address':
+      return `${FOOTER}  (reply: afx send ${addressForFrame(reply.address)} "…")`;
+    case 'through-architect':
+      return `${FOOTER}  (reply through your architect: afx send architect "…")`;
+    case 'no-address':
+      return `${FOOTER}  (no reply address; the sender's workspace needs: ${WORKSPACE_NAME_COMMAND})`;
+    case 'none':
+      return FOOTER;
+  }
+}
+
+/**
+ * Format a message whose sender is an agent in ANOTHER workspace on this Tower.
+ *
+ * The header is today's with the sender's workspace-qualified address in place of its bare
+ * id: `### [ARCHITECT codev:architect:review MESSAGE → tunnel | <time>] ###`, or
+ * `BUILDER codev:builder-spir-12` for a builder. The role word comes from the address's
+ * structured kind, never from the shape of a string. The verb follows today's:
+ * `INSTRUCTION` from an architect to a builder, `MESSAGE` otherwise.
+ *
+ * When the sender's workspace has no usable address name the header shows the sender's
+ * local form marked `(another workspace)`, and no directory name is printed.
+ *
+ * The reply hint sits on the footer line, as {@link REPLY_HINT} does, so the frame stays
+ * three lines (see {@link FOOTER}). Raw mode has no frame, so no header and no footer.
+ *
+ * A same-workspace send never comes here; that is what keeps its frame byte-identical.
+ */
+export function formatCrossWorkspaceMessage(
+  origin: CrossWorkspaceOrigin,
+  toAgent: string,
+  recipientIsArchitect: boolean,
+  message: string,
+  raw: boolean = false,
+): string {
+  if (raw) return message;
+
+  const { sender, reply } = origin;
+  const role = sender.kind === 'architect' ? 'ARCHITECT' : 'BUILDER';
+  const from = sender.workspace === undefined
+    ? `${addressForFrame(sender)} (another workspace)`
+    : addressForFrame(sender);
+  const verb = sender.kind === 'architect' && !recipientIsArchitect ? 'INSTRUCTION' : 'MESSAGE';
+  const timestamp = new Date().toISOString();
+  return `### [${role} ${from} ${verb}${recipient(toAgent)} | ${timestamp}] ###
+${message}
+${replyFooter(reply)}`;
 }

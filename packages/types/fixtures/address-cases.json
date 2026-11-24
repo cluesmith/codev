@@ -1,0 +1,974 @@
+{
+  "$comment": "Spec 1940: the one table of address cases. Run by codev-sdk, packages/codev and apps/vscode, each through its own import of the parser, so the three cannot disagree. parse: input -> structured address, or the parse error code. format: address + reader context -> the shortest form correct for that reader; each row also round-trips (parse the text, fill what it leaves out from the reader, get the address back).",
+  "parse": [
+    {
+      "note": "G short 1: my spawning architect",
+      "input": "architect",
+      "address": {
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "G short 2: architect review, my workspace",
+      "input": "architect:review",
+      "address": {
+        "kind": "architect",
+        "name": "review"
+      }
+    },
+    {
+      "note": "G short 3: builder 1940, my workspace",
+      "input": "builder-spir-1940",
+      "address": {
+        "kind": "id",
+        "name": "builder-spir-1940"
+      }
+    },
+    {
+      "note": "G short 4: main architect of codev-cloud, this Tower",
+      "input": "codev-cloud:architect",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "G short 5: architect tunnel in codev-cloud, this Tower",
+      "input": "codev-cloud:architect:tunnel",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "tunnel"
+      }
+    },
+    {
+      "note": "G short 6: workspace name with a dot",
+      "input": "codevos.ai:architect",
+      "address": {
+        "workspace": "codevos.ai",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "G short 7: architect local on my devvm",
+      "input": "afx://devvm/codev:architect:local",
+      "address": {
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "local"
+      }
+    },
+    {
+      "note": "G short 8: builder on my devvm",
+      "input": "afx://devvm/codev:builder-spir-1940",
+      "address": {
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "id",
+        "name": "builder-spir-1940"
+      }
+    },
+    {
+      "note": "G short 9: front door on Sam's mbp",
+      "input": "afx://sam@mbp/codev-cloud:architect",
+      "address": {
+        "owner": "sam",
+        "tower": "mbp",
+        "workspace": "codev-cloud",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "G short 10 and full 10 (the same text): architect data on Sam's studio",
+      "input": "afx://sam@studio/codev-cloud:architect:data",
+      "address": {
+        "owner": "sam",
+        "tower": "studio",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "data"
+      }
+    },
+    {
+      "note": "G short 11: Sam's side writing my front door",
+      "input": "afx://ana@mbp/codev:architect",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "G full 1, 11",
+      "input": "afx://ana@mbp/codev:architect:main",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "main"
+      }
+    },
+    {
+      "note": "G full 2",
+      "input": "afx://ana@mbp/codev:architect:review",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "review"
+      }
+    },
+    {
+      "note": "G full 3",
+      "input": "afx://ana@mbp/codev:builder-spir-1940",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "id",
+        "name": "builder-spir-1940"
+      }
+    },
+    {
+      "note": "G full 4",
+      "input": "afx://ana@mbp/codev-cloud:architect:main",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "main"
+      }
+    },
+    {
+      "note": "G full 5",
+      "input": "afx://ana@mbp/codev-cloud:architect:tunnel",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "tunnel"
+      }
+    },
+    {
+      "note": "G full 6",
+      "input": "afx://ana@mbp/codevos.ai:architect:main",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codevos.ai",
+        "kind": "architect",
+        "name": "main"
+      }
+    },
+    {
+      "note": "G full 7",
+      "input": "afx://ana@devvm/codev:architect:local",
+      "address": {
+        "owner": "ana",
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "local"
+      }
+    },
+    {
+      "note": "G full 8",
+      "input": "afx://ana@devvm/codev:builder-spir-1940",
+      "address": {
+        "owner": "ana",
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "id",
+        "name": "builder-spir-1940"
+      }
+    },
+    {
+      "note": "G full 9",
+      "input": "afx://sam@mbp/codev-cloud:architect:main",
+      "address": {
+        "owner": "sam",
+        "tower": "mbp",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "main"
+      }
+    },
+    {
+      "note": "today: builder by tail",
+      "input": "1940",
+      "address": {
+        "kind": "id",
+        "name": "1940"
+      }
+    },
+    {
+      "note": "today: builder by tail, leading zeros kept for the resolver to strip",
+      "input": "0109",
+      "address": {
+        "kind": "id",
+        "name": "0109"
+      }
+    },
+    {
+      "note": "today: builder in another workspace",
+      "input": "codev-cloud:builder-bugfix-12",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "id",
+        "name": "builder-bugfix-12"
+      }
+    },
+    {
+      "note": "today: builder tail in another workspace",
+      "input": "codev-cloud:12",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "id",
+        "name": "12"
+      }
+    },
+    {
+      "note": "today: shell id",
+      "input": "shell-ab12",
+      "address": {
+        "kind": "id",
+        "name": "shell-ab12"
+      }
+    },
+    {
+      "note": "today: shell id in another workspace",
+      "input": "codev-cloud:shell-ab12",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "id",
+        "name": "shell-ab12"
+      }
+    },
+    {
+      "note": "today: arch is an alias for bare architect",
+      "input": "arch",
+      "address": {
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "today: arch alias as the whole agent part",
+      "input": "codev:arch",
+      "address": {
+        "workspace": "codev",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "today: input is lower-cased",
+      "input": "Codev-Cloud:ARCHITECT",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "today: mixed case builder id",
+      "input": "Builder-SPIR-109",
+      "address": {
+        "kind": "id",
+        "name": "builder-spir-109"
+      }
+    },
+    {
+      "note": "new form is lower-cased too",
+      "input": "Codev-Cloud:Architect:Tunnel",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "tunnel"
+      }
+    },
+    {
+      "note": "arch before a colon is a workspace, never the architect alias",
+      "input": "arch:review",
+      "address": {
+        "workspace": "arch",
+        "kind": "id",
+        "name": "review"
+      }
+    },
+    {
+      "note": "a workspace called builder keeps its front door",
+      "input": "builder:architect",
+      "address": {
+        "workspace": "builder",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "a workspace called arch keeps its front door",
+      "input": "arch:architect",
+      "address": {
+        "workspace": "arch",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "arch alias inside a workspace called arch",
+      "input": "arch:arch",
+      "address": {
+        "workspace": "arch",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "architect:<x> always means a named architect",
+      "input": "architect:architect",
+      "address": {
+        "kind": "architect",
+        "name": "architect"
+      }
+    },
+    {
+      "note": "the first architect is the kind word",
+      "input": "codev:architect:architect",
+      "address": {
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "architect"
+      }
+    },
+    {
+      "note": "a builder id in a workspace called builder",
+      "input": "builder:builder-spir-1",
+      "address": {
+        "workspace": "builder",
+        "kind": "id",
+        "name": "builder-spir-1"
+      }
+    },
+    {
+      "note": "a workspace may be called afx: its front door",
+      "input": "afx:architect",
+      "address": {
+        "workspace": "afx",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "a workspace may be called afx: a builder in it",
+      "input": "afx:builder-spir-1",
+      "address": {
+        "workspace": "afx",
+        "kind": "id",
+        "name": "builder-spir-1"
+      }
+    },
+    {
+      "note": "owner handle with digits and hyphens after its first letter",
+      "input": "afx://s4m-k@mbp/codev:architect",
+      "address": {
+        "owner": "s4m-k",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "local workspace with a space",
+      "input": "my project:architect",
+      "address": {
+        "workspace": "my project",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "local workspace with a space, named architect",
+      "input": "my project:architect:review",
+      "address": {
+        "workspace": "my project",
+        "kind": "architect",
+        "name": "review"
+      }
+    },
+    {
+      "note": "local workspace with an underscore and capitals",
+      "input": "My_Repo:builder-air-7",
+      "address": {
+        "workspace": "my_repo",
+        "kind": "id",
+        "name": "builder-air-7"
+      }
+    },
+    {
+      "note": "surrounding whitespace is trimmed",
+      "input": "  architect:review  ",
+      "address": {
+        "kind": "architect",
+        "name": "review"
+      }
+    },
+    {
+      "note": "scheme, tower and path are lower-cased",
+      "input": "AFX://DevVM/Codev:Architect:Local",
+      "address": {
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "local"
+      }
+    },
+    {
+      "note": "remote arch alias",
+      "input": "afx://devvm/codev:arch",
+      "address": {
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "remote workspace with dot, underscore and hyphen",
+      "input": "afx://devvm/my_repo.v2-x:architect",
+      "address": {
+        "tower": "devvm",
+        "workspace": "my_repo.v2-x",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "remote builder tail",
+      "input": "afx://devvm/codev:1940",
+      "address": {
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "id",
+        "name": "1940"
+      }
+    },
+    {
+      "note": "tower name with digits and hyphens",
+      "input": "afx://dev-vm-2/codev:architect",
+      "address": {
+        "tower": "dev-vm-2",
+        "workspace": "codev",
+        "kind": "architect"
+      }
+    },
+    {
+      "note": "empty",
+      "input": "",
+      "error": "EMPTY_ADDRESS"
+    },
+    {
+      "note": "whitespace only",
+      "input": "   ",
+      "error": "EMPTY_ADDRESS"
+    },
+    {
+      "note": "empty workspace",
+      "input": ":agent",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "empty agent",
+      "input": "codev:",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "empty architect name",
+      "input": "architect:",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "empty component in the middle",
+      "input": "codev::architect",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "whitespace-only component",
+      "input": "codev: :architect",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "two components after architect",
+      "input": "codev:architect:a:b",
+      "error": "TOO_MANY_AFTER_ARCHITECT"
+    },
+    {
+      "note": "two components after architect, no workspace",
+      "input": "architect:a:b",
+      "error": "TOO_MANY_AFTER_ARCHITECT"
+    },
+    {
+      "note": "two components before architect (a Tower written as a workspace)",
+      "input": "devvm:codev:architect",
+      "error": "TOO_MANY_BEFORE_ARCHITECT"
+    },
+    {
+      "note": "two components before a named architect",
+      "input": "devvm:codev:architect:local",
+      "error": "TOO_MANY_BEFORE_ARCHITECT"
+    },
+    {
+      "note": "three components with no architect",
+      "input": "a:b:c",
+      "error": "TOO_MANY_COMPONENTS"
+    },
+    {
+      "note": "arch is not an alias before a colon, so this is three plain components",
+      "input": "codev:arch:review",
+      "error": "TOO_MANY_COMPONENTS"
+    },
+    {
+      "note": "scheme with one slash missing",
+      "input": "afx:/devvm/codev:architect",
+      "error": "REMOTE_BAD_SCHEME"
+    },
+    {
+      "note": "scheme with the colon missing",
+      "input": "afx//devvm/codev:architect",
+      "error": "REMOTE_BAD_SCHEME"
+    },
+    {
+      "note": "scheme with one slash missing, a builder",
+      "input": "afx:/devvm/codev:builder-spir-1940",
+      "error": "REMOTE_BAD_SCHEME"
+    },
+    {
+      "note": "remote with no path",
+      "input": "afx://devvm",
+      "error": "REMOTE_NO_WORKSPACE"
+    },
+    {
+      "note": "remote with an empty path",
+      "input": "afx://devvm/",
+      "error": "REMOTE_NO_WORKSPACE"
+    },
+    {
+      "note": "remote with no workspace, front door",
+      "input": "afx://devvm/architect",
+      "error": "REMOTE_NO_WORKSPACE"
+    },
+    {
+      "note": "remote with no workspace, named architect",
+      "input": "afx://devvm/architect:local",
+      "error": "REMOTE_NO_WORKSPACE"
+    },
+    {
+      "note": "remote with no workspace, an id",
+      "input": "afx://devvm/builder-spir-1940",
+      "error": "REMOTE_NO_WORKSPACE"
+    },
+    {
+      "note": "remote with nothing after the scheme",
+      "input": "afx://",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "remote with an empty tower",
+      "input": "afx:///codev:architect",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "remote with an empty owner",
+      "input": "afx://@mbp/codev:architect",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "remote with an owner and no tower",
+      "input": "afx://sam@/codev:architect",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "remote with an empty agent",
+      "input": "afx://devvm/codev:",
+      "error": "EMPTY_COMPONENT"
+    },
+    {
+      "note": "remote with two owners",
+      "input": "afx://a@b@c/codev:architect",
+      "error": "REMOTE_BAD_AUTHORITY"
+    },
+    {
+      "note": "remote with a port",
+      "input": "afx://devvm:4100/codev:architect",
+      "error": "REMOTE_PORT"
+    },
+    {
+      "note": "remote with a query",
+      "input": "afx://devvm/codev:architect?x=1",
+      "error": "REMOTE_QUERY"
+    },
+    {
+      "note": "remote with a fragment",
+      "input": "afx://devvm/codev:architect#top",
+      "error": "REMOTE_FRAGMENT"
+    },
+    {
+      "note": "remote with percent-encoding",
+      "input": "afx://devvm/co%20dev:architect",
+      "error": "REMOTE_PERCENT_ENCODING"
+    },
+    {
+      "note": "remote with a second path segment",
+      "input": "afx://devvm/codev/architect",
+      "error": "REMOTE_EXTRA_PATH"
+    },
+    {
+      "note": "remote with a trailing slash",
+      "input": "afx://devvm/codev:architect/",
+      "error": "REMOTE_EXTRA_PATH"
+    },
+    {
+      "note": "tower with an underscore",
+      "input": "afx://dev_vm/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "tower with a dot",
+      "input": "afx://dev.vm/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "tower starting with a hyphen",
+      "input": "afx://-devvm/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "owner with a dot",
+      "input": "afx://sam.k@mbp/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "owner handle starting with a digit",
+      "input": "afx://123@mbp/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "owner handle starting with a hyphen",
+      "input": "afx://-sam@mbp/codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "remote workspace with a space",
+      "input": "afx://devvm/co dev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "remote workspace starting with a dot",
+      "input": "afx://devvm/.codev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "remote architect name with a character outside the set",
+      "input": "afx://devvm/codev:architect:re!view",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "remote id with a character outside the set",
+      "input": "afx://devvm/codev:builder spir",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "reserved word as a remote workspace: arch",
+      "input": "afx://devvm/arch:review",
+      "error": "RESERVED_WORKSPACE"
+    },
+    {
+      "note": "reserved word as a remote workspace: builder",
+      "input": "afx://devvm/builder:architect",
+      "error": "RESERVED_WORKSPACE"
+    },
+    {
+      "note": "remote, two components before architect",
+      "input": "afx://devvm/a:codev:architect",
+      "error": "TOO_MANY_BEFORE_ARCHITECT"
+    },
+    {
+      "note": "remote, two components after architect",
+      "input": "afx://devvm/codev:architect:a:b",
+      "error": "TOO_MANY_AFTER_ARCHITECT"
+    },
+    {
+      "note": "remote, three plain components",
+      "input": "afx://devvm/codev:arch:review",
+      "error": "TOO_MANY_COMPONENTS"
+    },
+    {
+      "note": "a local address over the length bound",
+      "input": "codev:architect:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error": "ADDRESS_TOO_LONG"
+    },
+    {
+      "note": "a remote address over the length bound",
+      "input": "afx://devvm/codev:architect:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "error": "ADDRESS_TOO_LONG"
+    },
+    {
+      "note": "remote workspace with an escape character",
+      "input": "afx://devvm/co\u001b[2jdev:architect",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "remote architect name outside ASCII",
+      "input": "afx://devvm/codev:architect:caf\u00e9",
+      "error": "INVALID_COMPONENT"
+    },
+    {
+      "note": "tower with a control character",
+      "input": "afx://dev\u0007vm/codev:architect",
+      "error": "INVALID_COMPONENT"
+    }
+  ],
+  "format": [
+    {
+      "note": "tier 1, stage 1: named architect in my workspace",
+      "address": {
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "review"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "architect:review"
+    },
+    {
+      "note": "tier 1, stage 1: bare architect in my workspace",
+      "address": {
+        "workspace": "codev",
+        "kind": "architect"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "architect"
+    },
+    {
+      "note": "tier 1, stage 1: builder in my workspace",
+      "address": {
+        "workspace": "codev",
+        "kind": "id",
+        "name": "builder-spir-1940"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "builder-spir-1940"
+    },
+    {
+      "note": "tier 1, connected Tower",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "review"
+      },
+      "reader": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev"
+      },
+      "text": "architect:review"
+    },
+    {
+      "note": "tier 2, stage 1: named architect in another workspace",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "tunnel"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "codev-cloud:architect:tunnel"
+    },
+    {
+      "note": "tier 2, stage 1: front door of another workspace",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "architect"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "codev-cloud:architect"
+    },
+    {
+      "note": "tier 2, stage 1: builder in another workspace",
+      "address": {
+        "workspace": "codev-cloud",
+        "kind": "id",
+        "name": "builder-bugfix-12"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "codev-cloud:builder-bugfix-12"
+    },
+    {
+      "note": "tier 2, stage 1: workspace name with a dot",
+      "address": {
+        "workspace": "codevos.ai",
+        "kind": "architect",
+        "name": "main"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "codevos.ai:architect:main"
+    },
+    {
+      "note": "tier 2, connected Tower",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "tunnel"
+      },
+      "reader": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev"
+      },
+      "text": "codev-cloud:architect:tunnel"
+    },
+    {
+      "note": "tier 2: a reader with no workspace always sees the workspace",
+      "address": {
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "review"
+      },
+      "reader": {},
+      "text": "codev:architect:review"
+    },
+    {
+      "note": "tier 3: my other Tower",
+      "address": {
+        "owner": "ana",
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "local"
+      },
+      "reader": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev"
+      },
+      "text": "afx://devvm/codev:architect:local"
+    },
+    {
+      "note": "tier 3: my other Tower, same workspace name still printed",
+      "address": {
+        "owner": "ana",
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "id",
+        "name": "builder-spir-1940"
+      },
+      "reader": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev"
+      },
+      "text": "afx://devvm/codev:builder-spir-1940"
+    },
+    {
+      "note": "tier 3: a Tower named, reader has no Tower name",
+      "address": {
+        "tower": "devvm",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "local"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "afx://devvm/codev:architect:local"
+    },
+    {
+      "note": "tier 4: another owner's Tower",
+      "address": {
+        "owner": "sam",
+        "tower": "studio",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "data"
+      },
+      "reader": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev"
+      },
+      "text": "afx://sam@studio/codev-cloud:architect:data"
+    },
+    {
+      "note": "tier 4: another owner's Tower with the same name as mine",
+      "address": {
+        "owner": "sam",
+        "tower": "mbp",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "main"
+      },
+      "reader": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev"
+      },
+      "text": "afx://sam@mbp/codev-cloud:architect:main"
+    },
+    {
+      "note": "tier 4: my Tower as Sam reads it",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect",
+        "name": "main"
+      },
+      "reader": {
+        "owner": "sam",
+        "tower": "studio",
+        "workspace": "codev-cloud"
+      },
+      "text": "afx://ana@mbp/codev:architect:main"
+    },
+    {
+      "note": "tier 4: my mbp as read on Sam's mbp",
+      "address": {
+        "owner": "ana",
+        "tower": "mbp",
+        "workspace": "codev",
+        "kind": "architect"
+      },
+      "reader": {
+        "owner": "sam",
+        "tower": "mbp",
+        "workspace": "codev-cloud"
+      },
+      "text": "afx://ana@mbp/codev:architect"
+    },
+    {
+      "note": "tier 4: an owner named, reader has no owner",
+      "address": {
+        "owner": "sam",
+        "tower": "studio",
+        "workspace": "codev-cloud",
+        "kind": "architect",
+        "name": "data"
+      },
+      "reader": {
+        "workspace": "codev"
+      },
+      "text": "afx://sam@studio/codev-cloud:architect:data"
+    }
+  ]
+}
