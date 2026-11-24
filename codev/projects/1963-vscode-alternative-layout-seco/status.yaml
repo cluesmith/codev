@@ -84,7 +84,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-workspace_views_package-iter1-claude.txt
 started_at: '2026-11-24T01:12:47.024Z'
-updated_at: '2026-11-24T11:48:47.217Z'
+updated_at: '2026-11-24T11:49:53.636Z'
 context_refreshes:
   - boundary: enter:implement
     at: '2026-11-24T06:55:50.288Z'
@@ -106,3 +106,4 @@ context_refreshes:
     acknowledged_at: '2026-11-24T11:07:42.974Z'
   - boundary: plan-phase:decisions_panel
     at: '2026-11-24T11:48:47.217Z'
+    acknowledged_at: '2026-11-24T11:49:53.635Z'
