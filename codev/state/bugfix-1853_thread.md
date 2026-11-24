@@ -70,3 +70,17 @@ The worker cap reaches vitest through porch → shell → npm → vitest. I prob
 under porch's own `runCheck`: with `VITEST_MAX_WORKERS=3`, pool ids were 1–3 and at most 3 ran at
 once; without it, ids 1–6 and 6 at once. vitest 4.1.4 applies the variable in config resolution,
 overriding the config. I did not sample load during the porch done run (1-min load was 6.4 just after).
+
+## 2026-11-23 — fix phase passed, pr phase
+
+On the architect's go: `VITEST_MAX_WORKERS=3 node packages/codev/bin/porch.js done bugfix-1853` with
+this branch's porch, run once. Build passed (19.5s), tests passed (142.6s), 165s wall, peak 1-min load
+14.96. Advanced to pr.
+
+CMAP: claude APPROVE with five non-blocking notes. I fixed three: stream splicing (now whole lines),
+the dead `stderr` accumulator, and a prune that could delete the log just written (5a67e5800, with
+tests in 32fd78350). codex REQUEST_CHANGES, only on the `chore(porch)` commit prefixes. Rebutted:
+those are porch's own state commits, standard on main (87 of the last 200).
+
+Windows run 45303921745 (first commit) failed only the same skill-hash test; the #1853 tests passed
+there. Re-dispatched as 45306427073 on head 32fd783. PR #1964 is out of draft.
