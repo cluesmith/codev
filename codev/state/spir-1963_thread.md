@@ -752,3 +752,21 @@ build, then on this build with `COCKPIT_BASELINE`. Evidence in
 
 **For Phase 7:** the VS Code host must pass `openExternal` to both views, with the allowlist
 host-side. Pass the Decisions view a stable host object (it keys image loads on it).
+
+### Phase 6 review, iteration 2 (2026-11-24)
+
+**Verdicts:** Codex APPROVE (no issues); Claude APPROVE (no blocking issues).
+
+**Carried to Phase 7/8 (Claude's forward notes):**
+- The VS Code webview stylesheet must map **every** `--codev-wv-*` token. The dashboard maps 13
+  and leaves the rest on defaults equal to its own values. Add a coverage test that extracts the
+  token names from `styles.css` and asserts the VS Code stylesheet maps each one, the same shape as
+  `styles-tokens.test.ts`.
+- The webview hosts' tests must assert they provide `openExternal` (Work and Decisions) and
+  `showImage` (Decisions). Omitting `openExternal` silently reintroduces the link bypass.
+
+**Left as is:**
+- The root's `work-view ` trailing space is parity with the pre-move code, and the snapshot
+  compares the class string.
+- `one-copy.test.ts`'s `statSync` would throw on a dangling symlink: none exist under `apps/` or
+  `packages/`.
