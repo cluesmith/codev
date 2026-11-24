@@ -1344,3 +1344,36 @@ local config restored in the same command (sha1 `2a213104…e51`, the original).
 (a) to (e) belong there; for (e) each untested scenario with its reason in one line; for (d) say
 whether a quoted architect command also dies on a real Tower. Next stop after the review rounds is
 the `pr` gate, the owner's.
+
+## 2026-11-24 — phase 6 reviewed: codex APPROVE, claude APPROVE (round 1); porch is at `review`
+
+No change asked for, so no commit after the reviewed head and no unreviewed commit in phase 6.
+Claude's comments, none blocking, all for the review file:
+
+1. The unknown-architect hint (`Architects there: main, tunnel`) lists only architects with a live
+   terminal; the registry resolver's own hint would include one between sessions. Phase 2 code.
+   The architect has ruled it belongs in the review (point (a)); not changed.
+2. The older-Tower check builds a full address book on every `NOT_FOUND` of the three-part form,
+   an ordinary typo on a current Tower included. Failure path only. A version field on `/health`
+   would make it one cheap read later. Not changed.
+3. `afx whoami`: the branch where global.db cannot be opened at all (`global.db could not be read,
+   so the name of this workspace is not known`) is the one address-unavailable message with no
+   remedy. Not changed.
+4. The plan's "template pair diff is empty" wording: already recorded above.
+5. The scenario-to-test table, the two latency figures and the architect-command finding must
+   reach `codev/reviews/1940-tower-to-tower-messaging-proto.md`.
+
+**The architect's question on (d), answered from the code.** The whitespace split is in Tower's
+production launch path, not in a test helper: `tower-instances.ts` runs
+`architectCmd.split(/\s+/)` for the main architect (`launchInstance`) and for an added one
+(`addArchitect`), and an array-valued `shell.architect` is joined with spaces and split the same
+way. So on a real Tower any architect command with a quoted argument that contains a space is
+broken (`claude --append-system-prompt "be brief"` passes `"be` and `brief"` as two arguments).
+A command of plain words and flags, which is what configs have today, is unaffected. Not changed
+here: another subsystem, and not this project's subject. The architect files the issue.
+
+**Scenario-to-test table**: built by a read-only search of the test files, every title copied from
+the source; saved in the session scratchpad as `scenario-table.md` and to be written into the
+review. Three claims have no test: the `devvm` hint (the plan left it out: a stage 1 Tower has no
+list of the owner's Towers); the "until it has an explicit name" half of the two `afx://` bullets
+(nothing resolves an `afx://` address in stage 1; stage 2 does); front door only (phase 7, cut).
