@@ -259,6 +259,17 @@ How it works and what to know:
 - **PowerShell.** Tower uses the built-in `powershell.exe` (CIM) to list and stop the processes
   each session starts. A machine policy that blocks it, or Constrained Language Mode, is not
   supported; `codev doctor` and Tower's log report it.
+- **Everything a session starts stays in it.** Each terminal runs in its own Windows Job Object,
+  and programs cannot leave it: the agent, every command it runs, and anything those start.
+  Closing or cleaning up a session ends all of them, as a process group does on macOS and Linux.
+  That includes what an agent's timed-out command leaves running (often a root-wide file
+  search using a full CPU): it ends with its session. It also includes a GUI program or a
+  background server started from that terminal (for example `code .` when VS Code is not already
+  running, or a dev server started with `&`), and a browser that a Codev command opens for you
+  (`afx workspace start`, `afx attach`, `afx tower cloud login`) when no browser was already
+  running. Start such a program from outside Codev (a Windows
+  Terminal or PowerShell window) when it must outlive the session. Tower itself is started outside
+  the session by `afx tower start`, and refuses to run inside any session.
 - **Programs never run from the current folder.** Windows normally looks a program started by
   bare name (`git`, `npm`) up in the current folder before `PATH`, so a `git.exe` inside a
   repository could run in place of Git. Codev turns that lookup off (it sets

@@ -227,7 +227,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From #1658] A native dependency's supported platforms are its prebuild matrix, not `engines`. better-sqlite3's install script is `prebuild-install || node-gyp rebuild`, so a Node version with no prebuild silently becomes a source build: it succeeds on a machine with a toolchain and fails on a user's machine without one. Measure the install per Node version and OS on a clean runner, and gate unsupported combinations with a message that names the supported ones.
 
-- [From #1658] On Windows, Node's `detached: true` is not `setsid`. libuv never requests job breakaway, so a "detached" child stays in its parent's Job Object and dies with that session. A process that must outlive the session that starts it (the Tower daemon) has to be created outside the job, e.g. through CIM `Win32_Process.Create`.
+- [From #1658] On Windows, Node's `detached: true` is not `setsid`. libuv never requests job breakaway, so a "detached" child stays in its parent's Job Object and dies with that session. A process that must outlive the session that starts it (the Tower daemon) has to be created outside the job, e.g. through CIM `Win32_Process.Create`. [From #1915] The opposite trap: a job that ALLOWS breakaway loses everything Git Bash starts, because the MSYS runtime asks for breakaway on every native program. Measure job membership (`QueryInformationJobObject` process list) of a real session before trusting "the job holds the session".
 
 ## Process
 
@@ -314,6 +314,8 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From #1819] **A risk-table mitigation that says "covered in the manual pass" is the easiest line in a plan to skip, so make it a test.** The plan said the atomic rename vs an open annotator file tab was covered manually; it had not been checked when the last phase was first reviewed. As an e2e test it passed, and its first failed run exposed a pre-existing annotator gap: the viewer's first mtime reading, about a second after load, is taken as the baseline, so a write in that first second is never shown. Before the review phase, go through the risk table and check that every mitigation points to a test or a recorded check.
 
 ## Testing
+
+- [From #1915] A test's cleanup that kills every pid it recorded can kill an unrelated process: Windows reuses pids quickly, and the recorded process is often long dead by `afterAll`. Kill a recorded pid only if the live process with that pid was created no later than the recording (`__tests__/helpers/tracked-pids.ts`). This matters more than it looks because vitest 4 ignores `poolOptions.forks.singleFork`, so test files run in parallel workers: one file's cleanup ran inside another file's assertion window and is the likely killer of a CIM-created Tower in tower-lifecycle.windows Phase 4(b).
 
 - [From #1595] Harness hook semantics are claims to measure in a real session, not to read from docs. Two spikes and full unit coverage still missed that Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the turn's background task runs (it flipped a working agent to idle), and that an approved permission fires no hook at all (#1851). Both surfaced only in Phase 8's scripted real-session run with permissions in `default` mode: the operator's `auto` mode never raises a prompt, so a verification run must set the mode it means to test.
 
