@@ -37,6 +37,7 @@ import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
 import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId, isIssueKey } from '../../lib/issue-id.js';
 import { resolveIssueIdKind, loadForgeConfig } from '../../lib/forge.js';
+import { buildAgentName } from '../utils/agent-names.js';
 
 // =============================================================================
 // Status YAML parser (lightweight, no library dependency)
@@ -551,10 +552,11 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   if (pirMatch) return `builder-pir-${Number(pirMatch[1])}`;
 
   // Task: task-NAvW → builder-task-navw. The whole remainder is the short id:
-  // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3,
-  // as buildAgentName produces; #1740).
+  // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3;
+  // #1740). Named by buildAgentName, as spawn names the terminal, so an
+  // all-digit id loses its leading zeros the same way (task-0123 → builder-task-123; #1992).
   const taskMatch = lower.match(SHORT_ID_NAME_TASK);
-  if (taskMatch) return `builder-task-${taskMatch[1]}`;
+  if (taskMatch) return buildAgentName('task', taskMatch[1]);
 
   // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
   const worktreeMatch = lower.match(SHORT_ID_NAME_WORKTREE);
