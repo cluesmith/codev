@@ -13,10 +13,12 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-25T20:39:58.461Z'
-updated_at: '2026-11-25T23:42:40.697Z'
+updated_at: '2026-11-25T23:58:00.292Z'
 pr_history:
   - phase: pr
     pr_number: 1988
     branch: builder/bugfix-1871
     created_at: '2026-11-25T21:04:29.802Z'
+    merged: true
+    merged_at: '2026-11-25T23:58:00.291Z'
 pr_ready_for_human: false
