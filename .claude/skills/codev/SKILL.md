@@ -49,7 +49,7 @@ codev bootstrap-docs           # Draft, report, review
 
 ## codev update
 
-Updates framework files (protocols, roles, skills) from the installed `@cluesmith/codev` package. **Never touches user data** (specs, plans, reviews). Creates `.codev-new` versions for customized files. Missing Claude and Codex skills are added. A skill you never edited is replaced with the package's version; an edited one is kept and gets `<file>.codev-new` copies to merge.
+Updates framework files (protocols, roles, skills) from the installed `@cluesmith/codev` package. **Never touches user data** (specs, plans, reviews). Creates `.codev-new` versions for customized files. Missing Claude and Codex skills are added. A skill you never edited is replaced with the package's version; an edited one is kept and gets `<file>.codev-new` copies to merge. CLAUDE.md and AGENTS.md likewise: one you never edited outside its generated hot-context block, from this or an older release, is brought to the current template.
 
 ```bash
 codev update                   # Interactive update
