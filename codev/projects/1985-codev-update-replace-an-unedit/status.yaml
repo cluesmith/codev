@@ -1,7 +1,7 @@
 id: '1985'
 title: codev-update-replace-an-unedit
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,7 +13,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-25T20:33:45.952Z'
-updated_at: '2026-11-25T21:24:15.534Z'
+updated_at: '2026-11-25T21:24:25.579Z'
 pr_history:
   - phase: pr
     pr_number: 1987
