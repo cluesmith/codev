@@ -90,31 +90,58 @@ export function renderHotContextBlock(workspaceRoot: string, pendingHotFiles: re
   ].join('\n');
 }
 
+/** The doc's text before and after its managed block (markers included in the block); null if it has none. */
+function splitAroundBlock(doc: string): { before: string; after: string } | null {
+  const begin = doc.indexOf(HOT_BLOCK_BEGIN);
+  const end = doc.indexOf(HOT_BLOCK_END);
+  if (begin === -1 || end === -1 || end <= begin) return null;
+  return { before: doc.slice(0, begin), after: doc.slice(end + HOT_BLOCK_END.length) };
+}
+
+/**
+ * The line ending a root doc uses, read from its text outside the managed block (#1990): the
+ * block is regenerated, so a doc an earlier update left with an LF block in a CR LF body is
+ * CR LF, and is healed by the next refresh. Text outside the block whose line breaks are all
+ * CR LF is CR LF; anything else (all LF, both kinds, or no line break at all) takes LF, the
+ * ending the published templates and the rendered block carry.
+ */
+function rootDocLineEnding(doc: string): '\r\n' | '\n' {
+  const split = splitAroundBlock(doc);
+  const outside = split ? [split.before, split.after] : [doc];
+  const count = (pattern: RegExp): number => outside.reduce((n, s) => n + (s.match(pattern) ?? []).length, 0);
+  const crlf = count(/\r\n/g);
+  return crlf > 0 && crlf === count(/\n/g) ? '\r\n' : '\n';
+}
+
 /**
  * Upsert the managed block into a root-doc's content, non-destructively.
  * - Markers present  → replace everything between them (inclusive) with `block`.
  * - Markers absent    → insert `block` after the first H1 (or at the top if none).
- * User content outside the markers is always preserved. Idempotent.
+ * User content outside the markers is always preserved. Idempotent. The block, and the
+ * line breaks an insertion adds, are written in the doc's line ending (#1990), so a CR LF doc
+ * never ends up mixed.
  */
 export function upsertHotContextBlock(docContent: string, block: string): string {
   if (block === '') return docContent;
 
-  const begin = docContent.indexOf(HOT_BLOCK_BEGIN);
-  const end = docContent.indexOf(HOT_BLOCK_END);
-  if (begin !== -1 && end !== -1 && end > begin) {
-    const before = docContent.slice(0, begin);
-    const after = docContent.slice(end + HOT_BLOCK_END.length);
-    return before + block + after;
+  const eol = rootDocLineEnding(docContent);
+  const ownBlock = block.replace(/\r?\n/g, eol);
+  const split = splitAroundBlock(docContent);
+  if (split) {
+    return split.before + ownBlock + split.after;
   }
 
   const lines = docContent.split('\n');
   const h1Idx = lines.findIndex((l) => l.startsWith('# '));
   if (h1Idx === -1) {
-    return `${block}\n\n${docContent}`;
+    return `${ownBlock}${eol}${eol}${docContent}`;
   }
+  // `head` keeps its heading's CR, if any, so a '\n' after it restores the heading's own line
+  // break; a heading on the doc's last line had none, and gets the doc's.
   const head = lines.slice(0, h1Idx + 1).join('\n');
   const tail = lines.slice(h1Idx + 1).join('\n');
-  return `${head}\n\n${block}\n${tail}`;
+  const headBreak = h1Idx === lines.length - 1 ? eol : '\n';
+  return `${head}${headBreak}${eol}${ownBlock}${eol}${tail}`;
 }
 
 /**
