@@ -90,12 +90,28 @@ export function renderHotContextBlock(workspaceRoot: string, pendingHotFiles: re
   ].join('\n');
 }
 
-/** The doc's text before and after its managed block (markers included in the block); null if it has none. */
-function splitAroundBlock(doc: string): { before: string; after: string } | null {
+interface AroundBlock {
+  before: string;
+  after: string;
+  /** Whether a line break ended the line before the BEGIN marker / the END marker's line. */
+  breakBefore: boolean;
+  breakAfter: boolean;
+}
+
+/**
+ * The doc's text around its managed block; null if it has none. The block is the markers,
+ * what lies between them, and the line break on each side (#1990): inserting the block writes
+ * those breaks, so an earlier update may have written them in LF into a CR LF doc too.
+ */
+function splitAroundBlock(doc: string): AroundBlock | null {
   const begin = doc.indexOf(HOT_BLOCK_BEGIN);
   const end = doc.indexOf(HOT_BLOCK_END);
   if (begin === -1 || end === -1 || end <= begin) return null;
-  return { before: doc.slice(0, begin), after: doc.slice(end + HOT_BLOCK_END.length) };
+  const head = doc.slice(0, begin);
+  const tail = doc.slice(end + HOT_BLOCK_END.length);
+  const before = head.replace(/\r?\n$/, '');
+  const after = tail.replace(/^\r?\n/, '');
+  return { before, after, breakBefore: before !== head, breakAfter: after !== tail };
 }
 
 /**
@@ -117,9 +133,9 @@ function rootDocLineEnding(doc: string): '\r\n' | '\n' {
  * Upsert the managed block into a root-doc's content, non-destructively.
  * - Markers present  → replace everything between them (inclusive) with `block`.
  * - Markers absent    → insert `block` after the first H1 (or at the top if none).
- * User content outside the markers is always preserved. Idempotent. The block, and the
- * line breaks an insertion adds, are written in the doc's line ending (#1990), so a CR LF doc
- * never ends up mixed.
+ * User content outside the markers is always preserved. Idempotent. The block, with the line
+ * break on each side of it and any an insertion adds, is written in the doc's line ending
+ * (#1990), so a CR LF doc never ends up mixed.
  */
 export function upsertHotContextBlock(docContent: string, block: string): string {
   if (block === '') return docContent;
@@ -128,7 +144,8 @@ export function upsertHotContextBlock(docContent: string, block: string): string
   const ownBlock = block.replace(/\r?\n/g, eol);
   const split = splitAroundBlock(docContent);
   if (split) {
-    return split.before + ownBlock + split.after;
+    const { before, after, breakBefore, breakAfter } = split;
+    return before + (breakBefore ? eol : '') + ownBlock + (breakAfter ? eol : '') + after;
   }
 
   const lines = docContent.split('\n');
