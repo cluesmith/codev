@@ -29,6 +29,7 @@ import { sameWindowsPath } from '../../lib/platform/windows/host-paths.js';
 import { unquoteWindowsCommandLine } from '../../lib/platform/windows/command-line.js';
 import { loadConfig } from '../../lib/config.js';
 import { AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { isBuilderScaffold, isSpawnMade, linkAt } from '../lib/builder-scaffold.js';
 import { keepFiles, keepPatterns, keptDirFor, listKeepCandidates } from '../lib/keep-files.js';
 
 /**
@@ -185,36 +186,39 @@ export interface CleanupOptions {
 }
 
 /**
- * Check if a worktree has uncommitted changes
- * Returns: dirty (has real changes), scaffoldOnly (only has .builder-* files)
+ * Check if a worktree has uncommitted changes.
+ * Returns: dirty (has real changes), scaffoldOnly (only spawn's scaffold: the files
+ * `isBuilderScaffold()` names, and the entries spawn linked in from the main checkout at
+ * `mainRoot` that git does not ignore, `isSpawnMade()`). The same rule `codev check worktree`
+ * uses, so the two agree on what is scaffold.
  */
-async function hasUncommittedChanges(worktreePath: string): Promise<{ dirty: boolean; scaffoldOnly: boolean; details: string }> {
+export async function hasUncommittedChanges(
+  worktreePath: string,
+  mainRoot: string,
+): Promise<{ dirty: boolean; scaffoldOnly: boolean; details: string }> {
   if (!existsSync(worktreePath)) {
     return { dirty: false, scaffoldOnly: false, details: '' };
   }
 
   try {
-    // Check for uncommitted changes (staged and unstaged)
-    const result = await run('git status --porcelain', { cwd: worktreePath });
+    // Check for uncommitted changes (staged and unstaged). Untracked files are listed one by
+    // one, so the write guard's `.claude/hooks/` is judged by its file, not as a directory.
+    const entries = parseStatusZ(await gitStatusZ(worktreePath));
 
-    if (result.stdout.trim()) {
-      // Count changed files, excluding builder scaffold files
-      const scaffoldPattern = /^\?\? \.builder-/;
-      const allLines = result.stdout.trim().split('\n').filter(Boolean);
-      const nonScaffoldLines = allLines.filter((line) => !scaffoldPattern.test(line));
+    if (entries.length > 0) {
+      // Count changed files, excluding spawn's scaffold (only ever untracked)
+      const nonScaffold = entries.filter((e) => !(e.xy === '??' && isSpawnScaffold(mainRoot, worktreePath, e.path)));
 
-      if (nonScaffoldLines.length > 0) {
+      if (nonScaffold.length > 0) {
         return {
           dirty: true,
           scaffoldOnly: false,
-          details: `${nonScaffoldLines.length} uncommitted file(s)`,
+          details: `${nonScaffold.length} uncommitted file(s)`,
         };
       }
 
       // Only scaffold files present
-      if (allLines.length > 0) {
-        return { dirty: false, scaffoldOnly: true, details: '' };
-      }
+      return { dirty: false, scaffoldOnly: true, details: '' };
     }
 
     return { dirty: false, scaffoldOnly: false, details: '' };
@@ -222,6 +226,45 @@ async function hasUncommittedChanges(worktreePath: string): Promise<{ dirty: boo
     // If git status fails, assume dirty to be safe
     return { dirty: true, scaffoldOnly: false, details: 'Unable to check status' };
   }
+}
+
+/**
+ * `git status --porcelain -z`: NUL-separated, so git quotes no path, and read whole (the shared
+ * `run()` trims its output, which would drop the first entry's leading status space).
+ */
+function gitStatusZ(worktreePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      ['status', '--porcelain', '-z', '--untracked-files=all'],
+      { cwd: worktreePath, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+      (err, out) => (err ? reject(err) : resolve(out)),
+    );
+  });
+}
+
+/** The entries of `status --porcelain -z`, each `XY path`; a rename or copy is followed by its source, which is dropped. */
+function parseStatusZ(output: string): Array<{ xy: string; path: string }> {
+  const tokens = output.split('\0').filter((t) => t !== '');
+  const entries: Array<{ xy: string; path: string }> = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const xy = tokens[i].slice(0, 2);
+    entries.push({ xy, path: tokens[i].slice(3) });
+    if (xy.includes('R') || xy.includes('C')) i++;
+  }
+  return entries;
+}
+
+/**
+ * Whether an untracked entry is spawn's scaffold. An entry that cannot be read is counted as a
+ * real change: the notice errs toward "dirty".
+ */
+function isSpawnScaffold(mainRoot: string, worktreePath: string, rel: string): boolean {
+  if (isBuilderScaffold(rel)) return true;
+  const link = linkAt(worktreePath, rel);
+  if (!link.ok) return false;
+  const made = isSpawnMade(mainRoot, worktreePath, rel, link.value);
+  return made.ok && made.value;
 }
 
 /**
@@ -384,7 +427,7 @@ async function cleanupBuilder(
 
   // Check for uncommitted changes (informational - worktree is preserved)
   if (!isShellMode) {
-    const { dirty, details } = await hasUncommittedChanges(builder.worktree);
+    const { dirty, details } = await hasUncommittedChanges(builder.worktree, config.workspaceRoot);
     if (dirty) {
       logger.info(`Worktree has uncommitted changes: ${details}`);
     }

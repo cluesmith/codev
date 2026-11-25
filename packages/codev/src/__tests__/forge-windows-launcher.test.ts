@@ -35,7 +35,7 @@ const CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive',
+  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
 ];
 
 const CWD = 'C:\\Users\\dev\\repo';

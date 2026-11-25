@@ -3,7 +3,8 @@
 # forge-executable: tea
 # Input: CODEV_PR_NUMBER
 # Output: JSON {title, body, state, url, author{login}, baseRefName, headRefName,
-#               additions, deletions}  (see PrViewResult in forge-contracts.ts)
+#               additions, deletions, headRefOid?, isDraft?, mergeable?, mergeCommit,
+#               mergedAt, reviewDecision: null}  (see PrViewResult in forge-contracts.ts)
 #
 # `tea pulls view N --output json` returns a table header / empty list rather
 # than the PR object, so route through the raw REST passthrough. `tea api`
@@ -63,5 +64,17 @@ printf '%s' "$PR" | jq '
   # Type-checked, not just defaulted: the contract types these as numbers, and
   # a non-numeric value here would be passed straight through.
   additions: (if (.additions | type) == "number" then .additions else 0 end),
-  deletions: (if (.deletions | type) == "number" then .deletions else 0 end)
-}'
+  deletions: (if (.deletions | type) == "number" then .deletions else 0 end),
+  # Spec 1951 (`codev check`): Gitea has no review-decision field, so it is an
+  # explicit null rather than absent.
+  reviewDecision: null,
+  mergeCommit: (if (.merge_commit_sha | type) == "string" and .merge_commit_sha != ""
+                then {oid: .merge_commit_sha} else null end),
+  mergedAt: (if (.merged_at | type) == "string" then .merged_at else null end)
+}
+# The optional fields Gitea may not supply are omitted rather than defaulted, so a
+# consumer reports them as unavailable instead of trusting an invented value.
++ (if (.head.sha | type) == "string" then {headRefOid: .head.sha} else {} end)
++ (if (.draft | type) == "boolean" then {isDraft: .draft} else {} end)
++ (if (.mergeable | type) == "boolean"
+   then {mergeable: (if .mergeable then "MERGEABLE" else "CONFLICTING" end)} else {} end)'

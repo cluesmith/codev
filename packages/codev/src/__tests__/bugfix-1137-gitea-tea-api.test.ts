@@ -384,6 +384,12 @@ describe.skipIf(!jqAvailable)('bugfix #1137: gitea preset routes reads through `
       headRefName: 'feature/x',
       additions: 10,
       deletions: 3,
+      // Spec 1951: always present (null until merged / no gitea equivalent). The
+      // fixture has no head.sha, draft or mergeable, so headRefOid, isDraft and
+      // mergeable are omitted rather than invented.
+      reviewDecision: null,
+      mergeCommit: null,
+      mergedAt: null,
     });
   });
 

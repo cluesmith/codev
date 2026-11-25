@@ -1,6 +1,6 @@
 ---
 name: codev
-description: Codev project management CLI — init, adopt, bootstrap-docs, update, and doctor commands. Check this skill before running any `codev` command (except `consult`, `porch`, or `afx` which have their own skills). Use when setting up new projects, adding codev to existing repos, updating framework files, or diagnosing missing dependencies.
+description: Codev project management CLI — init, adopt, bootstrap-docs, update, doctor, and the read-only check commands (check pr, check deploy, check worktree). Check this skill before running any `codev` command (except `consult`, `porch`, or `afx` which have their own skills). Use when setting up new projects, adding codev to existing repos, updating framework files, diagnosing missing dependencies, checking whether a PR is ready to merge, whether merged PRs reached the deploy branch, or whether a builder worktree can be removed.
 ---
 
 # codev - Project Management CLI
@@ -13,6 +13,9 @@ codev adopt                    Add codev to the current directory
 codev bootstrap-docs           Draft the governance docs from this codebase
 codev update                   Update protocols, roles, skills from package
 codev doctor                   Check system dependencies
+codev check pr <N>             Read-only: is PR N ready to recommend for merge
+codev check deploy <N>...      Read-only: did merged PRs reach the deploy branch
+codev check worktree <id|path> Read-only: would removing a builder worktree lose data
 ```
 
 ## codev init
@@ -62,6 +65,31 @@ Checks dependencies: Node.js (>=22), git (>=2.5), your forge's CLI and its auth 
 ```bash
 codev doctor
 ```
+
+## codev check
+
+Read-only: never merges, pushes, comments, deletes or moves a ref. Verdict on the first line,
+then one line per check (`ok`, `ATTN`, `info`, `not run`, `off`, `skip`). Exit 0 clear, 1
+something needs attention (a check that could not run counts), 2 the command failed. Works
+from the main checkout or any builder worktree.
+
+```bash
+codev check pr 42              # before recommending a merge: head, state, mergeability,
+                               # trial merge, CI on the code, attribution, watched files,
+                               # linked issue, size, files to read
+codev check deploy 42 43       # after merging: on the deploy branch, in the latest green deploy run
+codev check worktree spir-42   # before afx cleanup: would removal lose data
+codev check worktree .builders/spir-42 --json   # a path works too; --json for agents
+```
+
+- Run `codev check pr` before `consult --type integration`: it checks mechanics, the
+  consultation reviews content.
+- `REMOVABLE` means no data would be lost, not that the builder is finished: an open PR is
+  its own `ATTN` line and makes the exit 1.
+- Configuration lives under `check.*` in `.codev/config.json` (`attribution`, `watch`, `flag`,
+  `notForReading`, `deploy.branch`, `deploy.workflow`, `skip`); the keep list is
+  `cleanup.keepIgnored`. A bad value is exit 2 naming the key and the file. `codev check --help`
+  and `codev check <sub> --help` list the subcommands and options.
 
 ## Common mistakes
 

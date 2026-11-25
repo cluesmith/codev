@@ -126,8 +126,10 @@ describe('Spec 1658: cleanup removes an ephemeral worktree', () => {
     mkdirSync(worktree, { recursive: true });
     mockGetConfig.mockReturnValue(config());
     mockLoadState.mockReturnValue({ builders: [bugfixBuilder], architects: [], utils: [], annotations: [] });
-    vi.mocked(execFile).mockImplementation(((_cmd: string, _args: string[], cb: (e: Error | null, out: string) => void) => {
-      steps.push('ps');
+    // Two callers: `ps` (cmd, args, cb) and the dirty notice's `git status` (cmd, args, options, cb).
+    vi.mocked(execFile).mockImplementation(((cmd: string, _args: string[], optionsOrCb: unknown, maybeCb?: unknown) => {
+      if (cmd === 'ps') steps.push('ps');
+      const cb = (typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb) as (e: Error | null, out: string) => void;
       cb(null, '');
       return {} as ReturnType<typeof execFile>;
     }) as unknown as typeof execFile);

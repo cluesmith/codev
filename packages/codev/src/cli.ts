@@ -19,6 +19,7 @@ import { handleStats } from './commands/consult/stats.js';
 import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
+import { buildCheckCommand, CheckExit } from './commands/check/index.js';
 import { version } from './version.js';
 import { isCodevEntrypoint } from './lib/cli-entry.js';
 import { findWorkspaceRoot } from './agent-farm/utils/index.js';
@@ -61,6 +62,9 @@ program
       process.exit(1);
     }
   });
+
+// Check command group: read-only merge, deploy and worktree checks (Spec 1951)
+program.addCommand(buildCheckCommand());
 
 // Init command
 program
@@ -393,7 +397,12 @@ if (isMainModule) {
     process.stderr.write(`\`codev ${args[0]}\` is no longer supported. Use \`${hint}\` directly.\n`);
     process.exit(1);
   }
-  program.parseAsync(process.argv).catch((error) => {
+  program.parseAsync(process.argv).catch(async (error) => {
+    // `codev check` help and usage errors (Spec 1951): flush what was written, then exit with its code.
+    if (error instanceof CheckExit) {
+      await error.flush();
+      process.exit(error.code);
+    }
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   });

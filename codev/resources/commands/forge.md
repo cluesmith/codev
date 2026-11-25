@@ -78,6 +78,48 @@ Set a concept to `null` to disable it. The feature that uses it will gracefully 
 | `pr-view` | `CODEV_PR_NUMBER`, `CODEV_INCLUDE_COMMENTS` | JSON or text | View PR details |
 | `pr-diff` | `CODEV_PR_NUMBER`, `CODEV_DIFF_NAME_ONLY` | text | Get PR diff |
 
+### Merge Mechanics (read-only, used by `codev check`)
+
+| Concept | Env Vars | Output | Description |
+|---------|----------|--------|-------------|
+| `commit-checks` | `CODEV_COMMIT_SHA` | JSON array `[{name, state, url?, workflow?}]` | Check results reported on one commit |
+| `workflow-runs` | `CODEV_WORKFLOW`, `CODEV_BRANCH` | JSON array `[{headSha, status, conclusion, url, createdAt}]`, newest first | Runs of one workflow on one branch |
+
+`commit-checks` normalizes every result to one `state` word: `pass`, `fail`, `pending`, `skipped`
+or `neutral`. Skipped and neutral count as passed. The github script reads the commit's check
+runs (the latest attempt for each name) and its legacy commit statuses:
+
+- A check run that has not completed is `pending`.
+- `success` is `pass`, `skipped` is `skipped`, and `neutral` is `neutral`.
+- Every other conclusion is `fail`: `failure`, `cancelled`, `timed_out`, `action_required`,
+  `stale` and `startup_failure`.
+- A status of `success` is `pass`, `pending` is `pending`, and `failure` or `error` is `fail`.
+
+An empty array means nothing reported on the commit. A failure exits non-zero; it is never
+an empty array.
+
+`pr-view` also carries optional fields that `codev check` reads. Consumers that do not know
+them are unaffected.
+
+| Field | Meaning | github | gitlab | gitea |
+|---|---|---|---|---|
+| `headRefOid` | full SHA of the PR head | `headRefOid` | `sha` | `head.sha` |
+| `isDraft` | draft flag | `isDraft` | `draft` | `draft` |
+| `mergeable` | `MERGEABLE` / `CONFLICTING` / `UNKNOWN` | `mergeable` | from `detailed_merge_status` | from `mergeable` |
+| `mergeStateStatus` | merge state, GitHub's words (`CLEAN` = clean) | `mergeStateStatus` | `detailed_merge_status` (`mergeable` → `CLEAN`, others upper-cased) | — |
+| `mergeCommit` | `{oid}` of the merge/squash commit, `null` until merged | `mergeCommit` | `merge_commit_sha` / `squash_commit_sha` | `merge_commit_sha` |
+| `mergedAt` | merge time, `null` until merged | `mergedAt` | `merged_at` | `merged_at` |
+| `reviewDecision` | `APPROVED` / `CHANGES_REQUESTED` / `REVIEW_REQUIRED` | `reviewDecision` | `null` | `null` |
+
+A preset that cannot supply a field omits it (or sends `null` where the table says so), and
+`codev check` then reports the dependent check as `not run`. The gitlab mappings follow
+GitLab's documented merge-request API but are unverified against a live `glab`.
+
+**Providers.** github implements both new concepts, and so do linear and jira, which use the
+github default for every PR concept. gitlab and gitea disable both explicitly, so a
+`codev check` there shows `not run: commit-checks unavailable on gitlab`, never a silent `gh`
+call. Supply an override to enable them, e.g. `"commit-checks": "./scripts/my-ci-status.sh"`.
+
 ### Analytics & Team
 
 | Concept | Env Vars | Output | Description |
@@ -106,7 +148,7 @@ Set a concept to `null` to disable it. The feature that uses it will gracefully 
 }
 ```
 
-This maps all concepts to `glab` equivalents. Concepts without a GitLab equivalent (`team-activity`, `on-it-timestamps`) are automatically disabled.
+This maps all concepts to `glab` equivalents. Concepts without a GitLab equivalent (`team-activity`, `on-it-timestamps`) are automatically disabled, as are `commit-checks` and `workflow-runs`, which could not be verified against GitLab.
 
 To customize specific concepts:
 
@@ -129,7 +171,7 @@ To customize specific concepts:
 }
 ```
 
-Some Gitea concepts (`pr-search`, `pr-diff`) are disabled by default since `tea` doesn't support them directly. You can provide custom scripts:
+Some Gitea concepts (`pr-search`, `pr-diff`) are disabled by default since `tea` doesn't support them directly; `commit-checks` and `workflow-runs` are disabled because they could not be verified against a Gitea server. You can provide custom scripts:
 
 ```json
 {

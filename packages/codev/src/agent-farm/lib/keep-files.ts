@@ -3,7 +3,8 @@
  *
  * Kept: every untracked file that is not ignored, and the ignored files matching the keep list
  * (`cleanup.keepIgnored` in `.codev/config.json`). Never kept: dependency and build output,
- * whatever the list says, and symlinks (a worktree's links point back into the workspace, and
+ * whatever the list says (both defined in `keep-list.ts`, which `codev check worktree` shares),
+ * and symlinks (a worktree's links point back into the workspace, and
  * following one could copy a secret such as `.env`). Every copy is checked by SHA-256; any
  * failure removes the partial kept folder and throws, so the caller stops before removing
  * anything.
@@ -14,32 +15,12 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { isNeverKeep } from './keep-list.js';
 
-export const DEFAULT_KEEP_IGNORED: readonly string[] = [
-  'codev/projects/**',
-  'codev/state/**',
-  '.builder-*',
-  'tmp/**',
-  'scratch/**',
-];
-
-/** Path segments that mark dependency or build output. */
-const NEVER_KEEP = new Set([
-  'node_modules', 'bower_components', 'dist', 'build', 'target', '.next', '.nuxt', '.turbo',
-  '.parcel-cache', '.gradle', '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.tox',
-]);
+export { DEFAULT_KEEP_IGNORED, keepPatterns } from './keep-list.js';
 
 export function keptDirFor(agentFarmDir: string, workspaceRoot: string, builderId: string): string {
   return join(agentFarmDir, 'kept', basename(workspaceRoot), builderId);
-}
-
-/** Validate a `cleanup.keepIgnored` value from config; undefined means the default list. */
-export function keepPatterns(configured: unknown): readonly string[] {
-  if (configured === undefined) return DEFAULT_KEEP_IGNORED;
-  if (!Array.isArray(configured) || configured.some((p) => typeof p !== 'string' || p.trim() === '')) {
-    throw new Error('cleanup.keepIgnored in .codev/config.json must be an array of non-empty glob strings');
-  }
-  return configured;
 }
 
 function gitList(worktree: string, args: string[]): string[] {
@@ -78,7 +59,7 @@ export function listKeepCandidates(worktree: string, patterns: readonly string[]
     ? gitList(worktree, ['--ignored', '--exclude-standard', '--', ...patterns.map((p) => `:(glob)${p}`)])
     : [];
   const all = [...new Set([...untracked, ...ignored])].flatMap((rel) => expand(worktree, rel));
-  const files = all.filter((rel) => !rel.split('/').some((segment) => NEVER_KEEP.has(segment))).sort();
+  const files = all.filter((rel) => !isNeverKeep(rel)).sort();
   return { files, excluded: all.length - files.length };
 }
 

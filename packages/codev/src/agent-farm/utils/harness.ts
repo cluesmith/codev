@@ -20,6 +20,7 @@
 import { shellEscapeSingleQuote } from '../../lib/shell-quote.js';
 import { findLatestSessionId, verifySessionOwnership } from './claude-session-discovery.js';
 import { buildWorktreeGuardFiles } from './worktree-write-guard.js';
+import { OPENCODE_CONFIG_RELPATH } from '../lib/builder-scaffold.js';
 
 // =============================================================================
 // Types
@@ -339,7 +340,7 @@ export const OPENCODE_HARNESS: HarnessProvider = {
   },
   buildScriptRoleInjection: () => ({ fragment: '', env: {} }),
   getWorktreeFiles: () => ([{
-    relativePath: 'opencode.json',
+    relativePath: OPENCODE_CONFIG_RELPATH,
     content: JSON.stringify({ instructions: ['.builder-role.md'] }, null, 2) + '\n',
   }]),
 };

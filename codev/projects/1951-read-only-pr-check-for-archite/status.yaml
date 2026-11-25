@@ -1,0 +1,175 @@
+id: '1951'
+title: read-only-pr-check-for-archite
+protocol: spir
+phase: verify
+plan_phases:
+  - id: forge_read_concepts
+    title: Forge read concepts for PR mechanics
+    status: complete
+  - id: readonly_core
+    title: Read-only runner, configuration and report core
+    status: complete
+  - id: check_pr_mechanics
+    title: 'codev check pr: merge mechanics'
+    status: complete
+  - id: check_pr_forge
+    title: 'codev check pr: forge state and CI checks'
+    status: complete
+  - id: check_deploy
+    title: codev check deploy
+    status: complete
+  - id: check_worktree
+    title: codev check worktree
+    status: complete
+  - id: docs_guidance
+    title: Architect guidance and command documentation
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-11-23T19:11:38.967Z'
+    approved_at: '2026-11-23T21:21:55.621Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-11-23T21:41:08.788Z'
+    approved_at: '2026-11-23T22:10:01.002Z'
+  pr:
+    status: approved
+    requested_at: '2026-11-24T20:59:54.752Z'
+    approved_at: '2026-11-25T01:05:10.489Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history:
+  - iteration: 1
+    plan_phase: readonly_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter1-claude.txt
+  - iteration: 2
+    plan_phase: readonly_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter2-claude.txt
+  - iteration: 3
+    plan_phase: readonly_core
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-readonly_core-iter3-claude.txt
+  - iteration: 1
+    plan_phase: check_pr_forge
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_pr_forge-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_pr_forge-iter1-claude.txt
+  - iteration: 1
+    plan_phase: check_worktree
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter1-claude.txt
+  - iteration: 2
+    plan_phase: check_worktree
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter2-claude.txt
+  - iteration: 3
+    plan_phase: check_worktree
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-check_worktree-iter3-claude.txt
+  - iteration: 1
+    plan_phase: docs_guidance
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-claude.txt
+started_at: '2026-11-23T18:53:58.201Z'
+updated_at: '2026-11-25T01:05:20.060Z'
+context_refreshes:
+  - boundary: enter:plan
+    at: '2026-11-23T21:21:59.024Z'
+    acknowledged_at: '2026-11-23T21:23:07.115Z'
+  - boundary: plan-phase:readonly_core
+    at: '2026-11-23T22:50:05.115Z'
+    acknowledged_at: '2026-11-23T22:50:10.516Z'
+  - boundary: plan-phase:check_pr_mechanics
+    at: '2026-11-24T00:24:38.902Z'
+    acknowledged_at: '2026-11-24T00:31:23.829Z'
+  - boundary: plan-phase:check_pr_forge
+    at: '2026-11-24T01:07:01.800Z'
+    acknowledged_at: '2026-11-24T01:08:51.118Z'
+  - boundary: plan-phase:check_deploy
+    at: '2026-11-24T01:59:50.988Z'
+    acknowledged_at: '2026-11-24T02:01:11.770Z'
+  - boundary: plan-phase:check_worktree
+    at: '2026-11-24T02:32:56.934Z'
+    acknowledged_at: '2026-11-24T02:33:21.252Z'
+  - boundary: plan-phase:docs_guidance
+    at: '2026-11-24T18:44:02.801Z'
+    acknowledged_at: '2026-11-24T18:45:52.617Z'
+  - boundary: enter:review
+    at: '2026-11-24T19:53:08.196Z'
+    acknowledged_at: '2026-11-24T19:55:06.922Z'
+force_advanced:
+  phase: check_worktree
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1951-check_worktree-iter3-rebuttals.md
+  at: '2026-11-24T18:44:00.290Z'
+pr_ready_for_human: false

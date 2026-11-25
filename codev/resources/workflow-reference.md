@@ -38,11 +38,12 @@ Quick reference for the 7-stage project workflow. For protocol details, see `cod
 │                        HANDOFF / INTEGRATION                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
 │  → 6. COMMITTED                                                                     │
+│         Architect runs codev check pr N (mechanics, size)                           │
 │         Architect does 3-way integration review                                     │
 │         Architect iterates with builder via PR comments                             │
 │         Architect tells builder to merge                                            │
 │         Builder merges PR (NO --delete-branch flag)                                 │
-│         Architect cleans up builder                                                 │
+│         Architect runs codev check worktree <id>, then cleans up                    │
 │                                                                                     │
 │         ⏸️  HUMAN GATE: Validate in production                                      │
 │  → 7. INTEGRATED                                                                    │

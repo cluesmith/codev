@@ -9,8 +9,17 @@ When a builder PR arrives, assess risk before choosing review depth.
 ### Step 1: Check Size and Scope
 
 ```bash
-gh pr diff --stat <N>
-gh pr view <N> --json files | jq '.files[].path'
+codev check pr <N>
+```
+
+Its `size` line (lines added and removed, files changed) and its `to read` line (the files a
+person still has to read, once porch state, thread logs and lockfiles are set aside) are the
+inputs to Step 2. A blocker it names (a trial-merge conflict, failing or missing checks on the
+code, an unpushed head) comes before any review. It reads what you would otherwise type:
+
+```bash
+gh pr view <N> --json additions,deletions,changedFiles
+gh pr diff <N> --name-only
 ```
 
 ### Step 2: Determine Risk Level
@@ -65,7 +74,7 @@ gh pr view <N> --json files | jq '.files[].path'
 ### Low Risk: Bugfix (12 lines, 1 file, tests/)
 
 ```bash
-$ gh pr diff --stat 120
+$ git diff --stat origin/main...origin/builder/bugfix-120   # what `codev check pr 120` sizes
  packages/codev/tests/unit/foo.test.ts | 12 ++++++------
  1 file changed, 6 insertions(+), 6 deletions(-)
 
@@ -83,7 +92,7 @@ afx send spir-42 "PR approved, please merge"
 ### Medium Risk: New Feature (180 lines, 3 files, commands/)
 
 ```bash
-$ gh pr diff --stat 121
+$ git diff --stat origin/main...origin/builder/spir-121   # what `codev check pr 121` sizes
  packages/codev/src/commands/consult/risk.ts | 120 +++++++++++++
  packages/codev/src/cli.ts                    |  15 ++
  packages/codev/tests/unit/risk.test.ts       |  45 +++++
@@ -96,7 +105,7 @@ consult -m claude --type integration --issue 121
 ### High Risk: Protocol Change (650 lines, 14 files, porch/)
 
 ```bash
-$ gh pr diff --stat 122
+$ git diff --stat origin/main...origin/builder/spir-122   # what `codev check pr 122` sizes
  packages/codev/src/commands/porch/checks.ts  | 200 ++++++++++++------
  packages/codev/src/commands/porch/next.ts     | 150 ++++++++++----
  packages/codev/src/state/project.ts           |  80 +++++---
