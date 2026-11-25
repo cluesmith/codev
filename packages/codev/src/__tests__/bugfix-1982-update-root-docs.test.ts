@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { init } from '../commands/init.js';
 import { update, type UpdateResult } from '../commands/update.js';
 import { HOT_BLOCK_BEGIN, HOT_BLOCK_END } from '../lib/managed-block.js';
@@ -201,23 +202,29 @@ describe('issue #1982 — codev update on root docs', () => {
     expect(read(`${skill}.codev-new`)).toBe(shipped);
   });
 
-  // Known limit, decided out of scope for #1982: root docs carry no record of the version
-  // a release installed (skills have SHIPPED_SKILL_HASHES), so a doc an adopter never
-  // edited, written by an older release whose template has since changed outside the
-  // managed block, cannot be told from an edit. It stays a conflict and the doc is kept.
-  it('known limit: an unedited doc from an older template that changed outside the block is still a conflict', async () => {
+  // The limit #1982 pinned here is lifted by #1985: root docs now have a history of every
+  // shipped version (SHIPPED_ROOT_DOC_HASHES), as skills do, so an unedited doc an older
+  // release wrote is replaced. A doc that is no shipped version is still the adopter's.
+  it('an unedited doc from an older release is replaced; a doc that is no shipped version stays a conflict', async () => {
     const current = read('CLAUDE.md');
     const lastSection = current.lastIndexOf('\n## ');
     expect(lastSection).toBeGreaterThan(current.indexOf(HOT_BLOCK_END));
-    // The older release's template: the current one before its last section was added.
-    const olderTemplate = `${current.slice(0, lastSection)}\n`;
-    write('CLAUDE.md', olderTemplate);
+    // The current template less its last section: no release shipped it.
+    const notShipped = `${current.slice(0, lastSection)}\n`;
+    write('CLAUDE.md', notShipped);
+    // AGENTS.md as v3.3.4's init wrote it for this project, from the template in git history.
+    const fixture = fileURLToPath(new URL('./fixtures/root-doc-templates/v3.3.4.AGENTS.md.template', import.meta.url));
+    const currentAgents = read('AGENTS.md');
+    write('AGENTS.md', fs.readFileSync(fixture, 'utf-8').split('{{PROJECT_NAME}}').join('fresh'));
 
     const { result } = await runUpdate();
 
     expect(result.rootConflicts.map((c) => c.file)).toEqual(['CLAUDE.md']);
-    expect(read('CLAUDE.md')).toBe(olderTemplate);
+    expect(read('CLAUDE.md')).toBe(notShipped);
     expect(read('CLAUDE.md.codev-new')).toBe(current);
+    expect(result.updated).toEqual(['AGENTS.md']);
+    expect(read('AGENTS.md')).toBe(currentAgents);
+    expect(codevNewFiles(projectDir)).toEqual(['CLAUDE.md.codev-new']);
   });
 
   describe('--dry-run reports exactly what the real run then does, on the same project', () => {

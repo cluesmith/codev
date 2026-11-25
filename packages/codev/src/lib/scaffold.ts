@@ -5,10 +5,12 @@
  * management lives in `./gitignore.ts` (extracted in issue #882).
  */
 
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isEmptySkillDir } from './skill-refresh.js';
-import { withEmptyHotBlock } from './managed-block.js';
+import { ROOT_DOCS, withEmptyHotBlock } from './managed-block.js';
+import { SHIPPED_ROOT_DOC_HASHES } from './shipped-root-doc-hashes.js';
 
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
@@ -256,10 +258,20 @@ interface CopyRootFilesOptions {
   handleConflicts?: boolean;
   /** Report what would be copied or conflict, writing nothing. */
   dryRun?: boolean;
+  /**
+   * With `handleConflicts`, replace a doc that is an older shipped version, never edited,
+   * and remove a leftover `.codev-new` that is one (#1985). `codev update` asks for it;
+   * adopt leaves an existing doc to the merge.
+   */
+  replaceShipped?: boolean;
 }
 
 interface CopyRootFilesResult {
   copied: string[];
+  /** Unedited docs from an older release, replaced with the template (#1985). */
+  replaced: string[];
+  /** The content of each doc copied or replaced (or, under `dryRun`, to be), by name. */
+  written: Record<string, string>;
   conflicts: string[];
   /** Root files left alone because the path to write is a symlink or otherwise irregular. */
   notRegular: string[];
@@ -276,7 +288,17 @@ function isIrregularPath(p: string): boolean {
   }
 }
 
-const PROJECT_NAME_PLACEHOLDER = '{{PROJECT_NAME}}';
+export const PROJECT_NAME_PLACEHOLDER = '{{PROJECT_NAME}}';
+
+/** A root doc as matching compares it: LF line endings and the managed block emptied (#1982). */
+function normalizeRootDoc(doc: string): string {
+  return withEmptyHotBlock(doc.replace(/\r\n/g, '\n'));
+}
+
+/** The template written for `projectName`. Split and joined: a `$` in the name stays literal. */
+function substituteProjectName(template: string, projectName: string): string {
+  return template.split(PROJECT_NAME_PLACEHOLDER).join(projectName);
+}
 
 /**
  * A root doc the adopter never edited: a regular file that matches the template outside
@@ -286,18 +308,57 @@ const PROJECT_NAME_PLACEHOLDER = '{{PROJECT_NAME}}';
  */
 function matchesTemplate(filePath: string, template: string): boolean {
   if (!fs.statSync(filePath).isFile()) return false;
-  const pattern = withEmptyHotBlock(template.replace(/\r\n/g, '\n'))
+  const pattern = normalizeRootDoc(template)
     .split(PROJECT_NAME_PLACEHOLDER)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('[^\\n]*');
-  const doc = fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
-  return new RegExp(`^${pattern}$`).test(withEmptyHotBlock(doc));
+  return new RegExp(`^${pattern}$`).test(normalizeRootDoc(fs.readFileSync(filePath, 'utf-8')));
+}
+
+/**
+ * A root doc in the form shipped versions are hashed in (#1985): normalised as for
+ * matching, with the project name put back to the placeholder. Every template Codev has
+ * shipped carries the name once, in the heading on its first line, so the doc's first line
+ * must be `template`'s heading with some name in the placeholder's place, and that name is
+ * read from it. The name is never looked for anywhere else, and a doc whose first line is
+ * not that heading has no hash form: null.
+ */
+export function rootDocHashForm(doc: string, template: string): { projectName: string; form: string } | null {
+  const heading = template.replace(/\r\n/g, '\n').split('\n', 1)[0];
+  const at = heading.indexOf(PROJECT_NAME_PLACEHOLDER);
+  if (at < 0) return null;
+  const prefix = heading.slice(0, at);
+  const suffix = heading.slice(at + PROJECT_NAME_PLACEHOLDER.length);
+  const normalized = normalizeRootDoc(doc);
+  const firstLine = normalized.split('\n', 1)[0];
+  if (firstLine.length < prefix.length + suffix.length) return null;
+  if (!firstLine.startsWith(prefix) || !firstLine.endsWith(suffix)) return null;
+  return {
+    projectName: firstLine.slice(prefix.length, firstLine.length - suffix.length),
+    form: heading + normalized.slice(firstLine.length),
+  };
+}
+
+export function hashRootDocForm(form: string): string {
+  return crypto.createHash('sha256').update(form).digest('hex');
+}
+
+/**
+ * The project name of a root doc that is, outside the managed block, exactly a version of
+ * `file`'s template that Codev has shipped; null for anything else, which is the adopter's.
+ */
+function shippedVersionName(content: string, file: string, template: string): string | null {
+  const parsed = rootDocHashForm(content, template);
+  if (parsed === null || !(SHIPPED_ROOT_DOC_HASHES[file] ?? []).includes(hashRootDocForm(parsed.form))) return null;
+  return parsed.projectName;
 }
 
 /**
  * Copy root files (CLAUDE.md, AGENTS.md) with project name substitution. With
  * `handleConflicts`, an existing doc that differs from the template outside the managed
- * block keeps its content and gets the template beside it as `.codev-new`.
+ * block keeps its content and gets the template beside it as `.codev-new`, unless
+ * `replaceShipped` is set and it is an older shipped version, never edited: then it is
+ * replaced (#1985).
  */
 export function copyRootFiles(
   targetDir: string,
@@ -305,14 +366,15 @@ export function copyRootFiles(
   projectName: string,
   options: CopyRootFilesOptions = {}
 ): CopyRootFilesResult {
-  const { handleConflicts = false, dryRun = false } = options;
+  const { handleConflicts = false, replaceShipped = false, dryRun = false } = options;
   const copied: string[] = [];
+  const replaced: string[] = [];
+  const written: Record<string, string> = {};
   const conflicts: string[] = [];
   const notRegular: string[] = [];
   const resolved: string[] = [];
 
-  const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
-  for (const file of rootFiles) {
+  for (const file of ROOT_DOCS) {
     const srcPath = path.join(skeletonDir, 'templates', file);
     const destPath = path.join(targetDir, file);
 
@@ -321,7 +383,7 @@ export function copyRootFiles(
     }
 
     const template = fs.readFileSync(srcPath, 'utf-8');
-    const content = template.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    const content = substituteProjectName(template, projectName);
 
     // Never write through a symlink, which may point outside the project: not the
     // `.codev-new` copy, and not a dangling link where a missing file would be created. A
@@ -334,15 +396,35 @@ export function copyRootFiles(
       continue;
     }
 
+    // A pending copy Codev wrote, the template or an older shipped version of it, leaves
+    // nothing to merge once the doc is current (a symlinked one was skipped above).
+    const removeSettledPending = (): void => {
+      const pendingPath = destPath + '.codev-new';
+      if (!fs.existsSync(pendingPath)) return;
+      const settled = matchesTemplate(pendingPath, template)
+        || (replaceShipped && shippedVersionName(fs.readFileSync(pendingPath, 'utf-8'), file, template) !== null);
+      if (!settled) return;
+      if (!dryRun) fs.rmSync(pendingPath);
+      resolved.push(file + '.codev-new');
+    };
+
+    // Never replace through a symlink: only a regular file at the doc's own path.
+    const shippedName = handleConflicts && replaceShipped && fs.existsSync(destPath) && !isIrregularPath(destPath)
+      ? shippedVersionName(fs.readFileSync(destPath, 'utf-8'), file, template)
+      : null;
+
     if (fs.existsSync(destPath)) {
       if (handleConflicts && matchesTemplate(destPath, template)) {
-        // Up to date: the managed block is refreshed by syncHotContextBlock (#1982). A pending
-        // copy that is the template too leaves nothing to merge (a symlinked one was skipped above).
-        const pendingPath = destPath + '.codev-new';
-        if (fs.existsSync(pendingPath) && matchesTemplate(pendingPath, template)) {
-          if (!dryRun) fs.rmSync(pendingPath);
-          resolved.push(file + '.codev-new');
-        }
+        // Up to date: the managed block is refreshed by syncHotContextBlock (#1982).
+        removeSettledPending();
+      } else if (shippedName !== null) {
+        // An older release's template, never edited (#1985): written as init would write it
+        // for the project name it carries; syncHotContextBlock then regenerates the block.
+        const replacement = substituteProjectName(template, shippedName);
+        if (!dryRun) fs.writeFileSync(destPath, replacement);
+        replaced.push(file);
+        written[file] = replacement;
+        removeSettledPending();
       } else if (handleConflicts) {
         // Create .codev-new for merge
         if (!dryRun) fs.writeFileSync(destPath + '.codev-new', content);
@@ -352,10 +434,11 @@ export function copyRootFiles(
     } else {
       if (!dryRun) fs.writeFileSync(destPath, content);
       copied.push(file);
+      written[file] = content;
     }
   }
 
-  return { copied, conflicts, notRegular, resolved };
+  return { copied, replaced, written, conflicts, notRegular, resolved };
 }
 
 interface CreateProjectsDirOptions {
