@@ -42,7 +42,7 @@ gates:
     status: pending
     requested_at: '2026-11-25T01:15:24.615Z'
 iteration: 1
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: readonly_core
@@ -141,7 +141,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-25T01:17:06.691Z'
+updated_at: '2026-11-25T07:17:19.760Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
