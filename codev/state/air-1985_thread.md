@@ -36,3 +36,15 @@ and the adopter never edited, the way it already replaces unedited skills (#1811
   a `$&` in a directory name was expanded. It now uses split/join (init too).
 - Fixtures are the v1.1.0 / v3.1.5 / v3.3.4 templates copied from git, named
   `*.template` so no agent loads them as nested CLAUDE.md / AGENTS.md.
+
+## PR #1987 and CMAP
+
+- codex: REQUEST_CHANGES. `syncHotContextBlock` writes the managed block through a symlinked
+  root doc, and my symlink test hid that by comparing with the block emptied. That
+  write-through dates from Spec 987, not this change. Whether to stop it is an owner
+  decision, because `CLAUDE.md -> AGENTS.md` and other in-repo links rely on it. So I made the
+  claim precise (a symlinked doc is never *replaced*), commented the test, and raised the
+  write-through with the architect.
+- claude: APPROVE. Took its nit: dropped the dead `history` option on `copyRootFiles`. Left
+  the literal-`{{PROJECT_NAME}}`-heading case alone: that doc is the raw shipped template, so
+  replacing it loses nothing.

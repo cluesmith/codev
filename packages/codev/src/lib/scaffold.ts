@@ -264,8 +264,6 @@ interface CopyRootFilesOptions {
    * adopt leaves an existing doc to the merge.
    */
   replaceShipped?: boolean;
-  /** Shipped versions per root doc; tests substitute their own. */
-  history?: Record<string, readonly string[]>;
 }
 
 interface CopyRootFilesResult {
@@ -349,14 +347,9 @@ export function hashRootDocForm(form: string): string {
  * The project name of a root doc that is, outside the managed block, exactly a version of
  * `file`'s template that Codev has shipped; null for anything else, which is the adopter's.
  */
-function shippedVersionName(
-  content: string,
-  file: string,
-  template: string,
-  history: Record<string, readonly string[]>,
-): string | null {
+function shippedVersionName(content: string, file: string, template: string): string | null {
   const parsed = rootDocHashForm(content, template);
-  if (parsed === null || !(history[file] ?? []).includes(hashRootDocForm(parsed.form))) return null;
+  if (parsed === null || !(SHIPPED_ROOT_DOC_HASHES[file] ?? []).includes(hashRootDocForm(parsed.form))) return null;
   return parsed.projectName;
 }
 
@@ -373,7 +366,7 @@ export function copyRootFiles(
   projectName: string,
   options: CopyRootFilesOptions = {}
 ): CopyRootFilesResult {
-  const { handleConflicts = false, replaceShipped = false, dryRun = false, history = SHIPPED_ROOT_DOC_HASHES } = options;
+  const { handleConflicts = false, replaceShipped = false, dryRun = false } = options;
   const copied: string[] = [];
   const replaced: string[] = [];
   const written: Record<string, string> = {};
@@ -409,7 +402,7 @@ export function copyRootFiles(
       const pendingPath = destPath + '.codev-new';
       if (!fs.existsSync(pendingPath)) return;
       const settled = matchesTemplate(pendingPath, template)
-        || (replaceShipped && shippedVersionName(fs.readFileSync(pendingPath, 'utf-8'), file, template, history) !== null);
+        || (replaceShipped && shippedVersionName(fs.readFileSync(pendingPath, 'utf-8'), file, template) !== null);
       if (!settled) return;
       if (!dryRun) fs.rmSync(pendingPath);
       resolved.push(file + '.codev-new');
@@ -417,7 +410,7 @@ export function copyRootFiles(
 
     // Never replace through a symlink: only a regular file at the doc's own path.
     const shippedName = handleConflicts && replaceShipped && fs.existsSync(destPath) && !isIrregularPath(destPath)
-      ? shippedVersionName(fs.readFileSync(destPath, 'utf-8'), file, template, history)
+      ? shippedVersionName(fs.readFileSync(destPath, 'utf-8'), file, template)
       : null;
 
     if (fs.existsSync(destPath)) {

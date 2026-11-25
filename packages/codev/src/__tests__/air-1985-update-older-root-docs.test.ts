@@ -256,7 +256,9 @@ describe('issue #1985 — codev update on root docs from an older release', () =
     expect(read('CLAUDE.md')).toContain('(our change)');
   });
 
-  it('never replaces through a symlink: a linked doc holding an old version stays a conflict', async () => {
+  // Replacement never writes through a symlink. The block refresh still writes its block
+  // into a symlinked doc's target, as it has since Spec 987; this change leaves that alone.
+  it('never replaces a symlinked doc: one linking to an old version stays a conflict, its target not replaced', async () => {
     holdVersion('v3.3.4');
     const old = shipped('v3.3.4', 'CLAUDE.md');
     fs.rmSync(path.join(projectDir, 'CLAUDE.md'));
