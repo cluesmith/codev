@@ -36,3 +36,32 @@
   back-off; R answers `held busy` rather than block past 5 s; a run of 5 not-verified surfaces the
   peer as "not verifying"; Decision 9's remaining stage-2 surface (Peers panel, inbox show, status
   lines, 3-count indicator) explicitly in scope.
+- Spec gate requested (decision main-55 with the owner). While it is pending the architect asked for
+  a revision (21:09Z, 21:11Z) folding in three reviews: the cloud architect's review of contract
+  revision 1 (codev-cloud#22 comment 7174678201, points [r1]–[r18]), codex round 2 and claude round 2
+  (both COMMENT). Contract is now revision 2:
+  - Tower's name in the protocol is the SLUG (`self.slug`, `towers[].slug`, statement
+    `fromTowerSlug`); `auth_ok.name` is display-only and never used.
+  - HTTP 200 only and always means R decided; S reads the source from the status (the `source` field
+    is gone). C checks status, content type, size and the outcome header only; S validates the shape.
+  - 503 (no live session, hold) before 409 (session without the version, refuse); stream death →
+    504; Content-Encoding and self-addressed `x-codev-peer-to` → 400; once a relay was stated, a
+    bodyless 401/403/404/429/5xx holds.
+  - Exact rules for every statement and payload field (type, encoding, length, bounds); literal-UTF-8
+    serialisation pinned (an escaping serialiser would push a 48 KiB emoji body over the cap).
+  - S's refusal precedence listed; "how S resolves its row" table (`delivered` and `held` at R both
+    end it accepted; `duplicate:true` resolves as the state it reports).
+  - Rate-limited held mail stays held for EITHER source (codex/claude both caught that R's own 30/min
+    would still strand messages 31–50); R sends `retryAfterSec`.
+  - Wrong-clock surface (G12) mirroring G10; statement-id memory scoped to the session.
+  - Shared vectors: `packages/types/fixtures/peer-contract-vectors.json`, format given, one worked
+    case computed now (Node and Python agree on the MAC); full set ships with the first phase.
+  - Cloud costs K1–K6 listed as departures (flood counts lost on deploy, rows written after the
+    answer, bad-key limit out of the contract, protocols/switch stored, PUT retried 3×, approximate
+    fixed-window limits).
+  - New constraint: the plan sorts scenarios into porch's tests check vs on-demand and makes the
+    two-Tower + stand-in harness its own phase; injected clocks only. No new dev dependency for the
+    property test (seeded generator of our own).
+  - OQ1 now states the cost if codev-cloud#22 slips (PR merged and inert, builder stopped, parked at
+    verify-approval, resume with `afx spawn 1967 --resume`; the worktree in the meantime is the
+    owner's call).
