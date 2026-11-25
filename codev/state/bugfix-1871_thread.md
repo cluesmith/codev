@@ -88,3 +88,27 @@ Built as designed. Notes for readers:
   never contacted the (fake) server URL.
 - The dashboard's CloudStatus (`apps/web`) was left alone: a deregistered registration reports
   `registered: false`, so it shows "Cloud: not registered", which is accurate.
+
+## 2026-11-25 — PR #1988 and CMAP
+
+- Porch tests check failed once: 3 skill-parity suites. I had missed the fourth afx skill copy
+  (root `.codex/skills/afx/SKILL.md`). Fixed, told the architect, re-ran, green.
+- CMAP iter 1: codex REQUEST_CHANGES, claude COMMENT.
+  - **Real bug (codex):** the config watcher skipped every change while the tunnel was connected,
+    so a re-registration written during a live connection kept the old client. It ended up
+    terminal `deregistered` with nothing connecting the new key. The watcher now skips only when
+    the live client's credentials match the config. The test now demands a reconnect on the new
+    key and fails on the old condition.
+  - The dialog prefill uses the display name (I had wrongly reverted it; the dialog normalizes
+    names). The dashboard title (`/api/state` hostname) uses `display_name ?? tower_name`.
+  - Not changed: porch's own `chore(porch)` commit subjects.
+- Architect: the canonical name must come from the slug, never from `auth_ok.name`. Confirmed:
+  all three `tower_name` writes take the slug.
+- Windows: the first run's targeted job found no files because vitest filters are path
+  substrings, not regex. Re-dispatched on head `3baa9f5` with `filter=bugfix-1871-cloud-identity`.
+- CMAP iter 2 (codex, on `3baa9f5`): COMMENT, no blockers. Claude iter 1 was COMMENT; its points are
+  addressed.
+- Windows on `3baa9f5`: all jobs pass except Unit tests, whose only failure is
+  `bugfix-1982-update-root-docs.test.ts` (5 tests, CRLF). A baseline run on **main** fails the same
+  5 tests (run 45703930614). The failure comes from #1982, is unrelated to this PR, and is not flaky.
+  It is named in the PR and was reported to the architect.
