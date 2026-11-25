@@ -11,6 +11,7 @@
  * B. AI-assistant file refresh (runs every time):
  *    1. Update CLAUDE.md, AGENTS.md, and provider skill trees from package. A skill the
  *       user never edited is replaced; an edited one gets `.codev-new` copies (#1811).
+ *       A root doc edited outside its managed block gets a `.codev-new` too (#1982).
  */
 
 import * as fs from 'node:fs';
@@ -311,26 +312,21 @@ export async function update(options: UpdateOptions = {}, overrides: Partial<Upd
 
     // Materialize the hot-tier files for existing adopters (Spec 987), skip-existing so a
     // curated copy is preserved. Runs BEFORE the block refresh so the block uses local content.
-    if (dryRun) {
-      log(chalk.dim('  + (hot-tier) would create missing codev/resources/{arch,lessons}-critical.md'));
-    } else {
-      for (const file of copyHotTierDefaults(targetDir, templatesDir, { skipExisting: true }).copied) {
-        const rel = `codev/resources/${file}`;
-        result.newFiles.push(rel);
-        log(chalk.green('  + (new)'), rel);
-      }
+    // Like everything below, a dry run reports what the real run would do and writes nothing (#1982).
+    const pendingHotFiles: string[] = [];
+    for (const file of copyHotTierDefaults(targetDir, templatesDir, { skipExisting: true, dryRun }).copied) {
+      const rel = `codev/resources/${file}`;
+      result.newFiles.push(rel);
+      pendingHotFiles.push(rel);
+      log(chalk.green(`  + (${previewVerb}new)`), rel);
     }
 
     // Backfill the cold-tier governance files for existing adopters from the skeleton's
     // *.starter.md placeholders (issue #1012), skip-existing so a curated file is never overwritten.
-    if (dryRun) {
-      log(chalk.dim('  + (cold-tier) would create missing codev/resources/{arch,lessons-learned}.md'));
-    } else {
-      for (const file of copyColdTierDefaults(targetDir, templatesDir, { skipExisting: true }).copied) {
-        const rel = `codev/resources/${file}`;
-        result.newFiles.push(rel);
-        log(chalk.green('  + (new)'), rel);
-      }
+    for (const file of copyColdTierDefaults(targetDir, templatesDir, { skipExisting: true, dryRun }).copied) {
+      const rel = `codev/resources/${file}`;
+      result.newFiles.push(rel);
+      log(chalk.green(`  + (${previewVerb}new)`), rel);
     }
 
     // Starters left on a project with something to document point at the bootstrap pass
@@ -342,12 +338,9 @@ export async function update(options: UpdateOptions = {}, overrides: Partial<Upd
     // Refresh the always-on hot-tier managed block in CLAUDE.md / AGENTS.md (Spec 987).
     // Non-clobbering: only the marked block is replaced; user content is preserved.
     // Logged as a side effect (not added to result.updated, which tracks template copies).
-    if (dryRun) {
-      log(chalk.dim('  ~ (hot-tier) would refresh CLAUDE.md / AGENTS.md managed block'));
-    } else {
-      for (const file of syncHotContextBlock(targetDir)) {
-        log(chalk.blue('  ~ (hot-tier block)'), file);
-      }
+    // A dry run counts the hot files it would have created as present.
+    for (const file of syncHotContextBlock(targetDir, targetDir, { dryRun, pendingHotFiles })) {
+      log(chalk.blue(`  ~ (hot-tier block ${previewVerb}refreshed)`), file);
     }
 
     // Backfill .gitignore with any missing Codev entries

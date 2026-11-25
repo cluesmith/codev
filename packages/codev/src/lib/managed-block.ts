@@ -64,11 +64,12 @@ const HOT_IMPORTS: ReadonlyArray<{ diskRelPath: string; importLine: string }> = 
  * that with Claude Code `@import` lines so the hot files stay the single source of
  * truth — no copy to drift. Claude Code expands `@path` imports into context at
  * session launch (always-on, transcluded — not lazy), giving the same guarantee as
- * inlining minus the drift footgun. A line is emitted only if its hot file is on disk.
+ * inlining minus the drift footgun. A line is emitted only if its hot file is on disk, or
+ * is in `pendingHotFiles`: hot files a dry run would have created by now (#1982).
  */
-export function renderHotContextBlock(workspaceRoot: string): string {
+export function renderHotContextBlock(workspaceRoot: string, pendingHotFiles: readonly string[] = []): string {
   const imports = HOT_IMPORTS
-    .filter((h) => fs.existsSync(path.join(workspaceRoot, h.diskRelPath)))
+    .filter((h) => pendingHotFiles.includes(h.diskRelPath) || fs.existsSync(path.join(workspaceRoot, h.diskRelPath)))
     .map((h) => h.importLine);
   if (imports.length === 0) return '';
   return [
@@ -117,13 +118,37 @@ export function upsertHotContextBlock(docContent: string, block: string): string
 }
 
 /**
+ * Whether two root docs agree everywhere outside the managed block (#1982). The block is
+ * regenerated from the hot files on every update, so what sits inside it, or whether it
+ * is there at all, is never the adopter's edit: both docs are compared as the block
+ * refresh leaves them.
+ */
+export function sameOutsideHotBlock(a: string, b: string): boolean {
+  const anyBlock = `${HOT_BLOCK_BEGIN}\n${HOT_BLOCK_END}`;
+  return upsertHotContextBlock(a, anyBlock) === upsertHotContextBlock(b, anyBlock);
+}
+
+export interface SyncHotContextOptions {
+  /** Report the docs that would change, writing nothing. */
+  dryRun?: boolean;
+  /** Hot files (workspace-relative) a dry run would have created by now. */
+  pendingHotFiles?: readonly string[];
+}
+
+/**
  * Write/refresh the managed block in CLAUDE.md and AGENTS.md under `targetDir`,
  * resolving hot files from `workspaceRoot` (four-tier). Non-clobbering: only the
  * managed block changes. A root doc that doesn't exist is skipped (init/adopt
- * create them via copyRootFiles first). Returns the names of the files changed.
+ * create them via copyRootFiles first). Returns the names of the files changed, or
+ * under `dryRun` the names that would change.
  */
-export function syncHotContextBlock(targetDir: string, workspaceRoot: string = targetDir): string[] {
-  const block = renderHotContextBlock(workspaceRoot);
+export function syncHotContextBlock(
+  targetDir: string,
+  workspaceRoot: string = targetDir,
+  options: SyncHotContextOptions = {},
+): string[] {
+  const { dryRun = false, pendingHotFiles = [] } = options;
+  const block = renderHotContextBlock(workspaceRoot, pendingHotFiles);
   if (block === '') return [];
 
   const changed: string[] = [];
@@ -133,7 +158,7 @@ export function syncHotContextBlock(targetDir: string, workspaceRoot: string = t
     const before = fs.readFileSync(p, 'utf-8');
     const after = upsertHotContextBlock(before, block);
     if (after !== before) {
-      fs.writeFileSync(p, after);
+      if (!dryRun) fs.writeFileSync(p, after);
       changed.push(name);
     }
   }

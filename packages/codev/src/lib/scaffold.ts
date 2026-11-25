@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isEmptySkillDir } from './skill-refresh.js';
+import { sameOutsideHotBlock } from './managed-block.js';
 
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
@@ -145,6 +146,11 @@ export function copyResourceTemplates(
   return { copied, skipped };
 }
 
+interface CopyTierDefaultsOptions extends CopyResourceTemplatesOptions {
+  /** Report what would be copied, writing nothing (#1982). */
+  dryRun?: boolean;
+}
+
 /** The capped hot-tier files materialized into a project's codev/resources/ (Spec 987). */
 export const HOT_TIER_FILES = ['arch-critical.md', 'lessons-critical.md'] as const;
 
@@ -162,14 +168,14 @@ export const HOT_TIER_FILES = ['arch-critical.md', 'lessons-critical.md'] as con
 export function copyHotTierDefaults(
   targetDir: string,
   skeletonDir: string,
-  options: CopyResourceTemplatesOptions = {}
+  options: CopyTierDefaultsOptions = {}
 ): CopyResourceTemplatesResult {
-  const { skipExisting = false } = options;
+  const { skipExisting = false, dryRun = false } = options;
   const resourcesDir = path.join(targetDir, 'codev', 'resources');
   const copied: string[] = [];
   const skipped: string[] = [];
 
-  if (!fs.existsSync(resourcesDir)) {
+  if (!dryRun && !fs.existsSync(resourcesDir)) {
     fs.mkdirSync(resourcesDir, { recursive: true });
   }
 
@@ -182,7 +188,7 @@ export function copyHotTierDefaults(
       continue;
     }
     if (fs.existsSync(srcPath)) {
-      fs.copyFileSync(srcPath, destPath);
+      if (!dryRun) fs.copyFileSync(srcPath, destPath);
       copied.push(file);
     }
   }
@@ -218,14 +224,14 @@ export const COLD_TIER_FILES = [
 export function copyColdTierDefaults(
   targetDir: string,
   skeletonDir: string,
-  options: CopyResourceTemplatesOptions = {}
+  options: CopyTierDefaultsOptions = {}
 ): CopyResourceTemplatesResult {
-  const { skipExisting = false } = options;
+  const { skipExisting = false, dryRun = false } = options;
   const resourcesDir = path.join(targetDir, 'codev', 'resources');
   const copied: string[] = [];
   const skipped: string[] = [];
 
-  if (!fs.existsSync(resourcesDir)) {
+  if (!dryRun && !fs.existsSync(resourcesDir)) {
     fs.mkdirSync(resourcesDir, { recursive: true });
   }
 
@@ -238,7 +244,7 @@ export function copyColdTierDefaults(
       continue;
     }
     if (fs.existsSync(srcPath)) {
-      fs.copyFileSync(srcPath, destPath);
+      if (!dryRun) fs.copyFileSync(srcPath, destPath);
       copied.push(dest);
     }
   }
@@ -269,7 +275,28 @@ function isIrregularPath(p: string): boolean {
 }
 
 /**
- * Copy root files (CLAUDE.md, AGENTS.md) with project name substitution
+ * A root doc the adopter never edited: a regular file that matches the template
+ * everywhere outside the managed block.
+ */
+function matchesTemplate(destPath: string, template: string): boolean {
+  return fs.statSync(destPath).isFile() && sameOutsideHotBlock(fs.readFileSync(destPath, 'utf-8'), template);
+}
+
+/**
+ * Delete a pending `.codev-new` that holds exactly the template beside an up-to-date doc:
+ * nothing is left to merge. A copy with other content is kept.
+ */
+function removeResolvedCodevNew(pendingPath: string, template: string): void {
+  const pending = fs.lstatSync(pendingPath, { throwIfNoEntry: false });
+  if (pending?.isFile() && fs.readFileSync(pendingPath, 'utf-8') === template) {
+    fs.rmSync(pendingPath);
+  }
+}
+
+/**
+ * Copy root files (CLAUDE.md, AGENTS.md) with project name substitution. With
+ * `handleConflicts`, an existing doc that differs from the template outside the managed
+ * block keeps its content and gets the template beside it as `.codev-new`.
  */
 export function copyRootFiles(
   targetDir: string,
@@ -306,7 +333,10 @@ export function copyRootFiles(
     }
 
     if (fs.existsSync(destPath)) {
-      if (handleConflicts) {
+      if (handleConflicts && matchesTemplate(destPath, content)) {
+        // Up to date: the managed block is refreshed by syncHotContextBlock (#1982).
+        if (!dryRun) removeResolvedCodevNew(destPath + '.codev-new', content);
+      } else if (handleConflicts) {
         // Create .codev-new for merge
         if (!dryRun) fs.writeFileSync(destPath + '.codev-new', content);
         conflicts.push(file);
