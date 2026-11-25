@@ -78,7 +78,7 @@ function agents(builderState: string, architectState: string, since: string): Ov
 }
 
 function entry(ws: TowerWorkspace, overview: OverviewData | null): FleetEntry {
-  return { workspace: ws, attention: deriveAttention(overview) };
+  return { workspace: ws, attention: deriveAttention(overview), overview };
 }
 
 function fakeCache(fleet: FleetEntry[], loaded = true) {

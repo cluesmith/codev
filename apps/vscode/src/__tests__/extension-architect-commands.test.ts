@@ -28,6 +28,10 @@ const EXT_SRC = readFileSync(
   resolve(__dirname, '../extension.ts'),
   'utf8',
 );
+const ARGS_SRC = readFileSync(
+  resolve(__dirname, '../commands/command-args.ts'),
+  'utf8',
+);
 
 describe('Spec 786 Phase 6 — extension.ts architect commands', () => {
   it('codev.openArchitectTerminal accepts an optional architectName arg', () => {
@@ -111,9 +115,12 @@ describe('Spec 786 Phase 6 — extension.ts architect commands', () => {
     // so removeArchitect MUST read the raw name from item.id
     // (`workspace-architect-<name>`). Reading the label would DELETE a name
     // Tower doesn't know (e.g. 'WEB' vs 'web').
+    // Spec 1963 moved the resolution into `architectNameFromArg` (behaviour pinned in
+    // command-args.test.ts); the handler must still go through it.
     const removeBlock = EXT_SRC.split("regCli('codev.removeArchitect'")[1] ?? '';
-    expect(removeBlock).toMatch(/workspace-architect-/);
-    expect(removeBlock).toMatch(/arg\.id/);
+    expect(removeBlock).toMatch(/^, async \(arg: unknown\) => \{\s*\/\/[^\n]*\n\s*const name = architectNameFromArg\(arg\);/);
+    expect(ARGS_SRC).toMatch(/workspace-architect-/);
+    expect(ARGS_SRC).toMatch(/arg\.id/);
   });
 
   it('codev.removeArchitect is registered', () => {

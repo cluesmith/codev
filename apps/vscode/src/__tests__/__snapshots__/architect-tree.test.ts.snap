@@ -1,0 +1,347 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=0 · architect axis · flat files 1`] = `
+{
+  "cycle": [
+    "architect:main",
+  ],
+  "rows": [
+    "id=builder-group:main | label=MAIN (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("main") | tip="No builders" | parent=root",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=0 · architect axis · tree files 1`] = `
+{
+  "cycle": [
+    "architect:main",
+  ],
+  "rows": [
+    "id=builder-group:main | label=MAIN (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("main") | tip="No builders" | parent=root",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=0 · area axis · flat files 1`] = `
+{
+  "cycle": [],
+  "rows": [],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=0 · area axis · tree files 1`] = `
+{
+  "cycle": [],
+  "rows": [],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=0 · stage axis · flat files 1`] = `
+{
+  "cycle": [],
+  "rows": [],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=0 · stage axis · tree files 1`] = `
+{
+  "cycle": [],
+  "rows": [],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=1 · architect axis · flat files 1`] = `
+{
+  "cycle": [
+    "architect:main",
+    "builder:pir-1",
+    "architect:reviewer",
+  ],
+  "rows": [
+    "id=builder-group:main | label=MAIN (1) | desc=- | ctx=group-builder | state=2 | icon=circle-filled/testing.iconPassed | cmd=codev.openArchitectTerminal("main") | tip="0 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=pir-1#0 | label=[implement] #1 solo | desc=- | ctx=builder-pir | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%" | parent=builder-group:main",
+    "    id=pir-1::src/only.ts | label=only.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/only.ts" | parent=pir-1#0",
+    "id=builder-group:reviewer | label=REVIEWER (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("reviewer") | tip="No builders" | parent=root",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=1 · architect axis · tree files 1`] = `
+{
+  "cycle": [
+    "architect:main",
+    "builder:pir-1",
+    "architect:reviewer",
+  ],
+  "rows": [
+    "id=builder-group:main | label=MAIN (1) | desc=- | ctx=group-builder | state=2 | icon=circle-filled/testing.iconPassed | cmd=codev.openArchitectTerminal("main") | tip="0 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=pir-1#0 | label=[implement] #1 solo | desc=- | ctx=builder-pir | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%" | parent=builder-group:main",
+    "    id=pir-1::folder::src | label=src | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=pir-1#0",
+    "      id=pir-1::src/only.ts | label=only.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/only.ts" | parent=pir-1::folder::src",
+    "id=builder-group:reviewer | label=REVIEWER (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("reviewer") | tip="No builders" | parent=root",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=1 · area axis · flat files 1`] = `
+{
+  "cycle": [
+    "builder:pir-1",
+  ],
+  "rows": [
+    "id=pir-1#0 | label=[implement] #1 solo | desc=- | ctx=builder-pir | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%" | parent=root",
+    "  id=pir-1::src/only.ts | label=only.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/only.ts" | parent=pir-1#0",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=1 · area axis · tree files 1`] = `
+{
+  "cycle": [
+    "builder:pir-1",
+  ],
+  "rows": [
+    "id=pir-1#0 | label=[implement] #1 solo | desc=- | ctx=builder-pir | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%" | parent=root",
+    "  id=pir-1::folder::src | label=src | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=pir-1#0",
+    "    id=pir-1::src/only.ts | label=only.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/only.ts" | parent=pir-1::folder::src",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=1 · stage axis · flat files 1`] = `
+{
+  "cycle": [
+    "builder:pir-1",
+  ],
+  "rows": [
+    "id=builder-group:implement | label=IMPLEMENT (1) | desc=- | ctx=group-builder | state=2 | icon=circle-filled/testing.iconPassed | cmd=- | tip="0 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=pir-1#0 | label=#1 solo | desc=- | ctx=builder-pir | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%" | parent=builder-group:implement",
+    "    id=pir-1::src/only.ts | label=only.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/only.ts" | parent=pir-1#0",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N=1 · stage axis · tree files 1`] = `
+{
+  "cycle": [
+    "builder:pir-1",
+  ],
+  "rows": [
+    "id=builder-group:implement | label=IMPLEMENT (1) | desc=- | ctx=group-builder | state=2 | icon=circle-filled/testing.iconPassed | cmd=- | tip="0 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=pir-1#0 | label=#1 solo | desc=- | ctx=builder-pir | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%" | parent=builder-group:implement",
+    "    id=pir-1::folder::src | label=src | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=pir-1#0",
+    "      id=pir-1::src/only.ts | label=only.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/only.ts" | parent=pir-1::folder::src",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N>1 · architect axis · flat files 1`] = `
+{
+  "cycle": [
+    "architect:main",
+    "builder:spir-10",
+    "builder:air-11",
+    "architect:ghost",
+    "builder:pir-13",
+    "architect:web",
+    "builder:aspir-14",
+    "builder:bugfix-12",
+    "architect:demos",
+    "architect:reviewer",
+  ],
+  "rows": [
+    "id=builder-group:main | label=MAIN (2) | desc=- | ctx=group-builder | state=2 | icon=bell/notificationsWarningIcon.foreground | cmd=codev.openArchitectTerminal("main") | tip="1 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=spir-10#0 | label=[plan] #10 gated blocked on plan review [2h] | desc=- | ctx=blocked-builder-spir | state=1 | icon=checklist/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: spir | Mode: strict | Progress: 0%\\nBlocked on plan review" | parent=builder-group:main",
+    "    id=spir-10::README.md | label=README.md | desc= | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · README.md" | parent=spir-10#0",
+    "    id=spir-10::src/views/a.ts | label=a.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/a.ts" | parent=spir-10#0",
+    "    id=spir-10::src/views/b.ts | label=b.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/b.ts" | parent=spir-10#0",
+    "    id=spir-10::src/extension.ts | label=extension.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/extension.ts" | parent=spir-10#0",
+    "  id=air-11#0 | label=[implement] #11 orphan turn ended [30m] | desc=- | ctx=awaiting-builder-air | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: air | Mode: strict | Progress: 0%\\nTurn ended" | parent=builder-group:main",
+    "    id=- | label=Diff unavailable | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip="git failed" | parent=root",
+    "id=builder-group:ghost | label=GHOST (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openArchitectTerminal("ghost") | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=pir-13#0 | label=[review] #13 asks asking a question [5m] | desc=- | ctx=awaiting-builder-pir | state=1 | icon=question/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%\\nAsking a question" | parent=builder-group:ghost",
+    "    id=- | label=No worktree on record | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:web | label=WEB (2) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openArchitectTerminal("web") | tip="0 blocked · 1 waiting · 1 active" | parent=root",
+    "  id=aspir-14#0 | label=[specify] #14 quiet waiting on input [10h silent] | desc=- | ctx=awaiting-builder-aspir | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: aspir | Mode: strict | Progress: 0%\\nWaiting on input" | parent=builder-group:web",
+    "    id=- | label=No changes yet | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "  id=bugfix-12#0 | label=[pr] #12 busy | desc=- | ctx=builder-bugfix | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: bugfix | Mode: strict | Progress: 0%" | parent=builder-group:web",
+    "    id=bugfix-12::packages/x/y.ts | label=y.ts | desc=packages/x | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · packages/x/y.ts" | parent=bugfix-12#0",
+    "id=idle-architects-group | label=Idle Architects (2) | desc=- | ctx=group-idle-architects | state=1 | icon=circle-outline/disabledForeground | cmd=- | tip="2 idle architects · no builders attached" | parent=root",
+    "  id=builder-group:demos | label=DEMOS (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("demos") | tip="No builders" | parent=idle-architects-group",
+    "  id=builder-group:reviewer | label=REVIEWER (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("reviewer") | tip="No builders" | parent=idle-architects-group",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N>1 · architect axis · tree files 1`] = `
+{
+  "cycle": [
+    "architect:main",
+    "builder:spir-10",
+    "builder:air-11",
+    "architect:ghost",
+    "builder:pir-13",
+    "architect:web",
+    "builder:aspir-14",
+    "builder:bugfix-12",
+    "architect:demos",
+    "architect:reviewer",
+  ],
+  "rows": [
+    "id=builder-group:main | label=MAIN (2) | desc=- | ctx=group-builder | state=2 | icon=bell/notificationsWarningIcon.foreground | cmd=codev.openArchitectTerminal("main") | tip="1 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=spir-10#0 | label=[plan] #10 gated blocked on plan review [2h] | desc=- | ctx=blocked-builder-spir | state=1 | icon=checklist/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: spir | Mode: strict | Progress: 0%\\nBlocked on plan review" | parent=builder-group:main",
+    "    id=spir-10::folder::src | label=src | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=spir-10#0",
+    "      id=spir-10::folder::src/views | label=views | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=spir-10::folder::src",
+    "        id=spir-10::src/views/a.ts | label=a.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/a.ts" | parent=spir-10::folder::src/views",
+    "        id=spir-10::src/views/b.ts | label=b.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/b.ts" | parent=spir-10::folder::src/views",
+    "      id=spir-10::src/extension.ts | label=extension.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/extension.ts" | parent=spir-10::folder::src",
+    "    id=spir-10::README.md | label=README.md | desc= | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · README.md" | parent=spir-10#0",
+    "  id=air-11#0 | label=[implement] #11 orphan turn ended [30m] | desc=- | ctx=awaiting-builder-air | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: air | Mode: strict | Progress: 0%\\nTurn ended" | parent=builder-group:main",
+    "    id=- | label=Diff unavailable | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip="git failed" | parent=root",
+    "id=builder-group:ghost | label=GHOST (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openArchitectTerminal("ghost") | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=pir-13#0 | label=[review] #13 asks asking a question [5m] | desc=- | ctx=awaiting-builder-pir | state=1 | icon=question/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%\\nAsking a question" | parent=builder-group:ghost",
+    "    id=- | label=No worktree on record | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:web | label=WEB (2) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openArchitectTerminal("web") | tip="0 blocked · 1 waiting · 1 active" | parent=root",
+    "  id=aspir-14#0 | label=[specify] #14 quiet waiting on input [10h silent] | desc=- | ctx=awaiting-builder-aspir | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: aspir | Mode: strict | Progress: 0%\\nWaiting on input" | parent=builder-group:web",
+    "    id=- | label=No changes yet | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "  id=bugfix-12#0 | label=[pr] #12 busy | desc=- | ctx=builder-bugfix | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: bugfix | Mode: strict | Progress: 0%" | parent=builder-group:web",
+    "    id=bugfix-12::folder::packages/x | label=packages/x | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=bugfix-12#0",
+    "      id=bugfix-12::packages/x/y.ts | label=y.ts | desc=packages/x | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · packages/x/y.ts" | parent=bugfix-12::folder::packages/x",
+    "id=idle-architects-group | label=Idle Architects (2) | desc=- | ctx=group-idle-architects | state=1 | icon=circle-outline/disabledForeground | cmd=- | tip="2 idle architects · no builders attached" | parent=root",
+    "  id=builder-group:demos | label=DEMOS (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("demos") | tip="No builders" | parent=idle-architects-group",
+    "  id=builder-group:reviewer | label=REVIEWER (0) | desc=- | ctx=group-builder | state=0 | icon=circle-outline/disabledForeground | cmd=codev.openArchitectTerminal("reviewer") | tip="No builders" | parent=idle-architects-group",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N>1 · area axis · flat files 1`] = `
+{
+  "cycle": [
+    "builder:air-11",
+    "builder:aspir-14",
+    "builder:spir-10",
+    "builder:bugfix-12",
+    "builder:pir-13",
+  ],
+  "rows": [
+    "id=builder-group:porch | label=PORCH (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=air-11#0 | label=[implement] #11 orphan turn ended [30m] | desc=- | ctx=awaiting-builder-air | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: air | Mode: strict | Progress: 0%\\nTurn ended" | parent=builder-group:porch",
+    "    id=- | label=Diff unavailable | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip="git failed" | parent=root",
+    "id=builder-group:tower | label=TOWER (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=aspir-14#0 | label=[specify] #14 quiet waiting on input [10h silent] | desc=- | ctx=awaiting-builder-aspir | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: aspir | Mode: strict | Progress: 0%\\nWaiting on input" | parent=builder-group:tower",
+    "    id=- | label=No changes yet | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:vscode | label=VSCODE (2) | desc=- | ctx=group-builder | state=2 | icon=bell/notificationsWarningIcon.foreground | cmd=- | tip="1 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=spir-10#0 | label=[plan] #10 gated blocked on plan review [2h] | desc=- | ctx=blocked-builder-spir | state=1 | icon=checklist/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: spir | Mode: strict | Progress: 0%\\nBlocked on plan review" | parent=builder-group:vscode",
+    "    id=spir-10::README.md | label=README.md | desc= | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · README.md" | parent=spir-10#0",
+    "    id=spir-10::src/views/a.ts | label=a.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/a.ts" | parent=spir-10#0",
+    "    id=spir-10::src/views/b.ts | label=b.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/b.ts" | parent=spir-10#0",
+    "    id=spir-10::src/extension.ts | label=extension.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/extension.ts" | parent=spir-10#0",
+    "  id=bugfix-12#0 | label=[pr] #12 busy | desc=- | ctx=builder-bugfix | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: bugfix | Mode: strict | Progress: 0%" | parent=builder-group:vscode",
+    "    id=bugfix-12::packages/x/y.ts | label=y.ts | desc=packages/x | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · packages/x/y.ts" | parent=bugfix-12#0",
+    "id=builder-group:Uncategorized | label=UNCATEGORIZED (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=pir-13#0 | label=[review] #13 asks asking a question [5m] | desc=- | ctx=awaiting-builder-pir | state=1 | icon=question/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%\\nAsking a question" | parent=builder-group:Uncategorized",
+    "    id=- | label=No worktree on record | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N>1 · area axis · tree files 1`] = `
+{
+  "cycle": [
+    "builder:air-11",
+    "builder:aspir-14",
+    "builder:spir-10",
+    "builder:bugfix-12",
+    "builder:pir-13",
+  ],
+  "rows": [
+    "id=builder-group:porch | label=PORCH (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=air-11#0 | label=[implement] #11 orphan turn ended [30m] | desc=- | ctx=awaiting-builder-air | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: air | Mode: strict | Progress: 0%\\nTurn ended" | parent=builder-group:porch",
+    "    id=- | label=Diff unavailable | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip="git failed" | parent=root",
+    "id=builder-group:tower | label=TOWER (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=aspir-14#0 | label=[specify] #14 quiet waiting on input [10h silent] | desc=- | ctx=awaiting-builder-aspir | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: aspir | Mode: strict | Progress: 0%\\nWaiting on input" | parent=builder-group:tower",
+    "    id=- | label=No changes yet | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:vscode | label=VSCODE (2) | desc=- | ctx=group-builder | state=2 | icon=bell/notificationsWarningIcon.foreground | cmd=- | tip="1 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=spir-10#0 | label=[plan] #10 gated blocked on plan review [2h] | desc=- | ctx=blocked-builder-spir | state=1 | icon=checklist/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: spir | Mode: strict | Progress: 0%\\nBlocked on plan review" | parent=builder-group:vscode",
+    "    id=spir-10::folder::src | label=src | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=spir-10#0",
+    "      id=spir-10::folder::src/views | label=views | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=spir-10::folder::src",
+    "        id=spir-10::src/views/a.ts | label=a.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/a.ts" | parent=spir-10::folder::src/views",
+    "        id=spir-10::src/views/b.ts | label=b.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/b.ts" | parent=spir-10::folder::src/views",
+    "      id=spir-10::src/extension.ts | label=extension.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/extension.ts" | parent=spir-10::folder::src",
+    "    id=spir-10::README.md | label=README.md | desc= | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · README.md" | parent=spir-10#0",
+    "  id=bugfix-12#0 | label=[pr] #12 busy | desc=- | ctx=builder-bugfix | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: bugfix | Mode: strict | Progress: 0%" | parent=builder-group:vscode",
+    "    id=bugfix-12::folder::packages/x | label=packages/x | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=bugfix-12#0",
+    "      id=bugfix-12::packages/x/y.ts | label=y.ts | desc=packages/x | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · packages/x/y.ts" | parent=bugfix-12::folder::packages/x",
+    "id=builder-group:Uncategorized | label=UNCATEGORIZED (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=pir-13#0 | label=[review] #13 asks asking a question [5m] | desc=- | ctx=awaiting-builder-pir | state=1 | icon=question/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%\\nAsking a question" | parent=builder-group:Uncategorized",
+    "    id=- | label=No worktree on record | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N>1 · stage axis · flat files 1`] = `
+{
+  "cycle": [
+    "builder:aspir-14",
+    "builder:spir-10",
+    "builder:air-11",
+    "builder:pir-13",
+    "builder:bugfix-12",
+  ],
+  "rows": [
+    "id=builder-group:specify | label=SPECIFY (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=aspir-14#0 | label=[tower] #14 quiet waiting on input [10h silent] | desc=- | ctx=awaiting-builder-aspir | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: aspir | Mode: strict | Progress: 0%\\nWaiting on input" | parent=builder-group:specify",
+    "    id=- | label=No changes yet | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:plan | label=PLAN (1) | desc=- | ctx=group-builder | state=2 | icon=bell/notificationsWarningIcon.foreground | cmd=- | tip="1 blocked · 0 waiting · 0 active" | parent=root",
+    "  id=spir-10#0 | label=[vscode] #10 gated blocked on plan review [2h] | desc=- | ctx=blocked-builder-spir | state=1 | icon=checklist/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: spir | Mode: strict | Progress: 0%\\nBlocked on plan review" | parent=builder-group:plan",
+    "    id=spir-10::README.md | label=README.md | desc= | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · README.md" | parent=spir-10#0",
+    "    id=spir-10::src/views/a.ts | label=a.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/a.ts" | parent=spir-10#0",
+    "    id=spir-10::src/views/b.ts | label=b.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/b.ts" | parent=spir-10#0",
+    "    id=spir-10::src/extension.ts | label=extension.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/extension.ts" | parent=spir-10#0",
+    "id=builder-group:implement | label=IMPLEMENT (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=air-11#0 | label=[porch] #11 orphan turn ended [30m] | desc=- | ctx=awaiting-builder-air | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: air | Mode: strict | Progress: 0%\\nTurn ended" | parent=builder-group:implement",
+    "    id=- | label=Diff unavailable | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip="git failed" | parent=root",
+    "id=builder-group:review | label=REVIEW (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=pir-13#0 | label=#13 asks asking a question [5m] | desc=- | ctx=awaiting-builder-pir | state=1 | icon=question/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%\\nAsking a question" | parent=builder-group:review",
+    "    id=- | label=No worktree on record | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:pr | label=PR (1) | desc=- | ctx=group-builder | state=2 | icon=circle-filled/testing.iconPassed | cmd=- | tip="0 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=bugfix-12#0 | label=[vscode] #12 busy | desc=- | ctx=builder-bugfix | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: bugfix | Mode: strict | Progress: 0%" | parent=builder-group:pr",
+    "    id=bugfix-12::packages/x/y.ts | label=y.ts | desc=packages/x | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · packages/x/y.ts" | parent=bugfix-12#0",
+  ],
+}
+`;
+
+exports[`Agents view rows are unchanged by the refactor (snapshot from the pre-refactor provider) > N>1 · stage axis · tree files 1`] = `
+{
+  "cycle": [
+    "builder:aspir-14",
+    "builder:spir-10",
+    "builder:air-11",
+    "builder:pir-13",
+    "builder:bugfix-12",
+  ],
+  "rows": [
+    "id=builder-group:specify | label=SPECIFY (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=aspir-14#0 | label=[tower] #14 quiet waiting on input [10h silent] | desc=- | ctx=awaiting-builder-aspir | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: aspir | Mode: strict | Progress: 0%\\nWaiting on input" | parent=builder-group:specify",
+    "    id=- | label=No changes yet | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:plan | label=PLAN (1) | desc=- | ctx=group-builder | state=2 | icon=bell/notificationsWarningIcon.foreground | cmd=- | tip="1 blocked · 0 waiting · 0 active" | parent=root",
+    "  id=spir-10#0 | label=[vscode] #10 gated blocked on plan review [2h] | desc=- | ctx=blocked-builder-spir | state=1 | icon=checklist/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: spir | Mode: strict | Progress: 0%\\nBlocked on plan review" | parent=builder-group:plan",
+    "    id=spir-10::folder::src | label=src | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=spir-10#0",
+    "      id=spir-10::folder::src/views | label=views | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=spir-10::folder::src",
+    "        id=spir-10::src/views/a.ts | label=a.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/a.ts" | parent=spir-10::folder::src/views",
+    "        id=spir-10::src/views/b.ts | label=b.ts | desc=src/views | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/views/b.ts" | parent=spir-10::folder::src/views",
+    "      id=spir-10::src/extension.ts | label=extension.ts | desc=src | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · src/extension.ts" | parent=spir-10::folder::src",
+    "    id=spir-10::README.md | label=README.md | desc= | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · README.md" | parent=spir-10#0",
+    "id=builder-group:implement | label=IMPLEMENT (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=air-11#0 | label=[porch] #11 orphan turn ended [30m] | desc=- | ctx=awaiting-builder-air | state=1 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: air | Mode: strict | Progress: 0%\\nTurn ended" | parent=builder-group:implement",
+    "    id=- | label=Diff unavailable | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip="git failed" | parent=root",
+    "id=builder-group:review | label=REVIEW (1) | desc=- | ctx=group-builder | state=2 | icon=comment-discussion/notificationsInfoIcon.foreground | cmd=- | tip="0 blocked · 1 waiting · 0 active" | parent=root",
+    "  id=pir-13#0 | label=#13 asks asking a question [5m] | desc=- | ctx=awaiting-builder-pir | state=1 | icon=question/notificationsWarningIcon.foreground | cmd=codev.openBuilderRow(<self>) | tip="Protocol: pir | Mode: strict | Progress: 0%\\nAsking a question" | parent=builder-group:review",
+    "    id=- | label=No worktree on record | desc=- | ctx=builder-file-none | state=- | icon=circle-slash/disabledForeground | cmd=- | tip=null | parent=root",
+    "id=builder-group:pr | label=PR (1) | desc=- | ctx=group-builder | state=2 | icon=circle-filled/testing.iconPassed | cmd=- | tip="0 blocked · 0 waiting · 1 active" | parent=root",
+    "  id=bugfix-12#0 | label=[vscode] #12 busy | desc=- | ctx=builder-bugfix | state=1 | icon=circle-filled/testing.iconPassed | cmd=codev.openBuilderRow(<self>) | tip="Protocol: bugfix | Mode: strict | Progress: 0%" | parent=builder-group:pr",
+    "    id=bugfix-12::folder::packages/x | label=packages/x | desc=- | ctx=builder-file-folder | state=2 | icon=folder/- | cmd=- | tip=null | parent=bugfix-12#0",
+    "      id=bugfix-12::packages/x/y.ts | label=y.ts | desc=packages/x | ctx=builder-file | state=- | icon=- | cmd=codev.openBuilderFileDiff(<self>) | tip="Modified · packages/x/y.ts" | parent=bugfix-12::folder::packages/x",
+  ],
+}
+`;

@@ -2,12 +2,23 @@ import * as vscode from 'vscode';
 import { deriveAttention } from '@cluesmith/codev-sdk/builder-helpers';
 import type { AttentionSummary } from '@cluesmith/codev-sdk/builder-helpers';
 import type { TowerWorkspace } from '@cluesmith/codev-sdk/tower-client';
+import type { OverviewData } from '@cluesmith/codev-types';
 import type { ConnectionManager } from '../connection-manager.js';
 
-/** A workspace paired with its derived attention roll-up (the Tower view's per-row datum). */
+/**
+ * A workspace paired with its derived attention roll-up (the Tower view's per-row datum) and the
+ * overview that attention was derived from.
+ */
 export interface FleetEntry {
   workspace: TowerWorkspace;
   attention: AttentionSummary;
+  /**
+   * The workspace's last-known-good overview: the latest successful fetch, kept across a failed
+   * one. `null` for a dormant workspace (never fetched) and for an active one whose overview has
+   * not yet been fetched successfully. The object is the cache's own copy, shared by every reader:
+   * treat it as read-only (copy before sorting or otherwise mutating).
+   */
+  overview: OverviewData | null;
 }
 
 /** How often the fallback poll re-fetches the fleet when SSE isn't delivering (ms). */
@@ -30,12 +41,16 @@ const REFRESH_DEBOUNCE_MS = 300;
  * Refresh triggers: every non-heartbeat SSE event; a manual `refresh()` the activate/deactivate
  * actions call (workspace activation emits no SSE, so the list must be re-polled); and a
  * low-frequency fallback poll for when SSE isn't delivering. `getOverview` failures never clobber a
- * workspace's last-known attention, and out-of-order fan-out landings are dropped by a sequence
- * guard (the #916 last-write-wins pattern, at per-workspace granularity).
+ * workspace's last-known attention or overview, and out-of-order fan-out landings are dropped by a
+ * sequence guard (the #916 last-write-wins pattern, at per-workspace granularity).
+ *
+ * Each active workspace's overview is kept, not just its attention, so other views can render any
+ * workspace's architects and builders from the fan-out this cache already makes — no extra request.
  */
 export class TowerFleetCache {
   private entries: FleetEntry[] = [];
   private lastAttention = new Map<string, AttentionSummary>();
+  private lastOverview = new Map<string, OverviewData>();
   private latestSeq = 0;
   private loaded = false;
 
@@ -84,6 +99,16 @@ export class TowerFleetCache {
     return this.entries;
   }
 
+  /**
+   * The last-known-good overview of the workspace at `path` (Tower's spelling, as in
+   * `FleetEntry.workspace.path`). `null` when the workspace is dormant, not in the fleet, or has
+   * not yet been fetched successfully. Returned by reference, the same object as the fleet entry's
+   * `overview`: read-only for callers.
+   */
+  getOverview(path: string): OverviewData | null {
+    return this.lastOverview.get(path) ?? null;
+  }
+
   /** True once the first successful fetch has populated the cache (drives the loading vs empty state). */
   isLoaded(): boolean {
     return this.loaded;
@@ -126,8 +151,9 @@ export class TowerFleetCache {
    * an out-of-order landing is discarded. A transient list failure — `listWorkspaces()` returns `[]`
    * for any HTTP/timeout error, indistinguishable from a genuinely empty registry — is not allowed to
    * blank a populated fleet; only the first load may commit an empty list. A dormant workspace
-   * contributes an empty summary without a fetch; an active workspace whose overview fetch fails
-   * keeps its previous attention.
+   * contributes an empty summary and a `null` overview without a fetch; an active workspace whose
+   * overview fetch fails keeps its previous attention and overview. Workspaces that are dormant or
+   * gone from the list drop their retained overview with the commit.
    */
   private async fetchFleet(): Promise<void> {
     const client = this.connectionManager.getClient();
@@ -146,21 +172,29 @@ export class TowerFleetCache {
 
     const entries = await Promise.all(workspaces.map(async (workspace): Promise<FleetEntry> => {
       if (!workspace.active) {
-        return { workspace, attention: deriveAttention(null) };
+        return { workspace, attention: deriveAttention(null), overview: null };
       }
       const overview = await client.getOverview(workspace.path);
       if (overview === null) {
-        // Transient fetch failure — retain this workspace's last-known attention rather than
-        // flipping it to quiet on a blip.
+        // Transient fetch failure — retain this workspace's last-known attention and overview
+        // rather than flipping it to quiet (or emptying its rows) on a blip.
         const previous = this.lastAttention.get(workspace.path);
-        return { workspace, attention: previous ?? deriveAttention(null) };
+        return {
+          workspace,
+          attention: previous ?? deriveAttention(null),
+          overview: this.lastOverview.get(workspace.path) ?? null,
+        };
       }
-      return { workspace, attention: deriveAttention(overview) };
+      return { workspace, attention: deriveAttention(overview), overview };
     }));
     if (mySeq !== this.latestSeq) { return; }
 
     this.entries = entries;
     this.lastAttention = new Map(entries.map((e) => [e.workspace.path, e.attention]));
+    this.lastOverview = new Map();
+    for (const entry of entries) {
+      if (entry.overview !== null) { this.lastOverview.set(entry.workspace.path, entry.overview); }
+    }
     this.loaded = true;
     this.changeEmitter.fire();
   }

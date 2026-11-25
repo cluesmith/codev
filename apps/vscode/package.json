@@ -42,7 +42,9 @@
   "activationEvents": [
     "workspaceContains:.codev",
     "workspaceContains:codev",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWebviewPanel:codev.decisions",
+    "onWebviewPanel:codev.work"
   ],
   "main": "./dist/extension.js",
   "capabilities": {
@@ -90,6 +92,30 @@
         "command": "codev.tower.refresh",
         "title": "Codev: Refresh Tower",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "codev.cockpit.refresh",
+        "title": "Codev: Refresh Cockpit",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codev.cockpit.arrange",
+        "title": "Codev: Arrange Cockpit",
+        "icon": "$(editor-layout)"
+      },
+      {
+        "command": "codev.cockpit.openWebInterface",
+        "title": "Codev: Open Web Interface",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "codev.openDecisions",
+        "title": "Codev: Open Decisions",
+        "icon": "$(law)"
+      },
+      {
+        "command": "codev.openWork",
+        "title": "Codev: Open Work"
       },
       {
         "command": "codev.helloWorld",
@@ -165,11 +191,13 @@
       },
       {
         "command": "codev.newShell",
-        "title": "Codev: New Shell"
+        "title": "Codev: New Shell",
+        "icon": "$(terminal-new)"
       },
       {
         "command": "codev.spawnBuilder",
-        "title": "Codev: Spawn Builder"
+        "title": "Codev: Spawn Builder",
+        "icon": "$(rocket)"
       },
       {
         "command": "codev.sendMessage",
@@ -721,6 +749,10 @@
         {
           "command": "codev.dev.switchTarget",
           "when": "codev.hasDevCommand"
+        },
+        {
+          "command": "codev.cockpit.openWebInterface",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -860,6 +892,136 @@
           "command": "codev.copyBacklogIssueNumber",
           "when": "view == codev.backlog && viewItem == backlog-item",
           "group": "1_primary@4"
+        },
+        {
+          "command": "codev.approveGate",
+          "when": "view == codev.cockpit && viewItem =~ /^blocked-builder-/",
+          "group": "inline@1"
+        },
+        {
+          "command": "codev.openBuilderById",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/",
+          "group": "1_primary@1"
+        },
+        {
+          "command": "codev.approveGate",
+          "when": "view == codev.cockpit && viewItem =~ /^blocked-builder-/",
+          "group": "1_primary@2"
+        },
+        {
+          "command": "codev.viewSpecFile",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-(spir|aspir)(-review)?$/",
+          "group": "1_primary@3"
+        },
+        {
+          "command": "codev.viewPlanFile",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-(spir|aspir|pir)(-review)?$/",
+          "group": "1_primary@4"
+        },
+        {
+          "command": "codev.viewReviewFile",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-((spir|aspir|air)(-review)?|pir-review)$/",
+          "group": "1_primary@5"
+        },
+        {
+          "command": "codev.viewDiff",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/",
+          "group": "2_worktree@0"
+        },
+        {
+          "command": "codev.openWorktreeWindow",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/",
+          "group": "2_worktree@1"
+        },
+        {
+          "command": "codev.openWorktreeFolder",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/",
+          "group": "2_worktree@2"
+        },
+        {
+          "command": "codev.runWorktreeSetup",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/",
+          "group": "3_dev@1"
+        },
+        {
+          "command": "codev.runWorktreeDev",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/ && codev.hasDevCommand",
+          "group": "3_dev@2"
+        },
+        {
+          "command": "codev.stopWorktreeDev",
+          "when": "view == codev.cockpit && viewItem =~ /^(builder|blocked-builder|awaiting-builder)-/ && codev.hasDevCommand",
+          "group": "3_dev@3"
+        },
+        {
+          "command": "codev.removeArchitect",
+          "when": "view == codev.cockpit && viewItem == cockpit-architect-sibling",
+          "group": "1_primary@1"
+        },
+        {
+          "command": "codev.tower.openWorkspace",
+          "when": "view == codev.cockpit && viewItem =~ /^tower-workspace-(active|dormant)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "codev.tower.deactivateWorkspace",
+          "when": "view == codev.cockpit && viewItem == tower-workspace-active",
+          "group": "inline@2"
+        },
+        {
+          "command": "codev.spawnBuilder",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-current(-.*)?$/",
+          "group": "inline@3"
+        },
+        {
+          "command": "codev.newShell",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-current(-.*)?$/",
+          "group": "inline@4"
+        },
+        {
+          "command": "codev.addArchitect",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-current(-.*)?$/",
+          "group": "inline@5"
+        },
+        {
+          "command": "codev.spawnBuilder",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-current(-.*)?$/",
+          "group": "1_workspace@1"
+        },
+        {
+          "command": "codev.newShell",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-current(-.*)?$/",
+          "group": "1_workspace@2"
+        },
+        {
+          "command": "codev.addArchitect",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-current(-.*)?$/",
+          "group": "1_workspace@3"
+        },
+        {
+          "command": "codev.cockpit.openWebInterface",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-(current|parent)(-.*)?$/",
+          "group": "2_web@1"
+        },
+        {
+          "command": "codev.runWorkspaceDev",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-(current|parent)-dev-start(-devurls)?$/",
+          "group": "3_dev@1"
+        },
+        {
+          "command": "codev.stopWorkspaceDev",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-(current|parent)-dev-stop(-devurls)?$/",
+          "group": "3_dev@1"
+        },
+        {
+          "command": "codev.stopWorktreeDev",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-(current|parent)-dev-stop-other(-devurls)?$/",
+          "group": "3_dev@1"
+        },
+        {
+          "command": "codev.openDevUrl",
+          "when": "view == codev.cockpit && viewItem =~ /^cockpit-workspace-(current|parent)(-.*)?-devurls$/",
+          "group": "3_dev@2"
         }
       ],
       "view/title": [
@@ -867,6 +1029,36 @@
           "command": "codev.tower.refresh",
           "when": "view == codev.tower",
           "group": "navigation@1"
+        },
+        {
+          "command": "codev.cockpit.arrange",
+          "when": "view == codev.cockpit && !codev.isBuilderWorktree && codev.hasWorkspace",
+          "group": "navigation@0"
+        },
+        {
+          "command": "codev.cockpit.refresh",
+          "when": "view == codev.cockpit",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codev.disableBuildersAutoCollapse",
+          "when": "view == codev.cockpit && codev.buildersAutoCollapse",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codev.enableBuildersAutoCollapse",
+          "when": "view == codev.cockpit && !codev.buildersAutoCollapse",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codev.disableBuildersFileTreeMode",
+          "when": "view == codev.cockpit && codev.buildersFileViewAsTree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codev.enableBuildersFileTreeMode",
+          "when": "view == codev.cockpit && !codev.buildersFileViewAsTree",
+          "group": "navigation@3"
         },
         {
           "command": "codev.refreshOverview",
@@ -1131,6 +1323,11 @@
           "id": "codev",
           "title": "Codev",
           "icon": "icons/codev.svg"
+        },
+        {
+          "id": "codev-cockpit",
+          "title": "Codev Cockpit",
+          "icon": "icons/codev-cockpit.svg"
         }
       ],
       "secondarySidebar": [
@@ -1163,6 +1360,9 @@
       ],
       "codev-tower": [
         { "id": "codev.tower", "name": "Codev Tower" }
+      ],
+      "codev-cockpit": [
+        { "id": "codev.cockpit", "name": "Codev Cockpit" }
       ]
     },
     "viewsWelcome": [
@@ -1207,7 +1407,12 @@
           "type": "string",
           "enum": ["editor", "panel"],
           "default": "editor",
-          "description": "Where to open Codev terminals (editor area or bottom panel)"
+          "description": "Where to open Codev terminals (editor area or bottom panel). Codev: Arrange Cockpit puts the main architect in the left editor group either way."
+        },
+        "codev.cockpit.autoArrange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Arrange the editor area for the Codev Cockpit (the main architect on the left, Work over Decisions on the right) the first time the Cockpit is shown in a window. When off, only Codev: Arrange Cockpit arranges it."
         },
         "codev.terminalLinks.issueTarget": {
           "type": "string",
@@ -1430,6 +1635,7 @@
     "@cluesmith/codev-artifact-canvas": "workspace:*",
     "@cluesmith/codev-sdk": "workspace:*",
     "@cluesmith/codev-types": "workspace:*",
+    "@cluesmith/codev-workspace-views": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "ws": "^8.18.0"
@@ -1441,6 +1647,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
+    "@testing-library/react": "^16.0.0",
+    "jsdom": "^26.0.0",
     "typescript-eslint": "^8.48.1",
     "eslint": "^9.39.1",
     "esbuild": "^0.27.1",

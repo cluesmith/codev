@@ -18,6 +18,7 @@
   "dependencies": {
     "@cluesmith/codev-artifact-canvas": "workspace:*",
     "@cluesmith/codev-sdk": "workspace:*",
+    "@cluesmith/codev-workspace-views": "workspace:*",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.12.0",

@@ -1,0 +1,3398 @@
+#!/usr/bin/env node
+// Scripted rendered verification of the Codev Cockpit (Spec 1963) against the harness's isolated
+// VS Code and Tower. Run through `harness.mjs verify <script>`, never directly: the harness passes
+// the workbench URL template, the fixture, log and screenshot paths, and re-checks the tripwire
+// around the run. Uses the Chromium already in the Playwright cache (never `playwright install`).
+//
+// Scripts:
+//   explore    open the Cockpit on alpha, expand everything, dump the rows (selector discovery)
+//   render     button under Codev, hierarchy N=0/1/>1 across workspaces, Dormant group, themes
+//   actions    every builder context action, Approve Gate inline, every workspace-row action,
+//              Remove Architect, another workspace's rows, Tower Open / Deactivate
+//   reveal     active-file reveal with the workspace and architect rows collapsed
+//   windows    builder-worktree window, no-workspace window, Cockpit-only freshness
+//   reconnect  Not connected (isolated Tower stopped by PID) → reconnect (started again)
+//   requests   request count: Cockpit alone vs Workspace + Agents + Tower alone (scenario 21)
+//   dashboard  the browser dashboard's Work and Decisions tabs render, act and rule as before
+//              (scenario 20); with --baseline, styles and DOM identical to a run on main's build
+//   decisions  the VS Code Decisions panel (Phase 7): the hierarchy's entries, images, full size,
+//              a link, a ruling and its notice, a stale refusal, hidden-panel polling, themes,
+//              reload restore, the unavailable windows, empty state → init, network audit
+//   work       the VS Code Work panel (Phase 8): every section, the progress bar under the CSP,
+//              Open / + Shell / Refresh / a spec link / issue and PR links, themes and contrast,
+//              both panels beside the Cockpit's Decisions entries, reload restore, network audit,
+//              Tower down and back, the unavailable windows
+//   arrange    Arrange Cockpit (Phase 9): the first show arranges main | (Work over Decisions) over
+//              four groups of editors (dirty and untitled ones survive), the one-time notice, an
+//              idempotent re-run keeping a Decisions draft, both themes, later shows leave the
+//              layout alone, a panel terminal brought back, a reload, main not live, Don't arrange
+//              automatically (a second fresh profile), the unavailable windows
+//   profile-seed      with the installed package.json stripped of the codev-cockpit container (as
+//                     origin/main's), a new browser profile uses Codev: the "existing profile"
+//   profile-existing  the branch's install on that profile: where VS Code puts the Cockpit button
+//
+// Every result is recorded in --out as { script, results: [{ name, ok, detail, shots }] }. Any
+// browser request to the owner's port fails the run.
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(HERE, '../../../..');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function loadChromium() {
+  const require = createRequire(path.join(REPO, 'packages/codev/package.json'));
+  const mod = await import(pathToFileURL(require.resolve('playwright')).href);
+  return mod.chromium ?? mod.default.chromium;
+}
+
+function parseArgs(argv) {
+  const opts = {};
+  for (let i = 0; i < argv.length; i += 2) {
+    const [flag, value] = [argv[i], argv[i + 1]];
+    if (value === undefined) throw new Error(`${flag} needs a value`);
+    opts[flag.replace(/^--/, '')] = value;
+  }
+  for (const k of ['url-template', 'fixtures', 'profile', 'shots', 'out', 'owner-port', 'stub-log', 'request-log', 'tower-port']) {
+    if (!opts[k]) throw new Error(`--${k} is required`);
+  }
+  return opts;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Run context
+// ---------------------------------------------------------------------------------------------
+
+class Run {
+  constructor(script, opts) {
+    this.script = script;
+    this.opts = opts;
+    this.results = [];
+    this.ownerPortRequests = [];
+    this.popups = [];
+    this.shotIndex = 0;
+  }
+
+  url(query) {
+    return this.opts['url-template'].replace('__QUERY__', query);
+  }
+
+  folderUrl(...segments) {
+    return this.url(`folder=${encodeURIComponent(path.join(this.opts.fixtures, ...segments))}`);
+  }
+
+  async shot(page, name) {
+    const file = path.join(this.opts.shots, `${this.script}-${String(++this.shotIndex).padStart(2, '0')}-${name}.png`);
+    // Park the pointer on the title bar's empty left end, and let any hover tooltip it left close
+    // (one covered the Work heading in a side-by-side shot).
+    await page.mouse.move(160, 12);
+    await waitFor('hover tooltips to close', async () => (await page.locator('.workbench-hover-container, .monaco-hover:not(.hidden)').filter({ visible: true }).count()) === 0, 3_000).catch(() => {});
+    await page.screenshot({ path: file });
+    return file;
+  }
+
+  /** Record one check. `fn` returns a detail string (or { detail, shots }) or throws. */
+  async check(name, fn) {
+    const started = Date.now();
+    try {
+      const out = await fn();
+      const detail = typeof out === 'string' ? out : out?.detail ?? '';
+      this.results.push({ name, ok: true, detail, shots: out?.shots ?? [], ms: Date.now() - started });
+      console.log(`PASS  ${name}${detail ? ` — ${detail}` : ''}`);
+    } catch (err) {
+      const shots = [];
+      if (this.page) {
+        shots.push(await this.shot(this.page, 'failure').catch(() => null));
+        // Close a menu, quick input or dialog the failure left open, so it does not block the next check.
+        for (let i = 0; i < 3; i++) await this.page.keyboard.press('Escape').catch(() => {});
+      }
+      this.results.push({ name, ok: false, detail: String(err.message ?? err), shots: shots.filter(Boolean), ms: Date.now() - started });
+      console.log(`FAIL  ${name} — ${err.message ?? err}${shots[0] ? ` (screenshot ${shots[0]})` : ''}`);
+    }
+  }
+
+  write() {
+    fs.writeFileSync(this.opts.out, `${JSON.stringify({
+      script: this.script, at: new Date().toISOString(), ownerPortRequests: this.ownerPortRequests,
+      popups: this.popups, results: this.results,
+    }, null, 2)}\n`);
+  }
+
+  // Stub log: the afx / porch / codev calls the extension made, as recorded by the stubs.
+  stubCalls() {
+    const f = this.opts['stub-log'];
+    if (!fs.existsSync(f)) return [];
+    return fs.readFileSync(f, 'utf-8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  }
+
+  // Tower request log (request-log.cjs preloaded into the isolated Tower).
+  towerRequests() {
+    const f = this.opts['request-log'];
+    if (!fs.existsSync(f)) return [];
+    return fs.readFileSync(f, 'utf-8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  }
+
+  async tower(method, route, body) {
+    const res = await fetch(`http://127.0.0.1:${this.opts['tower-port']}${route}`, {
+      method,
+      headers: { 'codev-tower-key': process.env.COCKPIT_TOWER_KEY, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${method} ${route} answered ${res.status}: ${text}`);
+    return text ? JSON.parse(text) : {};
+  }
+
+  overview(ws) {
+    return this.tower('GET', `/api/overview?workspace=${encodeURIComponent(path.join(this.opts.fixtures, ws))}`);
+  }
+
+  /** Call back into harness.mjs (tower-down / tower-up). */
+  harness(cmd) {
+    const r = spawnSync(process.execPath, [path.join(HERE, 'harness.mjs'), cmd], {
+      env: { ...process.env }, encoding: 'utf-8', timeout: 120_000,
+    });
+    if (r.status !== 0) throw new Error(`harness ${cmd} failed: ${r.stderr || r.stdout}`);
+    return r.stdout.trim();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Workbench helpers
+// ---------------------------------------------------------------------------------------------
+
+const TRUST_BUTTON = /Yes, I trust the authors|Trust Folder & Continue|Trust Folder/i;
+
+/** A browser on `dir` (the run's profile unless another is named), its requests audited. */
+async function newContext(R, dir = R.opts.profile) {
+  const chromium = await loadChromium();
+  const context = await chromium.launchPersistentContext(dir, {
+    headless: true,
+    viewport: { width: 1600, height: 1000 },
+  });
+  context.on('request', (r) => {
+    if (URL.canParse(r.url()) && new URL(r.url()).port === R.opts['owner-port']) R.ownerPortRequests.push(r.url());
+    // Main-frame navigations, kept because a popup's URL that nothing serves ends as
+    // chrome-error://. A popup's first navigation is issued before its frame exists, and
+    // request.frame() throws for it: that one is recorded with no page.
+    if (r.isNavigationRequest()) {
+      let frame = null;
+      try { frame = r.frame(); } catch { /* a popup's first navigation */ }
+      if (!frame || frame === frame.page().mainFrame()) navigations.push({ at: Date.now(), page: frame ? frame.page() : null, url: r.url() });
+    }
+  });
+  return context;
+}
+
+/** Load a workbench URL into `page`, accept folder trust, and wait for the Codev extension. */
+async function loadWorkbench(page, url, { needCodev = true } = {}) {
+  await page.goto(url, { timeout: 240_000, waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+  const cockpit = activityItem(page, 'Codev Cockpit');
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const trust = page.getByRole('button', { name: TRUST_BUTTON });
+    if (await trust.count()) await trust.first().click();
+    if (await cockpit.count()) break;
+    await page.waitForTimeout(500);
+  }
+  if (!(await cockpit.count())) throw new Error('the Codev Cockpit activity-bar item never appeared');
+  if (needCodev) {
+    await page.locator('[id="cluesmith.codev-vscode"]').waitFor({ timeout: 120_000 });
+    await page.waitForTimeout(1500);
+    await ensureTrusted(page);
+  }
+  await closeNotifications(page);
+}
+
+async function ensureTrusted(page) {
+  const trustItem = page.locator('[id="status.workspaceTrust"]');
+  if (!(await trustItem.count())) return;
+  await trustItem.first().click();
+  await page.getByRole('button', { name: /^Trust$/ }).first().click({ timeout: 30_000 });
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline && (await trustItem.count())) {
+    const confirm = page.getByRole('button', { name: TRUST_BUTTON });
+    if (await confirm.count()) await confirm.first().click();
+    await page.waitForTimeout(500);
+  }
+  for (let i = 0; i < 10 && (await page.locator('.monaco-modal-editor-block').count()); i++) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+  }
+  // VS Code 1.128 opens the Workspace Trust editor this step used as a modal
+  // (`workbench.editor.useModal` defaults to "some") that Escape leaves up, and it takes every
+  // click. Close it with its own Close action. Any other modal is left for the check to meet.
+  const modal = page.locator('.monaco-modal-editor-block');
+  if ((await modal.count()) && /Workspace Trust/.test((await modal.first().textContent()) ?? '')) {
+    await modal.locator('.action-label[aria-label^="Close"], .action-label.codicon-close').first().click({ timeout: 10_000 });
+    await modal.waitFor({ state: 'detached', timeout: 5000 });
+  }
+}
+
+/**
+ * An activity-bar item by its container title. Its anchor's label carries the keybinding and the
+ * badge ("Codev (⌥⌘C) - 1 blocked"), and the badge overlays the anchor, so this returns the
+ * action item that holds both.
+ */
+function activityItem(page, label) {
+  const anchor = [`a[aria-label="${label}"]`, `a[aria-label^="${label} ("]`, `a[aria-label^="${label} -"]`].join(', ');
+  return page.locator('.activitybar .action-item').filter({ has: page.locator(anchor) }).first();
+}
+
+/** Open a view container from the activity bar (clicking an already-open one would close it). */
+async function openContainer(page, label, containerId) {
+  const sidebar = page.locator(`[id="workbench.view.extension.${containerId}"]`);
+  if (await sidebar.isVisible().catch(() => false)) return sidebar;
+  await activityItem(page, label).click();
+  await sidebar.waitFor({ state: 'visible', timeout: 30_000 });
+  await page.waitForTimeout(1000);
+  return sidebar;
+}
+
+const openCockpit = (page) => openContainer(page, 'Codev Cockpit', 'codev-cockpit');
+const openCodev = (page) => openContainer(page, 'Codev', 'codev');
+
+/**
+ * Every rendered row of the tree in `scope`, in tree order (by `data-index`: the list is virtualized
+ * and its DOM order is not its visual order).
+ */
+async function rows(scope) {
+  const all = await scope.locator('.monaco-list-row').evaluateAll((els) => els.map((el) => ({
+    index: Number(el.getAttribute('data-index')),
+    label: el.getAttribute('aria-label'),
+    text: el.querySelector('.label-name')?.textContent ?? '',
+    description: el.querySelector('.label-description')?.textContent ?? '',
+    level: Number(el.getAttribute('aria-level')),
+    expanded: el.getAttribute('aria-expanded'),
+    selected: el.classList.contains('selected'),
+    focused: el.classList.contains('focused'),
+  })));
+  return all.sort((a, b) => a.index - b.index);
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const toRe = (x) => (x instanceof RegExp ? x : new RegExp(`^${escapeRe(x)}$`));
+
+/**
+ * The row at `spec`, a path of label matchers from an ancestor down (each a string for an exact
+ * label or a RegExp), each step searched only inside the previous step's subtree. Returns the row
+ * record plus `loc`, its locator, or null when it is not rendered.
+ */
+async function findRow(scope, spec) {
+  const all = await rows(scope);
+  let start = 0;
+  let end = all.length;
+  let found = null;
+  for (const step of spec.map(toRe)) {
+    found = null;
+    for (let i = start; i < end; i++) {
+      if (step.test(all[i].text)) { found = i; break; }
+    }
+    if (found === null) return null;
+    const level = all[found].level;
+    start = found + 1;
+    end = start;
+    while (end < all.length && all[end].level > level) end++;
+  }
+  const r = all[found];
+  return { ...r, loc: scope.locator(`.monaco-list-row[data-index="${r.index}"]`) };
+}
+
+/** The row at `spec` and the rows of its subtree (rendered ones), as records. */
+async function subtree(scope, spec) {
+  const head = await findRow(scope, spec);
+  if (!head) return null;
+  const all = await rows(scope);
+  const i = all.findIndex((r) => r.index === head.index);
+  const out = [];
+  for (let j = i + 1; j < all.length && all[j].level > head.level; j++) out.push(all[j]);
+  return { head, rows: out };
+}
+
+async function waitRow(scope, spec, timeout = 30_000) {
+  return waitFor(`row ${spec.map(String).join(' › ')}`, () => findRow(scope, spec), timeout);
+}
+
+/** Expand (or collapse) the row at `spec`, through its twistie (a row click may run a command). */
+async function setExpanded(scope, spec, expanded) {
+  const r = await waitRow(scope, spec);
+  if (r.expanded === null) throw new Error(`row ${r.text} is not expandable`);
+  if ((r.expanded === 'true') !== expanded) {
+    await r.loc.locator('.monaco-tl-twistie').click();
+    await scope.page().waitForTimeout(900);
+  }
+  return waitFor(`row ${r.text} ${expanded ? 'expanded' : 'collapsed'}`, async () => {
+    const now = await findRow(scope, spec);
+    return now && (now.expanded === 'true') === expanded ? now : null;
+  }, 10_000);
+}
+
+/** Expand every step of `spec` in turn. */
+async function expandPath(scope, spec) {
+  for (let k = 1; k <= spec.length; k++) await setExpanded(scope, spec.slice(0, k), true);
+}
+
+/**
+ * Right-click `r` (a locator) and run the context-menu entry titled `title`. VS Code ignores a
+ * click on an entry that lands just after the menu opened (measured: at once it is dropped, after
+ * 500 ms it runs), so wait first; a menu still open afterwards means the entry did not run.
+ */
+async function contextAction(r, title) {
+  const page = r.page();
+  await r.click({ button: 'right' });
+  const item = page.locator('.monaco-menu:visible .action-item .action-label', { hasText: new RegExp(`^${escapeRe(title)}$`) });
+  await item.first().waitFor({ timeout: 10_000 });
+  await page.waitForTimeout(500);
+  await item.first().click();
+  await waitFor(`the menu to close after ${title}`, async () => (await page.locator('.monaco-menu:visible').count()) === 0, 3000);
+  await page.waitForTimeout(800);
+}
+
+/**
+ * The Codev entries of the context menu shown for `r` (closes the menu again). VS Code adds its own
+ * entries to every tree row (Copy, chat actions); those are not this extension's and are left out.
+ */
+async function contextTitles(r) {
+  const page = r.page();
+  await r.click({ button: 'right' });
+  const menu = page.locator('.monaco-menu:visible');
+  // A row with no entries at all (VS Code adds none of its own to it) opens no menu.
+  if (!await menu.first().waitFor({ timeout: 3000 }).then(() => true, () => false)) return [];
+  await page.waitForTimeout(300);
+  const titles = await menu.locator('.action-item:not(.disabled) .action-label').allTextContents();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  return titles.map((t) => t.trim()).filter((t) => t.startsWith('Codev:'));
+}
+
+/** True when right-clicking `r` shows no Codev entry (VS Code may still show its own menu). */
+async function hasNoCodevMenu(r) {
+  const page = r.page();
+  await r.click({ button: 'right' });
+  await page.waitForTimeout(1200);
+  const titles = await page.locator('.monaco-menu:visible .action-item .action-label').allTextContents();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  return titles.map((t) => t.trim()).filter((t) => t.startsWith('Codev:'));
+}
+
+/** A button label without its keybinding suffix: "Codev: Approve Gate (⌘K G)" → "Codev: Approve Gate". */
+const withoutKeybinding = (t) => (t ?? '').replace(/ \((?:[⌘⌥⇧⌃]|Ctrl\+|Alt\+|Shift\+|Cmd\+)[^()]*\)$/, '');
+
+/** The inline action buttons on `r` (hover first: they render on hover / selection). */
+async function inlineTitles(r) {
+  await r.hover();
+  await r.page().waitForTimeout(300);
+  const labels = await r.locator('.actions .action-label').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? el.getAttribute('title')));
+  return labels.map(withoutKeybinding);
+}
+
+async function inlineAction(r, title) {
+  const titles = await inlineTitles(r);
+  const i = titles.indexOf(title);
+  if (i < 0) throw new Error(`no inline ${title} on the row (it has ${JSON.stringify(titles)})`);
+  await r.locator('.actions .action-label').nth(i).click();
+  await r.page().waitForTimeout(800);
+}
+
+async function notifications(page) {
+  return page.locator('.notifications-toasts .notification-toast .notification-list-item-message').allTextContents();
+}
+
+async function closeNotifications(page) {
+  for (let i = 0; i < 10; i++) {
+    const close = page.locator('.notifications-toasts .codicon-notifications-clear, .notifications-toasts .action-label.codicon-close');
+    if (!(await close.count())) return;
+    await close.first().click().catch(() => {});
+    await page.waitForTimeout(200);
+  }
+}
+
+async function waitForNotification(page, re, timeout = 20_000) {
+  const deadline = Date.now() + timeout;
+  let seen = [];
+  while (Date.now() < deadline) {
+    seen = await notifications(page);
+    const hit = seen.find((t) => re.test(t));
+    if (hit) return hit;
+    await page.waitForTimeout(400);
+  }
+  throw new Error(`no notification matching ${re}; saw ${JSON.stringify(seen)}`);
+}
+
+async function dialog(page) {
+  const box = page.locator('.monaco-dialog-box');
+  await box.waitFor({ timeout: 15_000 });
+  return box;
+}
+
+async function dialogButton(page, name) {
+  const box = await dialog(page);
+  // The message: the box's text without its buttons and close action.
+  const text = await box.evaluate((el) => {
+    const copy = el.cloneNode(true);
+    copy.querySelectorAll('.monaco-button, .action-label, .dialog-buttons-row').forEach((n) => n.remove());
+    return copy.textContent.replace(/\s+/g, ' ').trim();
+  });
+  await box.locator('.dialog-buttons .monaco-button', { hasText: new RegExp(`^${escapeRe(name)}$`) }).click();
+  await page.waitForTimeout(800);
+  return text.trim();
+}
+
+async function quickInput(page) {
+  const widget = page.locator('.quick-input-widget');
+  await widget.waitFor({ state: 'visible', timeout: 15_000 });
+  return widget;
+}
+
+async function quickType(page, text) {
+  const widget = await quickInput(page);
+  await widget.locator('input').fill(text);
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(600);
+}
+
+async function quickItems(page) {
+  const widget = await quickInput(page);
+  await page.waitForTimeout(400);
+  return widget.locator('.quick-input-list .monaco-list-row .label-name').allTextContents();
+}
+
+async function quickPick(page, label) {
+  const widget = await quickInput(page);
+  await widget.locator('.quick-input-list .monaco-list-row', { hasText: label }).first().click();
+  await page.waitForTimeout(600);
+}
+
+async function editorTabs(page) {
+  return page.locator('.tabs-container .tab').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? el.textContent));
+}
+
+/**
+ * The active editor group's active tab. Every group has an active tab, and the Cockpit arranges
+ * the window into three by default (`codev.cockpit.autoArrange`), so the first in the page would be
+ * the left group's, whichever group is in front.
+ */
+async function activeEditorTab(page) {
+  return page.locator('.editor-group-container.active .tabs-container .tab.active').first().getAttribute('aria-label');
+}
+
+async function waitFor(what, fn, timeout = 20_000, interval = 500) {
+  const deadline = Date.now() + timeout;
+  let last;
+  while (Date.now() < deadline) {
+    last = await fn();
+    if (last) return last;
+    await sleep(interval);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Run the palette command whose label is exactly `title`; throws when the palette has none. */
+async function runCommand(page, title) {
+  await page.keyboard.press('F1');
+  const widget = await quickInput(page);
+  await widget.locator('input').fill(`>${title}`);
+  await page.waitForTimeout(600);
+  const items = widget.locator('.quick-input-list .monaco-list-row');
+  const labels = await items.evaluateAll((els) => els.map((el) => el.querySelector('.label-name')?.textContent?.trim() ?? ''));
+  const i = labels.indexOf(title);
+  if (i < 0) {
+    await page.keyboard.press('Escape');
+    throw new Error(`no palette command "${title}" (the palette offers ${JSON.stringify(labels.slice(0, 8))})`);
+  }
+  await items.nth(i).click();
+  await page.waitForTimeout(800);
+}
+
+/**
+ * What each workbench part shows: visibility, the active container's title (a tabbed part's
+ * checked tab, else the title label), and the side bar's panes with their expansion.
+ */
+async function partState(page) {
+  return page.evaluate(() => {
+    const visible = (el) => !!el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden';
+    const one = (sel) => {
+      const part = document.querySelector(sel);
+      if (!visible(part)) return { visible: false };
+      const tab = part.querySelector('.composite-bar .action-item.checked .action-label');
+      const title = (tab?.getAttribute('aria-label') ?? part.querySelector('.composite.title .title-label')?.textContent ?? '').trim();
+      const panes = [...part.querySelectorAll('.pane')].filter(visible).map((pane) => {
+        const header = pane.querySelector('.pane-header');
+        return { title: (header?.querySelector('.title')?.textContent ?? '').trim().replace(/ \(\d+\)$/, ''), expanded: header?.getAttribute('aria-expanded') === 'true' };
+      });
+      return { visible: true, title, panes };
+    };
+    return { sidebar: one('.part.sidebar'), auxiliarybar: one('.part.auxiliarybar'), panel: one('.part.panel') };
+  });
+}
+
+/** Show or hide a workbench part through its toggle command, then confirm the change. */
+async function setPart(page, part, visible) {
+  const toggle = { panel: 'View: Toggle Panel Visibility', auxiliarybar: 'View: Toggle Secondary Side Bar Visibility' }[part];
+  if ((await partState(page))[part].visible !== visible) await runCommand(page, toggle);
+  await waitFor(`the ${part} ${visible ? 'shown' : 'hidden'}`, async () => (await partState(page))[part].visible === visible, 5000);
+}
+
+async function setTheme(page, theme) {
+  await runCommand(page, 'Preferences: Color Theme');
+  const widget = await quickInput(page);
+  await widget.locator('input').fill(theme);
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
+}
+
+/** Wait for a new browser page (window.open from the workbench) and record its URL. */
+/** Every main-frame navigation request, by page (the context's request listener fills it). */
+const navigations = [];
+
+/**
+ * Wait for a new browser page (window.open from the workbench) and return the URL it navigated
+ * to: its first main-frame navigation request, so a URL nothing serves (an unserved dev URL)
+ * reads as itself rather than the chrome-error:// page it lands on.
+ */
+async function nextPopup(R, context, action, timeout = 20_000) {
+  const t0 = Date.now();
+  const [popup] = await Promise.all([context.waitForEvent('page', { timeout }), action()]);
+  await popup.waitForLoadState('domcontentloaded').catch(() => {});
+  const nav = await waitFor('the popup\'s navigation', async () => navigations
+    .find((n) => n.at >= t0 && (n.page === popup || n.page === null) && n.url !== 'about:blank'), 10_000);
+  R.popups.push(nav.url);
+  await popup.close();
+  return nav.url;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Scripts
+// ---------------------------------------------------------------------------------------------
+
+const SCRIPTS = {};
+
+// Row paths in the fleet fixture (`fleet` scenario): labels change with state and age, so builder
+// rows match on their issue number.
+const B = (id) => new RegExp(`#${id}\\b`);
+const ALPHA = ['Tower', 'alpha'];
+const A_MAIN = [...ALPHA, /^MAIN \(/];
+const A_WEB = [...ALPHA, /^WEB \(/];
+const BETA = ['Tower', 'beta'];
+const GAMMA = ['Tower', 'gamma'];
+
+/** Titles every builder row of this window's workspace offers (the Agents menu, from package.json). */
+function expectedBuilderTitles(contextValue, hasDevCommand) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'apps/vscode/package.json'), 'utf-8'));
+  const titles = new Map(pkg.contributes.commands.map((c) => [c.command, c.title]));
+  const out = [];
+  for (const e of pkg.contributes.menus['view/item/context']) {
+    if (!e.when.startsWith('view == codev.agents && ') || e.group.startsWith('inline')) continue;
+    const m = e.when.match(/viewItem =~ \/(.+?)\//);
+    if (!m || !new RegExp(m[1]).test(contextValue)) continue;
+    if (e.when.includes('codev.hasDevCommand') && !hasDevCommand) continue;
+    out.push(titles.get(e.command));
+  }
+  return out;
+}
+
+const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+
+/** Load alpha with the Cockpit open; returns the Cockpit pane. */
+async function alphaCockpit(R, page) {
+  await loadWorkbench(page, R.folderUrl('alpha'));
+  const cockpit = await openCockpit(page);
+  await waitRow(cockpit, A_MAIN, 60_000);
+  return cockpit;
+}
+
+/** New Tower terminals since `before` (ids). */
+async function newTerminals(R, before) {
+  const { terminals } = await R.tower('GET', '/api/terminals');
+  return (terminals ?? []).filter((t) => !before.has(t.id));
+}
+
+async function terminalIds(R) {
+  const { terminals } = await R.tower('GET', '/api/terminals');
+  return new Set((terminals ?? []).map((t) => t.id));
+}
+
+/** Run `action`; report what it produced: popup URL, new editor tabs, notifications, new terminals. */
+async function effects(R, context, page, action, { wait = 4000, popup = false } = {}) {
+  const tabsBefore = new Set(await editorTabs(page));
+  const termsBefore = await terminalIds(R);
+  const stubBefore = R.stubCalls().length;
+  await closeNotifications(page);
+  let popupUrl = null;
+  if (popup) {
+    popupUrl = await nextPopup(R, context, action);
+  } else {
+    await action();
+  }
+  await page.waitForTimeout(wait);
+  return {
+    popupUrl,
+    tabs: (await editorTabs(page)).filter((t) => !tabsBefore.has(t)),
+    notes: await notifications(page),
+    terminals: (await newTerminals(R, termsBefore)).map((t) => t.label ?? t.name ?? t.id),
+    stub: R.stubCalls().slice(stubBefore).filter((c) => c.caller === 'vscode'),
+  };
+}
+
+const describe = (e) => JSON.stringify(Object.fromEntries(Object.entries(e).filter(([, v]) => v && (!Array.isArray(v) || v.length))));
+
+// ── explore ──────────────────────────────────────────────────────────────────────────────────
+
+SCRIPTS.explore = async (R, context, page) => {
+  await R.check('alpha window loads with the Cockpit', async () => {
+    const cockpit = await alphaCockpit(R, page);
+    await page.waitForTimeout(3000);
+    const all = await rows(cockpit);
+    fs.writeFileSync(path.join(R.opts.shots, 'explore-rows.json'), `${JSON.stringify(all, null, 2)}\n`);
+    return { detail: `${all.length} rows`, shots: [await R.shot(page, 'cockpit')] };
+  });
+};
+
+// ── render ───────────────────────────────────────────────────────────────────────────────────
+
+SCRIPTS.render = async (R, context, page) => {
+  let cockpit;
+  await R.check('scenario 11: the Cockpit button sits directly below Codev', async () => {
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    const labels = await page.locator('.activitybar .action-item a').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+    const codev = labels.findIndex((l) => /^Codev( \(|$| -)/.test(l));
+    const cockpitAt = labels.findIndex((l) => /^Codev Cockpit( \(|$| -)/.test(l));
+    if (codev < 0 || cockpitAt !== codev + 1) throw new Error(`activity bar order: ${JSON.stringify(labels)}`);
+    const shot = path.join(R.opts.shots, `render-${String(++R.shotIndex).padStart(2, '0')}-activity-bar.png`);
+    await page.locator('.part.activitybar').screenshot({ path: shot });
+    return { detail: `items ${codev}: "${labels[codev]}", ${cockpitAt}: "${labels[cockpitAt]}"`, shots: [shot] };
+  });
+
+  await R.check('scenario 11: the existing Codev container is unchanged', async () => {
+    // Its contribution is byte-identical to origin/main's, and it renders those views in that
+    // order (Team only under codev.teamEnabled, which the fixture does not set).
+    const branch = JSON.parse(fs.readFileSync(path.join(REPO, 'apps/vscode/package.json'), 'utf-8')).contributes.views.codev;
+    const main = JSON.parse(spawnSync('git', ['show', 'origin/main:apps/vscode/package.json'], { cwd: REPO, encoding: 'utf-8' }).stdout).contributes.views.codev;
+    if (JSON.stringify(branch) !== JSON.stringify(main)) throw new Error('the codev container\'s views differ from origin/main');
+    const codev = await openCodev(page);
+    const headers = (await codev.locator('.pane-header .title').allTextContents()).map((t) => t.trim().replace(/ \(\d+\)$/, ''));
+    const want = branch.filter((v) => v.id !== 'codev.team').map((v) => v.name);
+    if (JSON.stringify(headers) !== JSON.stringify(want)) throw new Error(`rendered ${JSON.stringify(headers)}, want ${JSON.stringify(want)}`);
+    return { detail: `contribution identical to origin/main; renders ${headers.join(', ')}`, shots: [await R.shot(page, 'codev-container')] };
+  });
+
+  await R.check('scenario 12: hierarchy with N>1, N=1 and N=0 builders across workspaces', async () => {
+    cockpit = await openCockpit(page);
+    await waitRow(cockpit, A_MAIN, 60_000);
+    for (const spec of [ALPHA, A_MAIN, A_WEB, BETA, [...BETA, /^MAIN \(/], GAMMA]) await setExpanded(cockpit, spec, true);
+    const got = {};
+    for (const [name, spec] of [['alpha', ALPHA], ['beta', BETA], ['gamma', GAMMA]]) {
+      const t = await subtree(cockpit, spec);
+      got[name] = t.rows.map((r) => `${'  '.repeat(r.level - 3)}${r.text}`);
+    }
+    const builders = (name) => got[name].filter((l) => /#\d+/.test(l)).length;
+    const problems = [];
+    if (builders('alpha') !== 3) problems.push(`alpha has ${builders('alpha')} builders`);
+    if (builders('beta') !== 1) problems.push(`beta has ${builders('beta')} builders`);
+    if (builders('gamma') !== 0) problems.push(`gamma has ${builders('gamma')} builders`);
+    for (const [spec, ids] of [[A_MAIN, [101, 102]], [A_WEB, [103]], [[...BETA, /^MAIN \(/], [201]]]) {
+      const t = await subtree(cockpit, spec);
+      const under = t.rows.filter((r) => r.level === t.head.level + 1).map((r) => r.text);
+      for (const id of ids) if (!under.some((x) => B(id).test(x))) problems.push(`#${id} not under ${t.head.text}`);
+    }
+    const ws = await findRow(cockpit, ALPHA);
+    if (!/current/.test(ws.description)) problems.push(`alpha row lacks the current marker: "${ws.description}"`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(got)}`);
+    return { detail: JSON.stringify(got), shots: [await R.shot(page, 'hierarchy-light')] };
+  });
+
+  await R.check('the Dormant group', async () => {
+    await setExpanded(cockpit, ['Tower', /^Dormant \(1\)$/], true);
+    const t = await subtree(cockpit, ['Tower', /^Dormant \(1\)$/]);
+    const names = t.rows.map((r) => r.text);
+    if (!names.includes('delta')) throw new Error(`Dormant holds ${JSON.stringify(names)}`);
+    const delta = t.rows.find((r) => r.text === 'delta');
+    if (delta.expanded !== null) throw new Error('a dormant workspace row is expandable');
+    return { detail: `Dormant (1): ${names.join(', ')}`, shots: [await R.shot(page, 'dormant')] };
+  });
+
+  await R.check('scenario 18 (hierarchy part): dark theme, then a live switch back to light', async () => {
+    await setTheme(page, 'Dark Modern');
+    const dark = await page.locator('.monaco-workbench').evaluate((el) => el.classList.contains('vs-dark'));
+    const darkShot = await R.shot(page, 'hierarchy-dark');
+    await setTheme(page, 'Light Modern');
+    const light = await page.locator('.monaco-workbench').evaluate((el) => el.classList.contains('vs'));
+    const still = await findRow(cockpit, A_MAIN);
+    if (!dark || !light || !still) throw new Error(`dark=${dark} light=${light} rows kept=${Boolean(still)}`);
+    return { detail: 'vs-dark then vs; rows kept across the switch', shots: [darkShot, await R.shot(page, 'hierarchy-light-again')] };
+  });
+};
+
+// ── actions ──────────────────────────────────────────────────────────────────────────────────
+
+SCRIPTS.actions = async (R, context, page) => {
+  // The fleet scenario's own state: only #101 blocked. Earlier scripts (windows, requests) leave
+  // #102's and #103's gates requested.
+  for (const id of [102, 103]) if (gateRequested(R, 'alpha', id)) requestGate(R, 'alpha', id, { request: false });
+  if (!gateRequested(R, 'alpha', 101)) throw new Error('#101\'s gate is not requested: reseed the fleet scenario');
+  const cockpit = await alphaCockpit(R, page);
+  for (const spec of [ALPHA, A_MAIN, A_WEB]) await setExpanded(cockpit, spec, true);
+  const b101 = [...A_MAIN, B(101)];
+  const b102 = [...A_MAIN, B(102)];
+  const row = async (spec) => (await waitRow(cockpit, spec)).loc;
+
+  await R.check('scenario 12: a builder row\'s menu shows the Agents entries (blocked and waiting rows)', async () => {
+    const out = [];
+    for (const [spec, ctx] of [[b101, 'blocked-builder-spir'], [b102, 'awaiting-builder-spir']]) {
+      const got = await contextTitles(await row(spec));
+      const want = expectedBuilderTitles(ctx, true);
+      if (!sameSet(got, want)) throw new Error(`${spec.at(-1)}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+      out.push(`${ctx}: ${got.length} entries`);
+    }
+    return out.join('; ');
+  });
+
+  await R.check('the same builder\'s menu in the Agents view matches the Cockpit\'s', async () => {
+    const cockpitTitles = await contextTitles(await row(b101));
+    try {
+      const codev = await openCodev(page);
+      // Titles carry counts ("Agents (3)").
+      const agents = codev.locator('.pane').filter({ has: page.locator('.pane-header .title', { hasText: /^Agents( \(\d+\))?$/i }) });
+      const agentRow = await waitFor('#101 in Agents', async () => {
+        const hit = await findRow(agents, [B(101)]);
+        if (hit) return hit;
+        // Builders sit under collapsed group rows (stage axis by default): open the first one.
+        const closed = (await rows(agents)).find((r) => r.expanded === 'false' && r.level === 1);
+        if (closed) await agents.locator(`.monaco-list-row[data-index="${closed.index}"] .monaco-tl-twistie`).click();
+        return null;
+      }, 30_000);
+      const agentTitles = await contextTitles(agentRow.loc);
+      if (!sameSet(agentTitles, cockpitTitles)) throw new Error(`Agents ${JSON.stringify(agentTitles)} vs Cockpit ${JSON.stringify(cockpitTitles)}`);
+      return `${agentTitles.length} identical entries`;
+    } finally {
+      await openCockpit(page);
+    }
+  });
+
+  await R.check('Approve Gate is inline on the blocked row only', async () => {
+    const blocked = await inlineTitles(await row(b101));
+    const waiting = await inlineTitles(await row(b102));
+    if (!blocked.includes('Codev: Approve Gate') || waiting.includes('Codev: Approve Gate')) {
+      throw new Error(`#101 ${JSON.stringify(blocked)}, #102 ${JSON.stringify(waiting)}`);
+    }
+    return `#101 inline ${JSON.stringify(blocked)}`;
+  });
+
+  const builderAction = (title, spec, check, opts = {}) => R.check(`builder menu › ${title}`, async () => {
+    const e = await effects(R, context, page, async () => contextAction(await row(spec), title), opts);
+    const verdict = check(e);
+    if (verdict !== true) throw new Error(`${verdict}: ${describe(e)}`);
+    const shots = opts.shot ? [await R.shot(page, opts.shot)] : [];
+    return { detail: describe(e), shots };
+  });
+
+  await builderAction('Codev: Open Builder Terminal', b102, (e) => e.tabs.some((t) => /102|second-main/.test(t)) || 'no builder terminal tab', { shot: 'open-builder-terminal' });
+  await builderAction('Codev: View Spec File', b101, (e) => e.tabs.some((t) => /gated-spec|101/.test(t)) || 'no spec tab', { shot: 'view-spec' });
+  await builderAction('Codev: View Plan File', b101, (e) => (e.tabs.length || e.notes.length) ? true : 'no visible outcome');
+  await builderAction('Codev: View Review File', b101, (e) => (e.tabs.length || e.notes.length) ? true : 'no visible outcome');
+  await builderAction('Codev: View Diff', b101, (e) => e.tabs.length ? true : 'no diff tab', { shot: 'view-diff' });
+  await builderAction('Codev: Open Worktree in New Window', b101, (e) => (e.popupUrl && decodeURIComponent(e.popupUrl).includes('/.builders/')) || 'no worktree window', { popup: true });
+  await builderAction('Codev: Open Worktree Folder', b101, () => true);
+  // Setup runs `afx setup <id>` in a VS Code terminal in the workspace root: the stub records it.
+  await builderAction('Codev: Run Worktree Setup', b101, (e) => e.stub.some((c) => c.tool === 'afx' && c.argv.join(' ') === 'setup 101' && c.cwd.endsWith('/alpha')) || 'no `afx setup 101` in alpha');
+
+  await R.check('builder menu › Codev: Run Dev, then the workspace row offers Stop Dev; then Codev: Stop Dev', async () => {
+    const started = await effects(R, context, page, async () => contextAction(await row(b101), 'Codev: Run Dev'), { wait: 5000 });
+    if (!started.terminals.length) throw new Error(`no dev terminal: ${describe(started)}`);
+    const wsTitles = await waitFor('workspace row offering Stop Dev', async () => {
+      const t = await contextTitles(await row(ALPHA));
+      return t.includes('Codev: Stop Dev') ? t : null;
+    }, 15_000);
+    const shot = await R.shot(page, 'worktree-dev-running');
+    const before = await terminalIds(R);
+    await contextAction(await row(b101), 'Codev: Stop Dev');
+    const gone = await waitFor('dev terminal gone', async () => {
+      const now = await terminalIds(R);
+      return started.terminals.length && now.size < before.size ? now : null;
+    }, 15_000).catch(() => null);
+    const after = await contextTitles(await row(ALPHA));
+    if (!gone || !after.includes('Codev: Start Dev (this workspace)')) throw new Error(`after stop: terminals gone=${Boolean(gone)}, row ${JSON.stringify(after)}`);
+    return { detail: `started ${started.terminals.join(', ')}; row then offered ${JSON.stringify(wsTitles.filter((t) => /Dev/.test(t)))}; stopped`, shots: [shot] };
+  });
+
+  // Approve Gate relays the decision to the builder's spawning architect through Tower (#1494):
+  // #101 was spawned by main, which is live, so the extension POSTs /api/send to architect:main
+  // and never runs porch itself (its direct `porch approve` is only the no-live-architect branch).
+  await R.check('Approve Gate (inline) on #101 relays to its architect', async () => {
+    const t0 = Date.now();
+    const e = await effects(R, context, page, async () => {
+      await inlineAction(await row(b101), 'Codev: Approve Gate');
+      R.lastDialog = await dialogButton(page, 'Approve');
+    }, { wait: 4000 });
+    const sends = R.towerRequests().filter((r) => r.at >= t0 && r.method === 'POST' && r.url.startsWith('/api/send'));
+    const porch = e.stub.filter((c) => c.tool === 'porch');
+    const note = e.notes.find((n) => /^Codev: sent (the .* approval )?to main/.test(n));
+    if (sends.length !== 1 || porch.length || !note) throw new Error(`sends ${sends.length}, porch calls ${porch.length}: ${describe(e)}`);
+    return `dialog "${R.lastDialog}"; POST /api/send ×1; no porch call; "${note}"`;
+  });
+
+  // Workspace row.
+  await R.check('workspace row: inline and context entries', async () => {
+    const inline = await inlineTitles(await row(ALPHA));
+    const menu = await contextTitles(await row(ALPHA));
+    const wantInline = ['Codev: Spawn Builder', 'Codev: New Shell', 'Codev: Add Architect'];
+    const wantMenu = [...wantInline, 'Codev: Open Web Interface', 'Codev: Start Dev (this workspace)', 'Codev: Open Dev URL'];
+    if (!sameSet(inline, wantInline) || !sameSet(menu, wantMenu)) throw new Error(`inline ${JSON.stringify(inline)}, menu ${JSON.stringify(menu)}`);
+    return { detail: `inline ${JSON.stringify(inline)}; menu ${JSON.stringify(menu)}`, shots: [await R.shot(page, 'workspace-row')] };
+  });
+
+  await R.check('workspace row › Spawn Builder (inline) runs `afx spawn` through the stub', async () => {
+    const e = await effects(R, context, page, async () => {
+      await inlineAction(await row(ALPHA), 'Codev: Spawn Builder');
+      await quickType(page, '4242');
+      await quickPick(page, 'spir');
+      await quickType(page, '');
+    }, { wait: 2500 });
+    const call = e.stub.find((c) => c.tool === 'afx');
+    if (!call || call.argv.join(' ') !== 'spawn 4242 --protocol spir') throw new Error(`stub calls ${JSON.stringify(e.stub)}`);
+    if (!call.cwd.endsWith('/alpha')) throw new Error(`cwd ${call.cwd}`);
+    return `afx ${call.argv.join(' ')} in ${call.cwd}`;
+  });
+
+  await R.check('workspace row › New Shell (inline)', async () => {
+    const e = await effects(R, context, page, async () => inlineAction(await row(ALPHA), 'Codev: New Shell'), { wait: 4000 });
+    if (!e.terminals.length) throw new Error(`no shell terminal: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'new-shell')] };
+  });
+
+  await R.check('workspace row › Add Architect (inline) asks main', async () => {
+    const e = await effects(R, context, page, async () => {
+      await inlineAction(await row(ALPHA), 'Codev: Add Architect');
+      await quickType(page, 'ops');
+    }, { wait: 3000 });
+    if (!e.notes.some((n) => /Asked main to add a 'ops' architect/.test(n))) throw new Error(describe(e));
+    return describe(e);
+  });
+
+  await R.check('workspace row › Open Web Interface opens the isolated Tower\'s dashboard', async () => {
+    const e = await effects(R, context, page, async () => contextAction(await row(ALPHA), 'Codev: Open Web Interface'), { popup: true, wait: 1000 });
+    if (!e.popupUrl || new URL(e.popupUrl).port !== R.opts['tower-port']) throw new Error(describe(e));
+    return e.popupUrl;
+  });
+
+  await R.check('workspace row › Start Dev, then Stop Dev replaces it, then Stop Dev', async () => {
+    const started = await effects(R, context, page, async () => contextAction(await row(ALPHA), 'Codev: Start Dev (this workspace)'), { wait: 5000 });
+    if (!started.terminals.length) throw new Error(`no dev terminal: ${describe(started)}`);
+    const menu = await waitFor('Stop Dev (this workspace) on the row', async () => {
+      const t = await contextTitles(await row(ALPHA));
+      return t.includes('Codev: Stop Dev (this workspace)') && !t.includes('Codev: Start Dev (this workspace)') ? t : null;
+    }, 15_000);
+    const shot = await R.shot(page, 'workspace-dev-running');
+    await contextAction(await row(ALPHA), 'Codev: Stop Dev (this workspace)');
+    const back = await waitFor('Start Dev back on the row', async () => {
+      const t = await contextTitles(await row(ALPHA));
+      return t.includes('Codev: Start Dev (this workspace)') ? t : null;
+    }, 15_000);
+    return { detail: `dev ${started.terminals.join(', ')}; menu while running ${JSON.stringify(menu.filter((t) => /Dev/.test(t)))}; after stop ${JSON.stringify(back.filter((t) => /Dev/.test(t)))}`, shots: [shot] };
+  });
+
+  await R.check('workspace row › Open Dev URL lists both URLs and opens the picked one', async () => {
+    await contextAction(await row(ALPHA), 'Codev: Open Dev URL');
+    const items = await quickItems(page);
+    if (!items.some((i) => /App/.test(i)) || !items.some((i) => /Admin/.test(i))) throw new Error(`QuickPick items ${JSON.stringify(items)}`);
+    const url = await nextPopup(R, context, async () => {
+      await quickPick(page, 'Admin');
+      const box = page.locator('.monaco-dialog-box');
+      if (await box.count()) await box.locator('.dialog-buttons .monaco-button', { hasText: /^Open$/ }).click();
+    });
+    if (url !== 'http://127.0.0.1:18799/admin') throw new Error(`opened ${url}`);
+    return `QuickPick ${JSON.stringify(items)}; opened ${url}`;
+  });
+
+  // Architects.
+  // Remove Architect. A childless sibling's row goes with it. A sibling that spawned builders keeps
+  // its header as their owner's (architectGrouping: "no builder is ever dropped"), as in Agents.
+  const removeArchitect = async (spec, name) => {
+    await contextAction(await row(spec), 'Codev: Remove Architect');
+    const text = await dialogButton(page, 'Remove');
+    const ov = await waitFor(`${name} gone from the overview`, async () => {
+      const o = await R.overview('alpha');
+      return (o.architects ?? []).some((a) => a.name === name) ? null : o;
+    }, 20_000);
+    return { text, architects: ov.architects.map((a) => a.name) };
+  };
+  await R.check('Remove Architect is offered on siblings only; a childless sibling\'s row goes with it', async () => {
+    const mainTitles = await contextTitles(await row(A_MAIN));
+    if (mainTitles.includes('Codev: Remove Architect')) throw new Error(`MAIN offers ${JSON.stringify(mainTitles)}`);
+    const enc = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+    const added = await R.tower('POST', `/api/workspaces/${enc}/architects`, { name: 'qa' });
+    if (!added.success) throw new Error(`adding architect qa failed: ${JSON.stringify(added)}`);
+    const qa = [...ALPHA, /^QA \(0\)$/];
+    await waitRow(cockpit, qa, 20_000);
+    const qaTitles = await contextTitles(await row(qa));
+    if (!qaTitles.includes('Codev: Remove Architect')) throw new Error(`QA offers ${JSON.stringify(qaTitles)}`);
+    const shot = await R.shot(page, 'qa-added');
+    const { text, architects } = await removeArchitect(qa, 'qa');
+    await waitFor('QA row gone', async () => ((await findRow(cockpit, qa)) ? null : true), 20_000);
+    return { detail: `MAIN menu ${JSON.stringify(mainTitles)}; QA menu ${JSON.stringify(qaTitles)}; dialog "${text}"; architects now ${JSON.stringify(architects)}; QA row gone`, shots: [shot, await R.shot(page, 'qa-removed')] };
+  });
+
+  await R.check('Remove Architect on a sibling with a builder: the header stays as the builder\'s owner', async () => {
+    const webTitles = await contextTitles(await row(A_WEB));
+    if (!webTitles.includes('Codev: Remove Architect')) throw new Error(`WEB offers ${JSON.stringify(webTitles)}`);
+    const { text, architects } = await removeArchitect(A_WEB, 'web');
+    // The overview no longer lists web; the next render still shows WEB (1) holding #103.
+    await page.waitForTimeout(3000);
+    const held = await waitRow(cockpit, [...A_WEB, B(103)], 10_000);
+    return { detail: `dialog "${text}"; architects now ${JSON.stringify(architects)}; WEB still holds "${held.text}"`, shots: [await R.shot(page, 'web-removed')] };
+  });
+
+  // Other workspaces.
+  for (const spec of [BETA, [...BETA, /^MAIN \(/]]) await setExpanded(cockpit, spec, true);
+  const bMain = [...BETA, /^MAIN \(/];
+  const b201 = [...bMain, B(201)];
+  await R.check('another workspace\'s rows carry no builder or architect actions', async () => {
+    const archTitles = await hasNoCodevMenu(await row(bMain));
+    const builderTitles = await hasNoCodevMenu(await row(b201));
+    if (archTitles.length || builderTitles.length) throw new Error(`beta rows offer ${JSON.stringify({ archTitles, builderTitles })}`);
+    return 'no Codev entry on beta\'s MAIN or #201';
+  });
+  for (const [what, spec] of [['architect', bMain], ['builder', b201]]) {
+    await R.check(`scenario 12: another workspace's ${what} row opens that workspace's window`, async () => {
+      const url = await nextPopup(R, context, async () => (await row(spec)).click());
+      const folder = new URL(url).searchParams.get('folder') ?? '';
+      if (!decodeURIComponent(folder).endsWith('/beta')) throw new Error(`opened ${url}`);
+      return url;
+    });
+  }
+  await R.check('another workspace row: inline Open opens it, as in the Tower view', async () => {
+    const inline = await inlineTitles(await row(BETA));
+    if (!sameSet(inline, ['Codev: Open Workspace', 'Codev: Deactivate Workspace'])) throw new Error(`inline ${JSON.stringify(inline)}`);
+    const url = await nextPopup(R, context, async () => inlineAction(await row(BETA), 'Codev: Open Workspace'));
+    if (!decodeURIComponent(new URL(url).searchParams.get('folder') ?? '').endsWith('/beta')) throw new Error(`opened ${url}`);
+    return `inline ${JSON.stringify(inline)}; opened ${url}`;
+  });
+  await R.check('another workspace row: inline Deactivate moves it to Dormant', async () => {
+    await inlineAction(await row(GAMMA), 'Codev: Deactivate Workspace');
+    const text = await dialogButton(page, 'Deactivate');
+    await waitFor('gamma under Dormant (2)', async () => {
+      await setExpanded(cockpit, ['Tower', /^Dormant \(2\)$/], true).catch(() => null);
+      return findRow(cockpit, ['Tower', /^Dormant \(2\)$/, 'gamma']);
+    }, 30_000);
+    return { detail: `dialog "${text}"`, shots: [await R.shot(page, 'gamma-dormant')] };
+  });
+};
+
+// ── reveal ───────────────────────────────────────────────────────────────────────────────────
+
+SCRIPTS.reveal = async (R, context, page) => {
+  const cockpit = await alphaCockpit(R, page);
+  const b101 = [...A_MAIN, B(101)];
+  await R.check('active-file reveal expands collapsed workspace and architect rows', async () => {
+    await expandPath(cockpit, b101);
+    const file = await waitFor('alpha.ts under #101', async () => {
+      const t = await subtree(cockpit, b101);
+      for (const r of t?.rows ?? []) {
+        if (r.expanded === 'false') {
+          await cockpit.locator(`.monaco-list-row[data-index="${r.index}"] .monaco-tl-twistie`).click();
+          await page.waitForTimeout(600);
+          return null;
+        }
+      }
+      return findRow(cockpit, [...b101, 'alpha.ts']);
+    }, 30_000);
+    await file.loc.click();
+    await waitFor('the alpha.ts diff tab', async () => ((await activeEditorTab(page)) ?? '').includes('alpha.ts'), 20_000);
+    const diffTab = await activeEditorTab(page);
+    await setExpanded(cockpit, A_MAIN, false);
+    await setExpanded(cockpit, ALPHA, false);
+    const collapsedShot = await R.shot(page, 'collapsed');
+    // Another editor, then back to the diff: the active-editor change drives the reveal.
+    // Waits for Quick Open to offer the file before choosing it: in the window the Cockpit arranges,
+    // with Work and Decisions loading, the search can take longer than a blind Enter allows.
+    await quickOpenFile(page, 'README.md');
+    await page.locator('.tabs-container .tab', { hasText: 'alpha.ts' }).first().click();
+    const revealed = await waitFor('alpha.ts row revealed', async () => {
+      const r = await findRow(cockpit, [...b101, 'alpha.ts']);
+      return r && (r.selected || r.focused) ? r : null;
+    }, 20_000);
+    const ancestors = await Promise.all([ALPHA, A_MAIN, b101].map((s) => findRow(cockpit, s)));
+    if (!ancestors.every((a) => a?.expanded === 'true')) throw new Error(`ancestors ${JSON.stringify(ancestors.map((a) => a?.expanded))}`);
+    return { detail: `diff tab "${diffTab}"; row "${revealed.text}" selected=${revealed.selected} focused=${revealed.focused}`, shots: [collapsedShot, await R.shot(page, 'revealed')] };
+  });
+};
+
+// ── windows ──────────────────────────────────────────────────────────────────────────────────
+
+SCRIPTS.windows = async (R, context, page) => {
+  await R.check('scenario 19: builder-worktree window — the parent row carries worktree-scoped actions only', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    const cockpit = await openCockpit(page);
+    const ws = await waitRow(cockpit, ALPHA, 60_000);
+    const inline = await inlineTitles(ws.loc);
+    const menu = await contextTitles(ws.loc);
+    const forbidden = ['Codev: Spawn Builder', 'Codev: New Shell', 'Codev: Add Architect'];
+    if ([...inline, ...menu].some((t) => forbidden.includes(t))) throw new Error(`parent row offers ${JSON.stringify({ inline, menu })}`);
+    if (!sameSet(menu, ['Codev: Open Web Interface', 'Codev: Start Dev (this workspace)', 'Codev: Open Dev URL'])) throw new Error(`parent row menu ${JSON.stringify(menu)}`);
+    await setExpanded(cockpit, ALPHA, true);
+    await setExpanded(cockpit, A_MAIN, true);
+    const b = await waitRow(cockpit, [...A_MAIN, B(101)]);
+    const builderMenu = await hasNoCodevMenu(b.loc);
+    if (builderMenu.length) throw new Error(`a builder row acts in a worktree window: ${JSON.stringify(builderMenu)}`);
+    return { detail: `worktree ${wt}; parent row "${ws.description}" inline ${JSON.stringify(inline)} menu ${JSON.stringify(menu)}; builder rows navigate`, shots: [await R.shot(page, 'worktree-window')] };
+  });
+
+  await R.check('scenario 19: no-workspace window — the state row explains and offers Open Folder', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    const cockpit = await openCockpit(page);
+    const r = await waitRow(cockpit, ['Tower', 'Not connected to Tower'], 60_000);
+    await r.loc.hover();
+    await page.waitForTimeout(1500);
+    const hover = (await page.locator('.monaco-hover, .workbench-hover').allTextContents()).join(' ').trim();
+    if (!/no Codev workspace/.test(hover) && !/no Codev workspace/.test(r.label ?? '')) throw new Error(`tooltip "${hover}", label "${r.label}"`);
+    return { detail: `row "${r.text}"; tooltip "${hover || r.label}"`, shots: [await R.shot(page, 'no-workspace-window')] };
+  });
+
+  await R.check('scenario 19: Codev container hidden, Cockpit visible — a builder change appears within one refresh interval', async () => {
+    const cockpit = await alphaCockpit(R, page);
+    await setPart(page, 'auxiliarybar', false);
+    await setPart(page, 'panel', false);
+    const parts = await partState(page);
+    if (!/^codev cockpit$/i.test(parts.sidebar.title)) throw new Error(`the side bar shows "${parts.sidebar.title}", not the Cockpit`);
+    await setExpanded(cockpit, A_MAIN, true);
+    const before = await waitRow(cockpit, [...A_MAIN, B(102)]);
+    // Toggle #102's gate (a rerun finds it already requested): either way one builder state change.
+    const request = !/blocked/.test(before.text);
+    const changedAt = requestGate(R, 'alpha', 102, { request });
+    const after = await waitFor(`#102 shown ${request ? 'blocked' : 'no longer blocked'}`, async () => {
+      const r = await findRow(cockpit, [...A_MAIN, B(102)]);
+      return r && /blocked/.test(r.text) === request ? r : null;
+    }, 75_000, 1000);
+    const secs = ((Date.now() - changedAt) / 1000).toFixed(1);
+    return { detail: `"${before.text}" → "${after.text}" after ${secs}s (codev.overviewRefreshSeconds default 60)`, shots: [await R.shot(page, 'cockpit-only-fresh')] };
+  });
+};
+
+/**
+ * Toggle builder `id` of `ws`'s spec-approval gate between requested (porch's `status: pending` +
+ * `requested_at`, as when the gate is reached) and not requested: either way one builder state
+ * change. Returns when it was written.
+ */
+const GATE_REQUESTED = /(\n  spec-approval:\n    status: pending\n)    requested_at: [^\n]*\n/;
+const GATE_PENDING = /(\n  spec-approval:\n    status: pending\n)/;
+
+/** Builder `id` of `ws`'s porch status file. */
+function statusFile(R, ws, id) {
+  const builders = path.join(R.opts.fixtures, ws, '.builders');
+  const wt = fs.readdirSync(builders).find((d) => d.includes(String(id)));
+  const projects = path.join(builders, wt, 'codev', 'projects');
+  const dir = fs.readdirSync(projects).find((d) => d.startsWith(`${id}-`));
+  return path.join(projects, dir, 'status.yaml');
+}
+
+/** Whether builder `id` of `ws` has its spec-approval gate requested. */
+function gateRequested(R, ws, id) {
+  return GATE_REQUESTED.test(fs.readFileSync(statusFile(R, ws, id), 'utf-8'));
+}
+
+function requestGate(R, ws, id, { request = true } = {}) {
+  const file = statusFile(R, ws, id);
+  const text = fs.readFileSync(file, 'utf-8');
+  const requested = GATE_REQUESTED;
+  const pending = GATE_PENDING;
+  let next;
+  if (request) {
+    if (requested.test(text) || !pending.test(text)) throw new Error(`#${id}'s spec-approval is not pending and unrequested in ${file}`);
+    next = text.replace(pending, `$1    requested_at: '${new Date().toISOString()}'\n`);
+  } else {
+    if (!requested.test(text)) throw new Error(`#${id}'s spec-approval is not requested in ${file}`);
+    next = text.replace(requested, '$1');
+  }
+  fs.writeFileSync(file, next);
+  return Date.now();
+}
+
+// ── reconnect ────────────────────────────────────────────────────────────────────────────────
+
+SCRIPTS.reconnect = async (R, context, page) => {
+  let cockpit;
+  await R.check('a loaded Cockpit keeps its content while the isolated Tower is down', async () => {
+    cockpit = await alphaCockpit(R, page);
+    const up = await R.shot(page, 'connected');
+    R.harness('tower-down');
+    await page.waitForTimeout(10_000);
+    const kept = await findRow(cockpit, A_MAIN);
+    if (!kept) throw new Error('the hierarchy was cleared');
+    return { detail: `kept "${kept.text}"`, shots: [up, await R.shot(page, 'tower-down-loaded')] };
+  });
+  await R.check('a window loaded while Tower is down shows Not connected to Tower', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    cockpit = await openCockpit(page);
+    const r = await waitRow(cockpit, ['Tower', 'Not connected to Tower'], 90_000);
+    return { detail: `row "${r.text}"`, shots: [await R.shot(page, 'not-connected')] };
+  });
+  await R.check('Tower back + the row\'s Reconnect → the hierarchy returns', async () => {
+    R.harness('tower-up');
+    const r = await findRow(cockpit, ['Tower', 'Not connected to Tower']);
+    if (r) await r.loc.click();
+    const back = await waitRow(cockpit, A_MAIN, 90_000);
+    return { detail: `${r ? 'clicked Reconnect; ' : 'already reconnected; '}"${back.text}"`, shots: [await R.shot(page, 'reconnected')] };
+  });
+};
+
+// ── requests ─────────────────────────────────────────────────────────────────────────────────
+
+const IDLE_MS = 60_000;
+const BURST_WAIT_MS = 15_000;
+const SETTLE_MS = 25_000;
+/** The fleet cache's fallback poll (`POLL_INTERVAL_MS`, views/tower-cache.ts). */
+const FLEET_POLL_MS = 20_000;
+
+/** Count the Tower requests in [from, to), grouped by method and route (workspace paths by name). */
+function countRequests(R, from, to) {
+  const counts = {};
+  for (const r of R.towerRequests()) {
+    if (r.at < from || r.at >= to) continue;
+    const u = new URL(r.url, 'http://x');
+    let route = u.pathname.replace(/\/api\/workspaces\/[^/]+/, '/api/workspaces/:ws');
+    const ws = u.searchParams.get('workspace');
+    if (ws) route += `?workspace=${path.basename(ws)}`;
+    const key = `${r.kind === 'upgrade' ? 'WS' : r.method} ${route}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Touch alpha's config so Tower's watcher broadcasts `codev-config-updated`. */
+function touchConfig(R) {
+  const file = path.join(R.opts.fixtures, 'alpha', '.codev', 'config.json');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf-8'));
+}
+
+/**
+ * One layout's counts, in a freshly restarted VS Code server, so no other window's extension host
+ * (kept alive for VS Code's reconnection grace period) is polling the Tower.
+ *
+ * Idle: 60 s, three fleet-poll periods. Burst: it starts 2 s after a fleet poll tick and lasts
+ * 15 s, so no poll tick lands inside it in either layout and its counts are only what the two
+ * changes cause (the fleet cache also refetches on every SSE event, so a window holding a poll tick
+ * would count one fan-out more or less depending on the poll's phase).
+ */
+async function measure(R, page, label, layout, builderId, request) {
+  await page.goto('about:blank');
+  R.harness('vscode-restart');
+  const tLoad = Date.now();
+  await loadWorkbench(page, R.folderUrl('alpha'));
+  const parts = await layout();
+  await page.waitForTimeout(SETTLE_MS);
+  const t0 = Date.now();
+  await page.waitForTimeout(IDLE_MS);
+  const tIdleEnd = Date.now();
+  const tick = await waitFor('a fleet poll tick', () => R.towerRequests()
+    .find((r) => r.at >= tIdleEnd && r.url === '/api/workspaces'), FLEET_POLL_MS + 5000, 200);
+  await page.waitForTimeout(Math.max(0, tick.at + 2000 - Date.now()));
+  const tb = Date.now();
+  requestGate(R, 'alpha', builderId, { request });
+  touchConfig(R);
+  await page.waitForTimeout(BURST_WAIT_MS);
+  const t1 = Date.now();
+  if (t1 >= tick.at + FLEET_POLL_MS) throw new Error('the burst window reached the next poll tick');
+  const events = R.towerRequests().filter((r) => r.at >= tLoad && r.at < t1 && r.method === 'GET' && r.url.startsWith('/api/events')).length;
+  return {
+    label, parts, events, window: { tLoad, t0, tIdleEnd, tick: tick.at, tb, t1 },
+    idle: countRequests(R, t0, tIdleEnd), burst: countRequests(R, tb, t1), shot: await R.shot(page, label),
+  };
+}
+
+/** Expand exactly the Codev container's `keep` panes (a collapsed view is not visible). */
+async function codevPanes(page, keep) {
+  const codev = await openCodev(page);
+  const headers = codev.locator('.pane-header');
+  for (let i = 0; i < await headers.count(); i++) {
+    const header = headers.nth(i);
+    // Titles carry counts ("Agents (3)"); Team renders only under codev.teamEnabled.
+    const title = ((await header.locator('.title').textContent()) ?? '').trim().replace(/ \(\d+\)$/, '');
+    if ((await header.getAttribute('aria-expanded') === 'true') !== keep.includes(title)) await header.click();
+  }
+}
+
+/** Show the Codev Tower view in the secondary side bar. */
+async function showTowerView(page) {
+  await setPart(page, 'auxiliarybar', true);
+  await runCommand(page, 'Codev Tower: Focus on Codev Tower View');
+}
+
+/**
+ * The three request-count layouts (spec scenario 21). Each states what must be on screen; the
+ * measurement refuses to run on any other screen.
+ */
+const REQUEST_LAYOUTS = [
+  {
+    label: 'cockpit-alone',
+    async apply(page) {
+      await openCockpit(page);
+      await setPart(page, 'auxiliarybar', false);
+      await setPart(page, 'panel', false);
+    },
+    want: { sidebar: /^codev cockpit$/i, auxiliarybar: null, panel: null },
+  },
+  {
+    label: 'source-views-alone',
+    async apply(page) {
+      await codevPanes(page, ['Workspace', 'Agents']);
+      await showTowerView(page);
+      await setPart(page, 'panel', false);
+    },
+    want: { sidebar: /^codev$/i, panes: ['Workspace', 'Agents'], auxiliarybar: /^codev tower\b/i, panel: null },
+  },
+  {
+    // The Cockpit moves to the panel so both sets show at once; Reset View Locations undoes it.
+    label: 'both',
+    async apply(page) {
+      await runCommand(page, 'View: Move View');
+      await quickType(page, 'Codev Cockpit'); // the view to move
+      await quickPick(page, 'New Panel Entry'); // where to
+      await codevPanes(page, ['Workspace', 'Agents']);
+      await showTowerView(page);
+      await setPart(page, 'panel', true);
+    },
+    want: { sidebar: /^codev$/i, panes: ['Workspace', 'Agents'], auxiliarybar: /^codev tower\b/i, panel: /^codev cockpit\b/i },
+    async undo(page) {
+      await runCommand(page, 'View: Reset View Locations');
+      await waitFor('the Cockpit back in the activity bar', async () => activityItem(page, 'Codev Cockpit').isVisible(), 10_000);
+    },
+  },
+];
+
+/** Where `parts` differs from a layout's `want`, as messages (empty when it matches). */
+function layoutProblems(parts, want) {
+  const out = [];
+  for (const part of ['sidebar', 'auxiliarybar', 'panel']) {
+    const st = parts[part];
+    if (want[part] === null) {
+      if (st.visible) out.push(`${part} shows "${st.title}"`);
+    } else if (!st.visible || !want[part].test(st.title)) {
+      out.push(`${part} shows ${st.visible ? `"${st.title}"` : 'nothing'}, want ${want[part]}`);
+    }
+  }
+  if (want.panes) {
+    const open = parts.sidebar.panes?.filter((p) => p.expanded).map((p) => p.title) ?? [];
+    if (!sameSet(open, want.panes)) out.push(`expanded panes ${JSON.stringify(open)}, want ${JSON.stringify(want.panes)}`);
+  }
+  return out;
+}
+
+const isConfigRoute = (route) => route.startsWith('GET /api/worktree-config');
+
+SCRIPTS.requests = async (R, context, page) => {
+  const results = {};
+  // #103's gate alternates, so each burst is one builder state change.
+  let request = true;
+  for (const layout of REQUEST_LAYOUTS) {
+    await R.check(`scenario 21: ${layout.label}`, async () => {
+      try {
+        const m = await measure(R, page, layout.label, async () => {
+          await layout.apply(page);
+          const parts = await partState(page);
+          const problems = layoutProblems(parts, layout.want);
+          if (problems.length) throw new Error(`layout ${layout.label} not on screen: ${problems.join('; ')}`);
+          return parts;
+        }, 103, request);
+        request = !request;
+        results[layout.label] = m;
+        return { detail: JSON.stringify({ parts: m.parts, idle: m.idle, burst: m.burst, events: m.events }), shots: [m.shot] };
+      } finally {
+        if (layout.undo) await layout.undo(page);
+      }
+    });
+  }
+  await R.check('scenario 21: the request counts match', async () => {
+    const a = results['cockpit-alone'];
+    const b = results['source-views-alone'];
+    const c = results.both;
+    if (!a || !b || !c) throw new Error('a layout was not measured');
+    const keys = [...new Set([a, b, c].flatMap((m) => [...Object.keys(m.idle), ...Object.keys(m.burst)]))].sort();
+    const n = (m, w, k) => m[w][k] ?? 0;
+    const table = keys.map((k) => ({
+      route: k,
+      cockpitIdle: n(a, 'idle', k), sourceIdle: n(b, 'idle', k), bothIdle: n(c, 'idle', k),
+      cockpitBurst: n(a, 'burst', k), sourceBurst: n(b, 'burst', k), bothBurst: n(c, 'burst', k),
+    }));
+    fs.writeFileSync(path.join(R.opts.shots, 'requests-table.json'), `${JSON.stringify({
+      idleMs: IDLE_MS, burstWaitMs: BURST_WAIT_MS,
+      layouts: [a, b, c].map((m) => ({ label: m.label, parts: m.parts, events: m.events, ...m.window })),
+      table,
+    }, null, 2)}\n`);
+    const problems = [];
+    // The Cockpit alone makes nothing the source views do not.
+    for (const r of table) {
+      if (r.cockpitIdle > r.sourceIdle || r.cockpitBurst > r.sourceBurst) problems.push(`Cockpit alone makes more ${r.route}`);
+    }
+    // The fleet and the overviews are shared: identical counts in all three layouts.
+    for (const r of table.filter((x) => x.route === 'GET /api/workspaces' || x.route.startsWith('GET /api/overview'))) {
+      if (new Set([r.cockpitIdle, r.sourceIdle, r.bothIdle]).size > 1 || new Set([r.cockpitBurst, r.sourceBurst, r.bothBurst]).size > 1) problems.push(`${r.route} differs across layouts`);
+    }
+    // getWorktreeConfig never on a fleet tick: none while idle, in any layout.
+    for (const r of table.filter((x) => isConfigRoute(x.route))) {
+      if (r.cockpitIdle || r.sourceIdle || r.bothIdle) problems.push(`${r.route} while idle`);
+    }
+    // Both at once: beyond the source views alone, only getWorktreeConfig.
+    for (const r of table) {
+      if ((r.bothIdle > r.sourceIdle || r.bothBurst > r.sourceBurst) && !isConfigRoute(r.route)) problems.push(`both at once adds ${r.route}`);
+    }
+    // No stream added: one event stream per window in every layout.
+    for (const m of [a, b, c]) if (m.events !== 1) problems.push(`${m.label}: ${m.events} event streams`);
+    if (problems.length) throw new Error(`${problems.join('; ')}: ${JSON.stringify(table)}`);
+    return JSON.stringify(table);
+  });
+};
+
+// ---------------------------------------------------------------------------------------------
+// Dashboard regression (Phase 6, spec scenario 20): the browser dashboard's Work and Decisions
+// tabs, served by the isolated Tower, render and rule as before. Each run writes a snapshot of
+// every element's computed colours, type and box under the two views; with --baseline (a
+// snapshot from a run on main's build) the run fails on any difference.
+// ---------------------------------------------------------------------------------------------
+
+/** Style properties the snapshot records: colour, type and box model, never content-driven sizes. */
+const SNAPSHOT_PROPS = [
+  'color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+  'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width', 'border-radius',
+  'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-transform',
+  'text-decoration-line', 'white-space', 'padding', 'margin', 'display', 'gap', 'flex-direction', 'align-items',
+  'justify-content', 'position', 'overflow-y', 'opacity', 'cursor', 'box-shadow', 'outline-color',
+];
+
+/** Every element under `root`, in document order: its path, tag, classes, own text (ages masked) and styles. */
+async function styleSnapshot(page, root) {
+  await page.mouse.move(0, 0);
+  return page.evaluate(({ root, props }) => {
+    const top = document.querySelector(root);
+    if (!top) throw new Error(`${root} is not rendered`);
+    const out = [];
+    const walk = (el, at) => {
+      const cs = getComputedStyle(el);
+      const style = {};
+      for (const p of props) style[p] = cs.getPropertyValue(p);
+      const text = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join('')
+        .trim().replace(/\d+[dhm]?(\s+\d+[dhm])?/g, 'N');
+      out.push({ at, tag: el.tagName.toLowerCase(), cls: el.getAttribute('class') ?? '', text, style });
+      [...el.children].forEach((child, i) => walk(child, `${at}>${i}`));
+    };
+    walk(top, root);
+    return out;
+  }, { root, props: SNAPSHOT_PROPS });
+}
+
+/** Differences between two snapshots of one view, as readable lines. */
+function snapshotDiff(name, before, after) {
+  const lines = [];
+  if (before.length !== after.length) lines.push(`${name}: ${before.length} elements before, ${after.length} after`);
+  for (let i = 0; i < Math.min(before.length, after.length); i++) {
+    const [b, a] = [before[i], after[i]];
+    for (const k of ['at', 'tag', 'cls', 'text']) if (b[k] !== a[k]) lines.push(`${name} ${b.at} ${k}: ${JSON.stringify(b[k])} → ${JSON.stringify(a[k])}`);
+    for (const p of SNAPSHOT_PROPS) if (b.style[p] !== a.style[p]) lines.push(`${name} ${b.at} <${b.tag} class="${b.cls}"> ${p}: ${b.style[p]} → ${a.style[p]}`);
+  }
+  return lines;
+}
+
+/** The isolated Tower's dashboard for a fixture workspace. */
+function dashboardUrl(R, ws) {
+  return `http://127.0.0.1:${R.opts['tower-port']}/workspace/${Buffer.from(path.join(R.opts.fixtures, ws)).toString('base64url')}/`;
+}
+
+/** The dashboard's content tab bar (Work, Decisions, builders, files); the architect strip has its own. */
+const CONTENT_TABS = '.tab-bar[aria-label="Content tabs"]';
+
+async function dashboardTab(page, label) {
+  await page.locator(`${CONTENT_TABS} [role="tab"]`, { hasText: label }).first().click();
+}
+
+async function activeDashboardTab(page) {
+  return (await page.locator(`${CONTENT_TABS} .tab-active .tab-label`).textContent())?.trim() ?? '';
+}
+
+async function contentTabLabels(page) {
+  return (await page.locator(`${CONTENT_TABS} .tab-label`).allTextContents()).map((t) => t.trim());
+}
+
+/** Run `action`, wait for the browser tab it opens, and return the URL that tab loaded. */
+async function popupUrl(context, action, timeout = 20_000) {
+  const [popup] = await Promise.all([context.waitForEvent('page', { timeout }), action()]);
+  const url = await waitFor('the new tab to navigate', async () => (popup.url() !== 'about:blank' ? popup.url() : null), 10_000);
+  await popup.close();
+  return url;
+}
+
+SCRIPTS.dashboard = async (R, context, page) => {
+  // Item links point at example.com: answer them here, so no request leaves the machine.
+  await context.route(/^https?:\/\/example\.com\//, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' }));
+  const snapshot = {};
+  const card = (id) => page.locator('.decisions-card', { has: page.locator('.decisions-item-id', { hasText: id }) });
+
+  await R.check('scenario 20: the dashboard Work tab renders', async () => {
+    // The overview Tower computed when VS Code first opened alpha (before the seed wrote its forge
+    // config) is cached with the forge concepts failed: drop it, and wait for one with every list.
+    const ws = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+    await R.tower('POST', `/workspace/${ws}/api/overview/refresh`);
+    await waitFor('alpha\'s overview with its forge lists', async () => {
+      const o = await R.overview('alpha');
+      return !o.errors && o.pendingPRs?.length && o.backlog?.length && o.recentlyClosed?.length;
+    }, 60_000);
+    await page.goto(dashboardUrl(R, 'alpha'));
+    await waitFor('three builder rows', async () => (await page.locator('.work-view .builder-table tbody tr').count()) === 3, 60_000);
+    const problems = [];
+    const ids = await page.locator('.builder-table .builder-col-id').allTextContents();
+    for (const id of ['#101', '#102', '#103']) if (!ids.some((t) => t.startsWith(id))) problems.push(`no builder row ${id}`);
+    if (await page.locator('.builder-table .builder-row-open').count() !== 3) problems.push('not three Open buttons');
+    for (const label of ['+ Shell', 'Refresh']) if (!await page.locator('.work-actions .work-btn', { hasText: label }).count()) problems.push(`no ${label} button`);
+    if (!await page.locator('.work-file-panel .work-file-panel-search').count()) problems.push('no collapsed Files panel with its search box');
+    if (!await page.locator('.work-view .tip-banner').count()) problems.push('no tip banner');
+    const attention = (await page.locator('.attention-rows .attention-row').allTextContents()).join(' | ');
+    if (!/#101.*spec review/.test(attention)) problems.push(`Needs Attention lacks #101's spec review: "${attention}"`);
+    const prRow = page.locator('a.attention-row', { hasText: '#301' });
+    if (await prRow.getAttribute('href').catch(() => null) !== 'https://example.com/fixture/pull/301') problems.push('Needs Attention lacks PR #301 as a link');
+    const backlog = (await page.locator('.backlog-rows .backlog-row').allTextContents()).join(' | ');
+    if (!/#401/.test(backlog) || !/#402/.test(backlog) || /#10[123]/.test(backlog)) problems.push(`Backlog is "${backlog}"`);
+    const b401 = page.locator('.backlog-row', { hasText: '#401' });
+    const artifacts = (await b401.locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(artifacts) !== JSON.stringify(['spec', 'plan'])) problems.push(`#401 offers ${JSON.stringify(artifacts)}`);
+    const closed = page.locator('.recently-closed-row', { hasText: '#399' });
+    const closedLinks = (await closed.locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(closedLinks) !== JSON.stringify(['review', 'PR'])) problems.push(`#399 offers ${JSON.stringify(closedLinks)}`);
+    if (problems.length) throw new Error(problems.join('; '));
+    snapshot.work = await styleSnapshot(page, '.work-view');
+    return { detail: `builders ${ids.join(', ')}; ${snapshot.work.length} elements`, shots: [await R.shot(page, 'work')] };
+  });
+
+  await R.check('scenario 20: the dashboard Decisions tab renders', async () => {
+    await dashboardTab(page, 'Decisions');
+    await waitFor('two decision cards', async () => (await page.locator('.decisions-card').count()) === 2, 30_000);
+    const image = card('main-1').locator('img[alt="Compact board"]');
+    await waitFor('the workspace image to load as an object URL', async () => (await image.getAttribute('src'))?.startsWith('blob:'), 20_000);
+    const problems = [];
+    const words = await card('main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
+    if (JSON.stringify(words) !== JSON.stringify(['compact', 'stacked', 'hold'])) problems.push(`main-1 offers ${JSON.stringify(words)}`);
+    if (!/Written under this item/.test(await card('web-1').textContent())) problems.push('web-1 does not show its written ruling');
+    if (!/2 open/.test(await page.locator('.decisions-count').textContent())) problems.push('the count is not "2 open"');
+    const link = card('main-1').locator('a', { hasText: 'https://example.com/fixture/main-1' });
+    if (await link.getAttribute('target') !== '_blank') problems.push('the http(s) link does not open in a new tab');
+    if (problems.length) throw new Error(problems.join('; '));
+    snapshot.decisions = await styleSnapshot(page, '.decisions-view');
+    return { detail: `main-1 offers ${words.join(' / ')}; image loaded; ${snapshot.decisions.length} elements`, shots: [await R.shot(page, 'decisions')] };
+  });
+
+  await R.check('scenario 20: a Decisions link and image open in a new tab', async () => {
+    const linkUrl = await popupUrl(context, () => card('main-1').locator('a', { hasText: 'https://example.com/fixture/main-1' }).click());
+    if (linkUrl !== 'https://example.com/fixture/main-1') throw new Error(`the link opened ${linkUrl}`);
+    const imageUrl = await popupUrl(context, () => card('main-1').locator('img[alt="Compact board"]').click());
+    if (!imageUrl.startsWith('blob:')) throw new Error(`the image opened ${imageUrl}`);
+    return `link → ${linkUrl}; image → a ${imageUrl.slice(0, 5)} page`;
+  });
+
+  await R.check('scenario 20: a ruling round-trips', async () => {
+    const main1 = card('main-1');
+    await main1.locator('input[type="radio"][value="stacked"]').check();
+    await main1.locator('textarea.decisions-comment').fill('Fixture comment from the dashboard.');
+    const formShot = await R.shot(page, 'decisions-draft');
+    await main1.locator('button.decisions-submit-btn').click();
+    await waitFor('main-1 to show the written ruling', async () => /Written under this item/.test(await main1.textContent()), 20_000);
+    const shown = (await main1.locator('.decisions-ruling-text').textContent()) ?? '';
+    const want = 'stacked\n\nFixture comment from the dashboard.';
+    if (shown !== want) throw new Error(`the card shows ${JSON.stringify(shown)}`);
+    const file = fs.readFileSync(path.join(R.opts.fixtures, 'alpha', 'codev/state/pending-decisions.md'), 'utf-8');
+    if (!file.includes(`**Your word:** \`compact\` / \`stacked\` / \`hold\`\n${want}\n`)) throw new Error('the file does not hold the ruling under main-1');
+    return { detail: 'Submit → Tower wrote the file → the card shows the written ruling', shots: [formShot, await R.shot(page, 'decisions-ruled')] };
+  });
+
+  await R.check('scenario 20: Work actions (Open, + Shell, Refresh, spec link, issue link)', async () => {
+    await dashboardTab(page, 'Work');
+    const problems = [];
+    await page.locator('.builder-row', { hasText: '#102' }).locator('.builder-row-open').click();
+    await page.waitForTimeout(1000);
+    const opened = await activeDashboardTab(page);
+    if (opened !== 'builder-spir-102') problems.push(`Open on #102 selected "${opened}"`);
+
+    await dashboardTab(page, 'Work');
+    const before = await contentTabLabels(page);
+    await page.locator('.work-actions .work-btn', { hasText: '+ Shell' }).click();
+    const shellTab = await waitFor('a new shell tab', async () => {
+      const added = (await contentTabLabels(page)).filter((t) => !before.includes(t));
+      return added.length === 1 ? added[0] : null;
+    }, 20_000).catch(() => { problems.push('+ Shell added no tab'); return null; });
+
+    await dashboardTab(page, 'Work');
+    const beforeSpec = await contentTabLabels(page);
+    await page.locator('.backlog-row', { hasText: '#401' }).locator('.backlog-artifact-link', { hasText: 'spec' }).click();
+    const specTab = await waitFor('a file tab for the spec', async () => {
+      const added = (await contentTabLabels(page)).filter((t) => !beforeSpec.includes(t));
+      return added.length === 1 ? added[0] : null;
+    }, 20_000).catch(() => { problems.push('the #401 spec link added no tab'); return null; });
+    if (specTab && !/401-fixture-backlog/.test(specTab)) problems.push(`the spec link opened "${specTab}"`);
+
+    await dashboardTab(page, 'Work');
+    const issueUrl = await popupUrl(context, () => page.locator('.backlog-row', { hasText: '#402' }).locator('a.backlog-row-main').click());
+    if (issueUrl !== 'https://example.com/fixture/issues/402') problems.push(`the #402 row opened ${issueUrl}`);
+
+    const from = R.towerRequests().length;
+    await page.locator('.work-actions .work-btn', { hasText: 'Refresh' }).click();
+    await page.waitForTimeout(1500);
+    if (!R.towerRequests().slice(from).some((r) => r.method === 'POST' && /\/api\/overview\/refresh$/.test((r.url ?? '').split('?')[0]))) problems.push('Refresh sent no POST …/api/overview/refresh');
+    if (problems.length) throw new Error(problems.join('; '));
+    return `Open → "${opened}"; + Shell → "${shellTab}"; spec → "${specTab}"; #402 → ${issueUrl}; Refresh → POST …/api/overview/refresh`;
+  });
+
+  fs.writeFileSync(path.join(R.opts.shots, 'dashboard-snapshot.json'), `${JSON.stringify(snapshot, null, 1)}\n`);
+  if (R.opts.baseline) {
+    await R.check('scenario 20: computed styles and DOM unchanged from the baseline', async () => {
+      const base = JSON.parse(fs.readFileSync(R.opts.baseline, 'utf-8'));
+      const diff = [...snapshotDiff('work', base.work ?? [], snapshot.work ?? []), ...snapshotDiff('decisions', base.decisions ?? [], snapshot.decisions ?? [])];
+      if (diff.length) throw new Error(`${diff.length} difference(s): ${diff.slice(0, 25).join(' | ')}`);
+      return `work ${snapshot.work.length} and decisions ${snapshot.decisions.length} elements identical to ${path.basename(R.opts.baseline)}`;
+    });
+  }
+};
+
+// ── decisions (Phase 7) ──────────────────────────────────────────────────────────────────────
+
+const DECISIONS_PATH = 'codev/state/pending-decisions.md';
+const REMOTE_IMAGE = 'https://example.com/fixture/remote-board.svg';
+/** A remote image the browser fails to load: the route answers 404. */
+const REMOTE_GONE = 'https://example.com/fixture/gone-board.svg';
+const REMOTE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80"><rect width="200" height="80" fill="#38a169"/><rect x="16" y="32" width="168" height="16" fill="#f0fff4"/></svg>';
+const OUTSIDE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#e53e3e"/></svg>';
+
+/**
+ * `main-2`, added to alpha's file by this script: an https image, which the webview loads itself;
+ * an https image the browser fails to load (404); and an image outside the workspace, which Tower
+ * refuses. It is also the item the stale-fingerprint check edits under the panel.
+ */
+const MAIN_2 = `### main-2 · 2026-11-21 10:00 UTC · Which board image should the fixture keep?
+
+- **Context:** an image from the web, and one from outside the workspace.
+
+![Remote board](${REMOTE_IMAGE})
+
+![Gone board](${REMOTE_GONE})
+
+![Outside image](../../../outside.svg)
+
+**Your word:** \`remote\` / \`local\`
+
+`;
+
+/** An item for gamma's new file, added the way the hub adds one. */
+const GAMMA_1 = `### main-1 · 2026-11-24 12:00 UTC · Adopt the Decisions panel in gamma?
+
+- **Context:** added by the hub after \`afx decisions init\`.
+
+**Your word:** \`adopt\` / \`wait\`
+
+`;
+
+/** Add `item` at the top of a decisions file's Open section, and set its status line. */
+function addOpenItem(file, item, status) {
+  const text = fs.readFileSync(file, 'utf-8');
+  if (!text.includes('## Open\n\n')) throw new Error(`${file} has no "## Open" section`);
+  fs.writeFileSync(file, text.replace('## Open\n\n', `## Open\n\n${item}`).replace(/^_Status: .*_$/m, `_Status: ${status}_`));
+}
+
+/** The Decisions panel's document: VS Code nests a webview's page two iframes down. */
+async function decisionsFrame(page, timeout = 60_000) {
+  return waitFor('the Decisions webview', async () => {
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      if (await frame.locator('.decisions-view').count().catch(() => 0)) return frame;
+    }
+    return null;
+  }, timeout);
+}
+
+const decisionCard = (frame, id) => frame.locator('.decisions-card', { has: frame.locator('.decisions-item-id', { hasText: new RegExp(`^${escapeRe(id)}$`) }) });
+
+/** GETs of a decisions document the Tower received after request-log line `from`. */
+const decisionsReads = (R, from) => R.towerRequests().slice(from)
+  .filter((r) => r.method === 'GET' && (r.url ?? '').split('?')[0].endsWith('/api/decisions'));
+
+/** The isolated Tower's notices to a hub architect, from its log. */
+function rulingNotices(R) {
+  const log = path.join(path.dirname(R.opts['request-log']), 'tower.log');
+  if (!fs.existsSync(log)) return [];
+  return fs.readFileSync(log, 'utf-8').split('\n').filter((l) => /Decisions notice .* → main @ /.test(l));
+}
+
+const hexToRgb = (hex) => {
+  const h = hex.replace('#', '');
+  const n = (i) => parseInt(h.slice(i, i + 2), 16);
+  return h.length >= 6 ? `rgb(${n(0)}, ${n(2)}, ${n(4)})` : hex;
+};
+
+SCRIPTS.decisions = async (R, context, page) => {
+  const alphaFile = path.join(R.opts.fixtures, 'alpha', DECISIONS_PATH);
+  addOpenItem(alphaFile, MAIN_2, '3 open — main-2, main-1, web-1.');
+  fs.writeFileSync(path.join(R.opts.fixtures, 'outside.svg'), OUTSIDE_SVG);
+  // Item links and the remote image point at example.com: answer them here, so nothing leaves the machine.
+  await context.route(/^https?:\/\/example\.com\//, (route) => (route.request().url() === REMOTE_IMAGE
+    ? route.fulfill({ status: 200, contentType: 'image/svg+xml', body: REMOTE_SVG })
+    : route.request().url() === REMOTE_GONE
+      ? route.fulfill({ status: 404, contentType: 'text/plain', body: 'not found' })
+      : route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' })));
+
+  // Every request the browser makes, with the frame that made it, for scenario 22.
+  const requests = [];
+  context.on('request', (r) => {
+    let frame = 'other';
+    try {
+      const f = r.frame();
+      frame = f === f.page().mainFrame() ? 'main' : f.url();
+    } catch { /* a service worker's request, or a popup's first navigation */ }
+    requests.push({ url: r.url(), frame, key: Object.keys(r.headers()).some((h) => h.toLowerCase() === 'codev-tower-key') });
+  });
+
+  let cockpit;
+  let frame;
+  const DRAFT = 'Draft that must survive a refusal.';
+
+  await R.check('scenario 12: a Decisions entry under every active workspace, none under the dormant one', async () => {
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    cockpit = await openCockpit(page);
+    await waitRow(cockpit, A_MAIN, 60_000);
+    const got = {};
+    for (const [name, spec] of [['alpha', ALPHA], ['beta', BETA], ['gamma', GAMMA]]) {
+      await setExpanded(cockpit, spec, true);
+      const t = await subtree(cockpit, spec);
+      got[name] = t.rows.filter((r) => r.level === t.head.level + 1).map((r) => r.text);
+    }
+    await setExpanded(cockpit, ['Tower', /^Dormant \(1\)$/], true);
+    const dormant = await subtree(cockpit, ['Tower', /^Dormant \(1\)$/]);
+    const problems = [];
+    for (const [name, children] of Object.entries(got)) {
+      if (children.at(-1) !== 'Decisions') problems.push(`${name}'s last child is "${children.at(-1)}"`);
+      if (children.filter((c) => c === 'Decisions').length !== 1) problems.push(`${name} has ${children.filter((c) => c === 'Decisions').length} Decisions entries`);
+    }
+    const delta = dormant.rows.find((r) => r.text === 'delta');
+    if (!delta || delta.expanded !== null) problems.push('the dormant delta row is missing or expandable');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(got)}`);
+    return { detail: `${JSON.stringify(got)}; Dormant: delta, a leaf (beta and gamma have no decisions file)`, shots: [await R.shot(page, 'entries')] };
+  });
+
+  await R.check("scenario 12: another workspace's Decisions entry opens that workspace's window", async () => {
+    const entry = await waitRow(cockpit, [...BETA, 'Decisions']);
+    const url = await nextPopup(R, context, () => entry.loc.click());
+    if (!decodeURIComponent(new URL(url).searchParams.get('folder') ?? '').endsWith('/beta')) throw new Error(`opened ${url}`);
+    return `beta's entry → ${url}`;
+  });
+
+  await R.check("scenario 12: this workspace's Decisions entry opens the panel, which renders the items", async () => {
+    const entry = await waitRow(cockpit, [...ALPHA, 'Decisions']);
+    await entry.loc.click();
+    await waitFor('the Decisions editor tab', async () => /^Decisions/.test(await activeEditorTab(page) ?? ''), 20_000);
+    frame = await decisionsFrame(page);
+    await waitFor('three decision cards', async () => (await frame.locator('.decisions-card').count()) === 3, 30_000);
+    const problems = [];
+    const count = (await frame.locator('.decisions-count').textContent())?.trim();
+    if (count !== '3 open') problems.push(`the count reads "${count}"`);
+    const words = await decisionCard(frame, 'main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
+    if (JSON.stringify(words) !== JSON.stringify(['compact', 'stacked', 'hold'])) problems.push(`main-1 offers ${JSON.stringify(words)}`);
+    if (!/Written under this item/.test(await decisionCard(frame, 'web-1').textContent())) problems.push('web-1 does not show its written ruling');
+    // Clicking the entry again reveals the same panel: still one Decisions tab.
+    await entry.loc.click();
+    await page.waitForTimeout(1000);
+    const tabs = (await editorTabs(page)).filter((t) => /^Decisions/.test(t ?? ''));
+    if (tabs.length !== 1) problems.push(`${tabs.length} Decisions tabs after a second click`);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `tab "${await activeEditorTab(page)}"; ${count}; main-1 offers ${words.join(' / ')}; one tab after a second click`, shots: [await R.shot(page, 'panel')] };
+  });
+
+  await R.check('scenario 15: a workspace image (bytes through the host), an https image, and two not loaded (the browser\'s 404, Tower\'s refusal)', async () => {
+    const local = decisionCard(frame, 'main-1').locator('img[alt="Compact board"]');
+    const remote = decisionCard(frame, 'main-2').locator('img[alt="Remote board"]');
+    const loaded = (img) => img.evaluate((el) => el.complete && el.naturalWidth > 0).catch(() => false);
+    await waitFor('the workspace image to render from an object URL', async () => (await local.getAttribute('src'))?.startsWith('blob:') && loaded(local), 20_000);
+    await waitFor('the https image to render', async () => (await remote.getAttribute('src')) === REMOTE_IMAGE && loaded(remote), 20_000);
+    const missing = decisionCard(frame, 'main-2').locator('.decisions-image-missing');
+    await waitFor('two not-loaded notes', async () => (await missing.count()) === 2, 20_000);
+    const notes = await missing.evaluateAll((els) => els.map((el) => ({ text: el.textContent.replace(/\s+/g, ' ').trim(), reason: el.title })));
+    const gone = notes.find((n) => n.text.includes(REMOTE_GONE));
+    const outside = notes.find((n) => /outside\.svg/.test(n.text));
+    if (!gone || !/^Image not loaded Gone board/.test(gone.text)) throw new Error(`no note for the 404 image: ${JSON.stringify(notes)}`);
+    if (!outside || !/^Image not loaded/.test(outside.text) || !/outside/i.test(outside.reason)) throw new Error(`no note for the refused image: ${JSON.stringify(notes)}`);
+    if (await decisionCard(frame, 'main-2').locator('img[alt="Gone board"]').count()) throw new Error('the 404 image is still a (broken) img');
+    const size = await local.evaluate((el) => `${el.naturalWidth}×${el.naturalHeight}`);
+    return { detail: `workspace SVG ${size} from blob:; https image loaded; 404: "${gone.text}" (${gone.reason}); refused: "${outside.text}" (${outside.reason})`, shots: [await R.shot(page, 'images')] };
+  });
+
+  await R.check('scenario 15: the full-size view opens over the panel; Escape and Close each close it', async () => {
+    const local = decisionCard(frame, 'main-1').locator('img[alt="Compact board"]');
+    const overlay = frame.locator('.wv-fullsize[role="dialog"]');
+    await local.click();
+    await overlay.waitFor({ timeout: 10_000 });
+    const src = await overlay.locator('img').getAttribute('src');
+    if (src !== await local.getAttribute('src')) throw new Error(`the full-size image is ${src}`);
+    const shot = await R.shot(page, 'full-size');
+    await page.keyboard.press('Escape');
+    await waitFor('Escape to close the full-size view', async () => (await overlay.count()) === 0, 5000);
+    await local.click();
+    await overlay.waitFor({ timeout: 10_000 });
+    await overlay.locator('button', { hasText: 'Close' }).click();
+    await waitFor('Close to close the full-size view', async () => (await overlay.count()) === 0, 5000);
+    return { detail: `opened on ${src.slice(0, 5)}…; Escape closed it; Close closed it`, shots: [shot] };
+  });
+
+  await R.check('scenario 15: an http(s) link opens in the browser, through the extension host', async () => {
+    const link = decisionCard(frame, 'main-1').locator('a', { hasText: 'https://example.com/fixture/main-1' });
+    let asked = null;
+    const url = await nextPopup(R, context, async () => {
+      await link.click();
+      // VS Code asks before opening a domain it does not trust yet.
+      if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 5000 }).then(() => true, () => false)) asked = await dialogButton(page, 'Open');
+    });
+    if (url !== 'https://example.com/fixture/main-1') throw new Error(`opened ${url}`);
+    return `→ ${url}${asked ? ` (after VS Code's prompt: "${asked.slice(0, 80)}")` : ''}`;
+  });
+
+  await R.check('scenario 15: rule an item — the file is updated, the card shows the ruling, the architect is notified', async () => {
+    const main1 = decisionCard(frame, 'main-1');
+    const noticesBefore = rulingNotices(R).length;
+    await main1.locator('input[type="radio"][value="stacked"]').check();
+    await main1.locator('textarea.decisions-comment').fill('Fixture comment from the VS Code panel.');
+    const formShot = await R.shot(page, 'draft');
+    await main1.locator('button.decisions-submit-btn').click();
+    await waitFor('main-1 to show the written ruling', async () => /Written under this item/.test(await main1.textContent()), 20_000);
+    const shown = (await main1.locator('.decisions-ruling-text').textContent()) ?? '';
+    const want = 'stacked\n\nFixture comment from the VS Code panel.';
+    if (shown !== want) throw new Error(`the card shows ${JSON.stringify(shown)}`);
+    const file = fs.readFileSync(alphaFile, 'utf-8');
+    if (!file.includes(`**Your word:** \`compact\` / \`stacked\` / \`hold\`\n${want}\n`)) throw new Error('the file does not hold the ruling under main-1');
+    const notice = await waitFor('Tower\'s notice to main', async () => rulingNotices(R).slice(noticesBefore)[0] ?? null, 20_000);
+    return { detail: `file updated; card shows it; Tower: ${notice.replace(/^\[[^\]]*\] \[INFO\] /, '')}`, shots: [formShot, await R.shot(page, 'ruled')] };
+  });
+
+  await R.check('scenario 15: a stale fingerprint is refused, and the draft is kept', async () => {
+    const main2 = decisionCard(frame, 'main-2');
+    await main2.locator('input[type="radio"][value="local"]').check();
+    await main2.locator('textarea.decisions-comment').fill(DRAFT);
+    const submit = main2.locator('button.decisions-submit-btn');
+    await submit.hover();
+    // Edit main-2 just after a poll, so Submit lands before the next one can read the edit.
+    const from = R.towerRequests().length;
+    await waitFor('a Decisions poll', async () => decisionsReads(R, from).length > 0, 10_000, 50);
+    fs.writeFileSync(alphaFile, fs.readFileSync(alphaFile, 'utf-8').replace('one from outside the workspace.', 'one from outside the workspace (edited under the panel).'));
+    await submit.click();
+    const alert = main2.locator('[role="alert"]');
+    await waitFor('the refusal on main-2', async () => (await alert.count()) === 1, 10_000);
+    const message = (await alert.textContent()).trim();
+    const draft = await main2.locator('textarea.decisions-comment').inputValue();
+    const word = await main2.locator('input[type="radio"]:checked').getAttribute('value');
+    const problems = [];
+    if (!/changed/i.test(message)) problems.push(`the refusal reads "${message}"`);
+    if (draft !== DRAFT) problems.push(`the comment box holds ${JSON.stringify(draft)}`);
+    if (word !== 'local') problems.push(`the chosen word is ${word}`);
+    const section = fs.readFileSync(alphaFile, 'utf-8').split('### main-2')[1]?.split('### main-1')[0] ?? '';
+    if (!section.endsWith('**Your word:** `remote` / `local`\n\n')) problems.push(`main-2's section now ends ${JSON.stringify(section.slice(-60))}`);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `"${message}"; draft and word kept`, shots: [await R.shot(page, 'stale-refused')] };
+  });
+
+  await R.check('scenario 21: the Decisions poll stops while its panel is hidden, and resumes when shown', async () => {
+    const t0 = R.towerRequests().length;
+    await page.waitForTimeout(6000);
+    const shown = decisionsReads(R, t0).length;
+    await runCommand(page, 'File: New Untitled Text File');
+    await waitFor('the untitled editor in front', async () => /^Untitled/.test(await activeEditorTab(page) ?? ''), 10_000);
+    await page.waitForTimeout(1000);
+    const t1 = R.towerRequests().length;
+    await page.waitForTimeout(8000);
+    const hidden = decisionsReads(R, t1).length;
+    await runCommand(page, 'View: Close Editor');
+    await waitFor('the Decisions editor in front again', async () => /^Decisions/.test(await activeEditorTab(page) ?? ''), 10_000);
+    const t2 = R.towerRequests().length;
+    await waitFor('a read once shown again', async () => decisionsReads(R, t2).length > 0, 6000);
+    if (shown < 2 || hidden !== 0) throw new Error(`reads: ${shown} in 6 s shown, ${hidden} in 8 s hidden`);
+    const kept = await decisionCard(frame, 'main-2').locator('textarea.decisions-comment').inputValue();
+    if (kept !== DRAFT) throw new Error(`the draft did not survive hiding: ${JSON.stringify(kept)}`);
+    return `${shown} reads in 6 s shown; ${hidden} in 8 s hidden; reading again once shown; draft kept (retained context)`;
+  });
+
+  await R.check('scenario 18: light, dark and high-contrast themes, switched live with the panel open', async () => {
+    await frame.evaluate(() => { window.__codevMarker = 'kept'; });
+    const shots = [];
+    const seen = {};
+    const themes = [['Dark Modern', 'vs-dark'], ['Dark High Contrast', 'hc-black'], ['Light High Contrast', 'hc-light'], ['Light Modern', 'vs']];
+    for (const [theme, cls] of themes) {
+      await setTheme(page, theme);
+      const applied = await page.locator('.monaco-workbench').evaluate((el, c) => el.classList.contains(c), cls);
+      if (!applied) throw new Error(`the workbench is not ${cls} after choosing ${theme}`);
+      await page.waitForTimeout(800);
+      seen[theme] = await frame.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        const card = document.querySelector('.decisions-card');
+        // WCAG contrast of computed colours: rgb()/rgba(), or color(srgb …) from a color-mix().
+        const parse = (c) => {
+          const n = (c.match(/-?[\d.]+(?:e-?\d+)?/g) ?? []).map(Number);
+          const k = c.startsWith('color(') ? 255 : 1;
+          return c === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : { r: n[0] * k, g: n[1] * k, b: n[2] * k, a: n.length > 3 ? n[3] : 1 };
+        };
+        const over = (top, under) => ({ r: top.a * top.r + (1 - top.a) * under.r, g: top.a * top.g + (1 - top.a) * under.g, b: top.a * top.b + (1 - top.a) * under.b, a: 1 });
+        // What an element's text is drawn on: its own and its ancestors' backgrounds, composited.
+        const backdrop = (el) => {
+          const layers = [];
+          for (let e = el; e; e = e.parentElement) {
+            const bg = parse(getComputedStyle(e).backgroundColor);
+            if (bg.a > 0) layers.push(bg);
+            if (bg.a >= 1) break;
+          }
+          let base = layers.at(-1)?.a >= 1 ? layers.pop() : { r: 255, g: 255, b: 255, a: 1 };
+          for (const layer of layers.reverse()) base = over(layer, base);
+          return base;
+        };
+        const lum = ({ r, g, b }) => {
+          const [R, G, B] = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+          return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+        };
+        const ratio = (fg, bg) => { const [x, y] = [lum(fg), lum(bg)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10; };
+        const textContrast = (el) => { const bg = backdrop(el); return ratio(over(parse(getComputedStyle(el).color), bg), bg); };
+        const contrast = (a, b) => ratio(parse(a), parse(b));
+        const page = getComputedStyle(document.body).backgroundColor;
+        const id = document.querySelector('.decisions-item-id');
+        const submit = [...document.querySelectorAll('.decisions-submit-btn')].find((b) => !b.disabled);
+        const word = document.querySelector('.decisions-option-word');
+        const badge = document.querySelector('.decisions-badge');
+        // Every rendered element in the panel with text of its own, on what it is drawn on.
+        const texts = [...document.querySelectorAll('.decisions-view *')]
+          .filter((el) => el.getClientRects().length && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))
+          .map((el) => {
+            const kind = `${el.tagName.toLowerCase()}${[...el.classList].map((c) => `.${c}`).join('')}`;
+            return { kind, what: `${kind} "${el.textContent.trim().slice(0, 24)}"`, contrast: textContrast(el) };
+          })
+          .sort((a, b) => a.contrast - b.contrast);
+        return {
+          marker: window.__codevMarker ?? null,
+          body: page,
+          text: getComputedStyle(document.body).color,
+          editorBg: root.getPropertyValue('--vscode-editor-background').trim(),
+          card: card ? getComputedStyle(card).borderTopColor : null,
+          accent: root.getPropertyValue('--codev-wv-accent').trim(),
+          // Text drawn in the accent on the page, and on an accent-filled button.
+          idContrast: id ? contrast(getComputedStyle(id).color, page) : null,
+          submitContrast: submit ? contrast(getComputedStyle(submit).color, getComputedStyle(submit).backgroundColor) : null,
+          wordContrast: word ? textContrast(word) : null,
+          badgeContrast: badge ? textContrast(badge) : null,
+          scanned: texts.length,
+          lowest: texts.slice(0, 3).map(({ what, contrast: c }) => ({ what, contrast: c })),
+          // Every kind of text under 4.5:1, at its lowest: shown in the evidence, not only failed on.
+          under45: [...new Map(texts.filter((t) => t.contrast < 4.5).reverse().map((t) => [t.kind, t.contrast])).entries()].map(([k, c]) => `${c} ${k}`),
+        };
+      });
+      shots.push(await R.shot(page, `theme-${cls}`));
+    }
+    const problems = [];
+    for (const [theme, s] of Object.entries(seen)) {
+      if (s.marker !== 'kept') problems.push(`${theme}: the webview reloaded`);
+      if (s.body !== hexToRgb(s.editorBg)) problems.push(`${theme}: body ${s.body} is not the editor background ${s.editorBg}`);
+      if (!s.accent) problems.push(`${theme}: --codev-wv-accent resolves to nothing`);
+      if (!(s.idContrast >= 4.5)) problems.push(`${theme}: an item id's contrast is ${s.idContrast}`);
+      if (!(s.submitContrast >= 4.5)) problems.push(`${theme}: Submit's text contrast is ${s.submitContrast}`);
+      if (!(s.wordContrast >= 4.5)) problems.push(`${theme}: an option word's contrast is ${s.wordContrast}`);
+      if (!(s.badgeContrast >= 3)) problems.push(`${theme}: the Recommended badge's contrast is ${s.badgeContrast}`);
+      // No text in the panel below 3:1, the floor for anything a reader is meant to see.
+      const faint = s.lowest.filter((t) => !(t.contrast >= 3));
+      if (faint.length) problems.push(`${theme}: faint text ${JSON.stringify(faint)}`);
+    }
+    const tuples = new Set(Object.values(seen).map((s) => `${s.body}|${s.text}|${s.card}`));
+    if (tuples.size !== themes.length) problems.push(`only ${tuples.size} distinct looks across ${themes.length} themes`);
+    const draft = await decisionCard(frame, 'main-2').locator('textarea.decisions-comment').inputValue();
+    if (draft !== DRAFT) problems.push('the draft did not survive the switches');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(seen)}`);
+    return { detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}, card border ${s.card}, contrast id ${s.idContrast} / Submit ${s.submitContrast} / option word ${s.wordContrast} / badge ${s.badgeContrast}; lowest of ${s.scanned} texts ${s.lowest.map((x) => `${x.contrast} ${x.what}`).join(', ')}; under 4.5: ${s.under45.join(', ') || 'none'}`).join('; '), shots };
+  });
+
+  await R.check('the panel is restored after a window reload', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+    frame = await decisionsFrame(page, 120_000);
+    await waitFor('the restored panel\'s cards', async () => (await frame.locator('.decisions-card').count()) === 3, 60_000);
+    const tabs = (await editorTabs(page)).filter((t) => /^Decisions/.test(t ?? ''));
+    if (tabs.length !== 1) throw new Error(`${tabs.length} Decisions tabs after the reload`);
+    return { detail: 'one Decisions tab, its cards rendered', shots: [await R.shot(page, 'restored')] };
+  });
+
+  await R.check('scenario 19: in a builder-worktree window, Open Decisions explains, and the entry navigates to the parent', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    await runCommand(page, 'Codev: Open Decisions');
+    const note = await waitForNotification(page, /not offered in a builder-worktree window/);
+    const shot = await R.shot(page, 'worktree-explains');
+    const wtCockpit = await openCockpit(page);
+    await setExpanded(wtCockpit, ALPHA, true);
+    const entry = await waitRow(wtCockpit, [...ALPHA, 'Decisions']);
+    const url = await nextPopup(R, context, () => entry.loc.click());
+    if (!decodeURIComponent(new URL(url).searchParams.get('folder') ?? '').endsWith('/alpha')) throw new Error(`the entry opened ${url}`);
+    if ((await editorTabs(page)).some((t) => /^Decisions/.test(t ?? ''))) throw new Error('a Decisions panel opened in the worktree window');
+    return { detail: `"${note}"; entry → ${url}`, shots: [shot] };
+  });
+
+  await R.check('scenario 19: in a no-workspace window, Open Decisions explains', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    await page.waitForTimeout(3000);
+    await runCommand(page, 'Codev: Open Decisions');
+    const note = await waitForNotification(page, /needs a Codev workspace/);
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
+  });
+
+  await R.check('scenario 16: no decisions file shows the empty state; afx decisions init, then an item, and it appears', async () => {
+    await loadWorkbench(page, R.folderUrl('gamma'));
+    const gammaCockpit = await openCockpit(page);
+    await waitRow(gammaCockpit, GAMMA, 60_000);
+    await setExpanded(gammaCockpit, GAMMA, true);
+    await (await waitRow(gammaCockpit, [...GAMMA, 'Decisions'])).loc.click();
+    frame = await decisionsFrame(page);
+    const status = frame.locator('.decisions-notice[role="status"]');
+    await waitFor('the empty state', async () => (await status.count()) === 1, 20_000);
+    const empty = (await status.textContent()).trim();
+    if (!/^There is no decisions file/.test(empty) || !/afx decisions init/.test(empty)) throw new Error(`the empty state reads "${empty}"`);
+    // An empty state, not a warning: VS Code's description colour on no fill (the dashboard's
+    // amber notice read as one).
+    const look = await status.evaluate((el) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--vscode-descriptionForeground)';
+      document.body.appendChild(probe);
+      const description = getComputedStyle(probe).color;
+      probe.remove();
+      const style = getComputedStyle(el);
+      return { color: style.color, description, background: style.backgroundColor, classes: el.className };
+    });
+    if (look.color !== look.description || look.background !== 'rgba(0, 0, 0, 0)') throw new Error(`the empty state is not plain description text: ${JSON.stringify(look)}`);
+    const emptyShot = await R.shot(page, 'empty-state');
+
+    // The real CLI, run in the fixture: `decisions init` only writes the template (no Tower call).
+    const gamma = path.join(R.opts.fixtures, 'gamma');
+    const init = spawnSync(process.execPath, [path.join(REPO, 'packages/codev/bin/afx.js'), 'decisions', 'init'], { cwd: gamma, env: process.env, encoding: 'utf-8', timeout: 60_000 });
+    if (init.status !== 0) throw new Error(`afx decisions init exited ${init.status}: ${init.stderr || init.stdout}`);
+    await waitFor('the new file in place of the empty state', async () => (await status.count()) === 0 && /0 open/.test(await frame.locator('.decisions-count').textContent().catch(() => '')), 15_000);
+    const initShot = await R.shot(page, 'initialized');
+    addOpenItem(path.join(gamma, DECISIONS_PATH), GAMMA_1, '1 open — main-1.');
+    await waitFor('gamma\'s first item', async () => (await decisionCard(frame, 'main-1').count()) === 1, 15_000);
+    const words = await decisionCard(frame, 'main-1').locator('input[type="radio"]').evaluateAll((els) => els.map((e) => e.value));
+    return {
+      detail: `"${empty}" (${look.color}, the description colour, on no fill) → afx decisions init: "${init.stdout.split('\n').find((l) => /Created/.test(l))?.trim()}" → 0 open → main-1 appears (${words.join(' / ')})`,
+      shots: [emptyShot, initShot, await R.shot(page, 'item-appears')],
+    };
+  });
+
+  await R.check('scenario 22: the webview never contacts Tower; the key is in no request; remote item images are its only network loads', async () => {
+    const towerPort = R.opts['tower-port'];
+    const problems = [];
+    const toTower = requests.filter((r) => URL.canParse(r.url) && new URL(r.url).port === towerPort);
+    if (toTower.length) problems.push(`${toTower.length} browser request(s) to the Tower port: ${toTower.slice(0, 3).map((r) => r.url).join(', ')}`);
+    const keyed = requests.filter((r) => r.key);
+    if (keyed.length) problems.push(`${keyed.length} request(s) carry the key header`);
+    const webview = requests.filter((r) => /\/webview\/browser\/pre\//.test(r.frame));
+    const kinds = {};
+    for (const r of webview) {
+      const origin = URL.canParse(r.frame) ? new URL(r.frame).origin : '';
+      const kind = r.url === REMOTE_IMAGE || r.url === REMOTE_GONE ? 'remote item image'
+        : /^(blob|data):/.test(r.url) ? 'blob/data'
+          : URL.canParse(r.url) && /\.vscode-resource\./.test(new URL(r.url).hostname) ? 'extension resource'
+            : URL.canParse(r.url) && new URL(r.url).origin === origin ? "VS Code's webview host page"
+              : null;
+      if (!kind) problems.push(`unexpected webview request ${r.url}`);
+      else kinds[kind] = (kinds[kind] ?? 0) + 1;
+    }
+    if (!kinds['remote item image']) problems.push('the audit saw no webview request at all for the remote image (is it attributing frames?)');
+    const html = await frame.content();
+    if (html.includes(process.env.COCKPIT_TOWER_KEY) || html.includes(`:${towerPort}`)) problems.push('the webview document holds the key or the Tower port');
+    if (problems.length) throw new Error(problems.slice(0, 8).join('; '));
+    return `${requests.length} browser requests, none to :${towerPort}, none keyed; webview frames: ${JSON.stringify(kinds)}`;
+  });
+};
+
+// ── work ─────────────────────────────────────────────────────────────────────────────────────
+// The VS Code Work panel (Phase 8): spec scenarios 17 (each mapped action), 18 (themes, live
+// switch, contrast), 19 (the unavailable windows; Tower unreachable, then back) and 22 (network
+// audit), plus the increment-2 shot of the Cockpit's Decisions entries beside both panels.
+
+/** The Work panel's document: VS Code nests a webview's page two iframes down. */
+async function workFrame(page, timeout = 60_000) {
+  return waitFor('the Work webview', async () => {
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      if (await frame.locator('.work-view').count().catch(() => 0)) return frame;
+    }
+    return null;
+  }, timeout);
+}
+
+/** Requests the Tower received after request-log line `from` whose path ends with `suffix`. */
+const towerHits = (R, from, method, suffix) => R.towerRequests().slice(from)
+  .filter((r) => r.method === method && (r.url ?? '').split('?')[0].endsWith(suffix));
+
+/**
+ * Run in a panel's frame: the WCAG contrast of every rendered text in `rootSelector`, on what it is
+ * drawn on (its own and its ancestors' backgrounds, composited), lowest first. The same probe as the
+ * Decisions theme check: rgb()/rgba() and color(srgb …) (a color-mix()) are both parsed.
+ * `probes` are [label, className, text]: each is drawn for the measurement inside the view's
+ * content, as the view would draw it, then removed (colours the fixture's data never shows).
+ */
+function textContrasts({ rootSelector, probes }) {
+  const parse = (c) => {
+    const n = (c.match(/-?[\d.]+(?:e-?\d+)?/g) ?? []).map(Number);
+    const k = c.startsWith('color(') ? 255 : 1;
+    return c === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : { r: n[0] * k, g: n[1] * k, b: n[2] * k, a: n.length > 3 ? n[3] : 1 };
+  };
+  const over = (top, under) => ({ r: top.a * top.r + (1 - top.a) * under.r, g: top.a * top.g + (1 - top.a) * under.g, b: top.a * top.b + (1 - top.a) * under.b, a: 1 });
+  const backdrop = (el) => {
+    const layers = [];
+    for (let e = el; e; e = e.parentElement) {
+      const bg = parse(getComputedStyle(e).backgroundColor);
+      if (bg.a > 0) layers.push(bg);
+      if (bg.a >= 1) break;
+    }
+    let base = layers.at(-1)?.a >= 1 ? layers.pop() : { r: 255, g: 255, b: 255, a: 1 };
+    for (const layer of layers.reverse()) base = over(layer, base);
+    return base;
+  };
+  const lum = ({ r, g, b }) => {
+    const [R, G, B] = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  };
+  const ratio = (fg, bg) => { const [x, y] = [lum(fg), lum(bg)].sort((m, n) => n - m); return Math.round(((x + 0.05) / (y + 0.05)) * 10) / 10; };
+  const textContrast = (el) => { const bg = backdrop(el); return ratio(over(parse(getComputedStyle(el).color), bg), bg); };
+  const root = document.querySelector(rootSelector);
+  const host = document.querySelector('.work-content') ?? root;
+  const probed = probes.map(([label, className, text]) => {
+    const el = document.createElement('span');
+    el.className = className;
+    el.textContent = text;
+    host.appendChild(el);
+    const contrast = textContrast(el);
+    el.remove();
+    return { label, contrast };
+  });
+  const texts = [...root.querySelectorAll('*')]
+    .filter((el) => el.getClientRects().length && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))
+    .map((el) => {
+      const kind = `${el.tagName.toLowerCase()}${[...el.classList].map((c) => `.${c}`).join('')}`;
+      return { kind, what: `${kind} "${el.textContent.trim().slice(0, 24)}"`, contrast: textContrast(el) };
+    })
+    .sort((a, b) => a.contrast - b.contrast);
+  // A progress bar's track against its row, and its fill against the track (null when no bar).
+  const bar = root.querySelector('.progress-bar');
+  const fill = bar?.querySelector('.progress-fill');
+  const track = bar ? { onRow: ratio(backdrop(bar), backdrop(bar.parentElement)), fill: fill ? ratio(backdrop(fill), backdrop(bar)) : null } : null;
+  return {
+    track,
+    marker: window.__codevMarker ?? null,
+    body: getComputedStyle(document.body).backgroundColor,
+    text: getComputedStyle(document.body).color,
+    editorBg: getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim(),
+    scanned: texts.length,
+    lowest: texts.slice(0, 3).map(({ what, contrast }) => ({ what, contrast })),
+    under45: [...new Map(texts.filter((t) => t.contrast < 4.5).reverse().map((t) => [t.kind, t.contrast])).entries()].map(([k, c]) => `${c} ${k}`),
+    probed,
+  };
+}
+
+/** Colours the fixture never shows, drawn for the measurement: a PIR dev-approval row's orange, and the spike tag. */
+const WORK_PROBES = [
+  ['implementing orange (attention-kind--dev)', 'attention-kind attention-kind--dev', 'dev review'],
+  ['spike tag', 'backlog-type-tag type-tag--spike', 'spike'],
+];
+
+SCRIPTS.work = async (R, context, page) => {
+  // Issue and PR links point at example.com: answer them here, so no request leaves the machine.
+  await context.route(/^https?:\/\/example\.com\//, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>fixture link</p>' }));
+  // Every request the browser makes, with the frame that made it, for scenario 22.
+  const requests = [];
+  context.on('request', (r) => {
+    let frame = 'other';
+    try {
+      const f = r.frame();
+      frame = f === f.page().mainFrame() ? 'main' : f.url();
+    } catch { /* a service worker's request, or a popup's first navigation */ }
+    requests.push({ url: r.url(), frame, key: Object.keys(r.headers()).some((h) => h.toLowerCase() === 'codev-tower-key') });
+  });
+
+  let frame;
+  const work = () => frame.locator('.work-view');
+  const builderRow = (id) => frame.locator('.builder-row', { has: frame.locator('.builder-col-id', { hasText: new RegExp(`^#${id}\\b`) }) });
+
+  await R.check('scenario 17: Open Work opens one panel; builders, Needs Attention, Backlog and Recently Closed render; no dropped affordance', async () => {
+    // The overview Tower computed when VS Code first opened alpha (before the seed wrote its forge
+    // config) is cached with the forge concepts failed: drop it, and wait for one with every list.
+    const ws = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+    await R.tower('POST', `/workspace/${ws}/api/overview/refresh`);
+    await waitFor('alpha\'s overview with its forge lists', async () => {
+      const o = await R.overview('alpha');
+      return !o.errors && o.pendingPRs?.length && o.backlog?.length && o.recentlyClosed?.length;
+    }, 60_000);
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    await runCommand(page, 'Codev: Open Work');
+    await waitFor('the Work editor tab', async () => /^Work/.test(await activeEditorTab(page) ?? ''), 20_000);
+    frame = await workFrame(page);
+    await waitFor('three builder rows and the forge lists', async () => (await frame.locator('.builder-table tbody tr').count()) === 3
+      && (await frame.locator('.backlog-rows .backlog-row').count()) === 2, 60_000);
+    const problems = [];
+    const ids = await frame.locator('.builder-table .builder-col-id').allTextContents();
+    for (const id of ['#101', '#102', '#103']) if (!ids.some((t) => t.startsWith(id))) problems.push(`no builder row ${id}`);
+    if (await frame.locator('.builder-table .builder-row-open').count() !== 3) problems.push('not three Open buttons');
+    const buttons = (await work().locator('button').allTextContents()).map((t) => t.trim());
+    const headings = (await work().locator('h2, h3').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(headings) !== JSON.stringify(['Work', 'Builders', 'Needs Attention', 'Backlog', 'Recently Closed'])) problems.push(`headings ${JSON.stringify(headings)}`);
+    const attention = (await frame.locator('.attention-rows .attention-row').allTextContents()).join(' | ');
+    if (!/#101.*spec review/.test(attention)) problems.push(`Needs Attention lacks #101's spec review: "${attention}"`);
+    if (await frame.locator('a.attention-row', { hasText: '#301' }).getAttribute('href').catch(() => null) !== 'https://example.com/fixture/pull/301') problems.push('Needs Attention lacks PR #301 as a link');
+    const backlog = (await frame.locator('.backlog-rows .backlog-row').allTextContents()).join(' | ');
+    if (!/#401/.test(backlog) || !/#402/.test(backlog) || /#10[123]/.test(backlog)) problems.push(`Backlog is "${backlog}"`);
+    const artifacts = (await frame.locator('.backlog-row', { hasText: '#401' }).locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(artifacts) !== JSON.stringify(['spec', 'plan'])) problems.push(`#401 offers ${JSON.stringify(artifacts)}`);
+    const closedLinks = (await frame.locator('.recently-closed-row', { hasText: '#399' }).locator('.backlog-artifact-link').allTextContents()).map((t) => t.trim());
+    if (JSON.stringify(closedLinks) !== JSON.stringify(['review', 'PR'])) problems.push(`#399 offers ${JSON.stringify(closedLinks)}`);
+    // The dashboard-only pieces are absent: Open Files & Shells, the Files panel, the tip of the day.
+    for (const [what, selector] of [['the Files panel', '.work-file-panel'], ['the tip banner', '.tip-banner'], ['Open Files & Shells', '.open-files-shells, .work-open-files']]) {
+      if (await frame.locator(selector).count()) problems.push(`${what} renders`);
+    }
+    if (/Open Files|Shells/i.test(await work().textContent())) problems.push('an Open Files & Shells section renders');
+    if ((await work().getAttribute('class')).includes('file-panel-open')) problems.push('the view is laid out for a file panel');
+    // Running the command again reveals the same panel.
+    await runCommand(page, 'Codev: Open Work');
+    await page.waitForTimeout(800);
+    const tabs = (await editorTabs(page)).filter((t) => /^Work/.test(t ?? ''));
+    if (tabs.length !== 1) problems.push(`${tabs.length} Work tabs after a second Open Work`);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `builders ${ids.join(', ')}; headings ${headings.join(' / ')}; buttons ${buttons.join(', ')}; one tab after a second Open Work`, shots: [await R.shot(page, 'panel')] };
+  });
+
+  await R.check("scenario 17: a builder's progress bar is drawn at its width under the panel's CSP", async () => {
+    const bars = await frame.locator('.builder-row').evaluateAll((trs) => trs.map((tr) => {
+      const fill = tr.querySelector('.progress-fill');
+      const bar = tr.querySelector('.progress-bar');
+      return {
+        id: tr.querySelector('.builder-col-id')?.textContent?.trim().slice(0, 5),
+        pct: tr.querySelector('.progress-pct')?.textContent?.trim(),
+        inline: fill?.style.width,
+        fill: fill ? Math.round(fill.getBoundingClientRect().width) : null,
+        bar: bar ? Math.round(bar.getBoundingClientRect().width) : null,
+      };
+    }));
+    const problems = bars.filter((b) => b.inline !== b.pct || Math.abs(b.fill - (b.bar * parseFloat(b.pct)) / 100) > 1);
+    if (!bars.length || problems.length) throw new Error(`bars ${JSON.stringify(bars)}`);
+    return bars.map((b) => `${b.id} ${b.pct}: ${b.fill}px of ${b.bar}px`).join('; ');
+  });
+
+  await R.check("scenario 17: Open opens the builder's terminal", async () => {
+    const e = await effects(R, context, page, () => builderRow(102).locator('.builder-row-open').click());
+    if (!e.tabs.some((t) => /102|second-main/.test(t))) throw new Error(`no builder terminal tab: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'open-builder')] };
+  });
+
+  // Back to the panel for each action: Open left a terminal in front.
+  const showWork = async () => {
+    await runCommand(page, 'Codev: Open Work');
+    await waitFor('the Work editor in front', async () => /^Work/.test(await activeEditorTab(page) ?? ''), 10_000);
+  };
+
+  await R.check('scenario 17: + Shell opens a Tower shell', async () => {
+    await showWork();
+    const e = await effects(R, context, page, () => work().locator('.work-actions .work-btn', { hasText: '+ Shell' }).click());
+    if (!e.terminals.length) throw new Error(`no shell terminal: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'new-shell')] };
+  });
+
+  await R.check("scenario 17: Refresh drops Tower's overview cache, then re-reads the overview", async () => {
+    await showWork();
+    const from = R.towerRequests().length;
+    await work().locator('.work-actions .work-btn', { hasText: 'Refresh' }).click();
+    const post = await waitFor('POST …/api/overview/refresh', async () => towerHits(R, from, 'POST', '/api/overview/refresh')[0] ?? null, 10_000);
+    const reads = await waitFor('a GET of the overview after it', async () => {
+      const after = R.towerRequests().slice(from);
+      const at = after.indexOf(post);
+      const gets = after.slice(at + 1).filter((r) => r.method === 'GET' && (r.url ?? '').split('?')[0].endsWith('/api/overview'));
+      return gets.length ? gets : null;
+    }, 10_000);
+    return `${post.method} ${post.url}, then ${reads.length} GET ${reads[0].url}`;
+  });
+
+  await R.check('scenario 17: a spec link opens the workspace file in an editor', async () => {
+    const e = await effects(R, context, page, () => frame.locator('.backlog-row', { hasText: '#401' }).locator('.backlog-artifact-link', { hasText: 'spec' }).click(), { wait: 3000 });
+    if (!e.tabs.some((t) => /401-fixture-backlog\.md/.test(t))) throw new Error(`no spec tab: ${describe(e)}`);
+    return { detail: describe(e), shots: [await R.shot(page, 'spec-link')] };
+  });
+
+  await R.check('scenario 17: an issue link and a PR link open in the browser, through the extension host', async () => {
+    await showWork();
+    const opened = [];
+    for (const link of [frame.locator('.backlog-row', { hasText: '#402' }).locator('a.backlog-row-main'), frame.locator('a.attention-row', { hasText: '#301' })]) {
+      let asked = null;
+      const url = await nextPopup(R, context, async () => {
+        await link.click();
+        // VS Code asks before opening a domain it does not trust yet.
+        if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 5000 }).then(() => true, () => false)) asked = await dialogButton(page, 'Open');
+      });
+      opened.push(`${url}${asked ? ' (after VS Code\'s prompt)' : ''}`);
+    }
+    if (!/^https:\/\/example\.com\/fixture\/issues\/402\b/.test(opened[0]) || !/^https:\/\/example\.com\/fixture\/pull\/301\b/.test(opened[1])) throw new Error(`opened ${JSON.stringify(opened)}`);
+    // The webview did not follow the link itself: the panel is still the Work view.
+    if (!await frame.locator('.work-view').count()) throw new Error('the Work webview navigated away');
+    return opened.join('; ');
+  });
+
+  await R.check('scenario 18: light, dark and high-contrast themes, switched live with the panel open', async () => {
+    await showWork();
+    await frame.evaluate(() => { window.__codevMarker = 'kept'; });
+    const shots = [];
+    const seen = {};
+    const themes = [['Dark Modern', 'vs-dark'], ['Dark High Contrast', 'hc-black'], ['Light High Contrast', 'hc-light'], ['Light Modern', 'vs']];
+    for (const [theme, cls] of themes) {
+      await setTheme(page, theme);
+      const applied = await page.locator('.monaco-workbench').evaluate((el, c) => el.classList.contains(c), cls);
+      if (!applied) throw new Error(`the workbench is not ${cls} after choosing ${theme}`);
+      await page.waitForTimeout(800);
+      seen[theme] = await frame.evaluate(textContrasts, { rootSelector: '.work-view', probes: WORK_PROBES });
+      shots.push(await R.shot(page, `theme-${cls}`));
+    }
+    const problems = [];
+    for (const [theme, s] of Object.entries(seen)) {
+      if (s.marker !== 'kept') problems.push(`${theme}: the webview reloaded`);
+      if (s.body !== hexToRgb(s.editorBg)) problems.push(`${theme}: body ${s.body} is not the editor background ${s.editorBg}`);
+      // No text in the panel below 3:1, the floor for anything a reader is meant to see.
+      const faint = [...s.lowest, ...s.probed.map((p) => ({ what: p.label, contrast: p.contrast }))].filter((t) => !(t.contrast >= 3));
+      if (faint.length) problems.push(`${theme}: faint text ${JSON.stringify(faint)}`);
+      // The track must show on its row (Light Modern once drew it in the row's own colour).
+      if (!s.track || !(s.track.onRow >= 1.2)) problems.push(`${theme}: progress track ${JSON.stringify(s.track)}`);
+    }
+    const looks = new Set(Object.values(seen).map((s) => `${s.body}|${s.text}`));
+    if (looks.size !== themes.length) problems.push(`only ${looks.size} distinct looks across ${themes.length} themes`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${JSON.stringify(seen)}`);
+    return {
+      detail: Object.entries(seen).map(([t, s]) => `${t}: body ${s.body}, text ${s.text}; lowest of ${s.scanned} texts ${s.lowest.map((x) => `${x.contrast} ${x.what}`).join(', ')}; probes ${s.probed.map((p) => `${p.label} ${p.contrast}`).join(', ')}; progress track on its row ${s.track.onRow}, fill on track ${s.track.fill}; under 4.5: ${s.under45.join(', ') || 'none'}`).join('; '),
+      shots,
+    };
+  });
+
+  await R.check('increment 2: the Cockpit\'s Decisions entries, with the Work and Decisions panels side by side', async () => {
+    await setTheme(page, 'Dark Modern');
+    const cockpit = await openCockpit(page);
+    await waitRow(cockpit, A_MAIN, 60_000);
+    for (const spec of [ALPHA, BETA, GAMMA]) await setExpanded(cockpit, spec, true);
+    // One group first (the builder terminal may have opened a second): merges, closes nothing.
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await (await waitRow(cockpit, [...ALPHA, 'Decisions'])).loc.click();
+    await waitFor('the Decisions editor tab', async () => /^Decisions/.test(await activeEditorTab(page) ?? ''), 20_000);
+    await decisionsFrame(page);
+    await runCommand(page, 'Codev: Open Work');
+    await waitFor('the Work editor in front', async () => /^Work/.test(await activeEditorTab(page) ?? ''), 10_000);
+    await runCommand(page, 'View: Move Editor into Next Group');
+    await page.waitForTimeout(1500);
+    // Each group's active tab, left to right.
+    const groups = await page.locator('.editor-group-container').evaluateAll((els) => els.map((g) => g.querySelector('.tabs-container .tab.active')?.getAttribute('aria-label') ?? null));
+    if (groups.length !== 2 || !/^Decisions/.test(groups[0] ?? '') || !/^Work/.test(groups[1] ?? '')) throw new Error(`active tabs by group ${JSON.stringify(groups)}`);
+    frame = await workFrame(page);
+    // In a half-width group the view fits.
+    const fit = await workFit(frame);
+    if (workFitProblems(fit)) throw new Error(`the half-width Work view does not fit: ${JSON.stringify(fit)}`);
+    const shots = [await R.shot(page, 'both-panels-dark')];
+    await setTheme(page, 'Light Modern');
+    shots.push(await R.shot(page, 'both-panels-light'));
+    return { detail: `active tabs by group ${JSON.stringify(groups)}; alpha, beta and gamma expanded to their Decisions entries; Work at ${fit.width} px: no sideways scroll, a typical 44-character title shows ${fit.titleShown} characters, each state on one line, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}, no label overlaps`, shots };
+  });
+
+  await R.check('the panel is restored after a window reload', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+    frame = await workFrame(page, 120_000);
+    await waitFor('the restored panel\'s builder rows', async () => (await frame.locator('.builder-table tbody tr').count()) === 3, 60_000);
+    const tabs = (await editorTabs(page)).filter((t) => /^Work/.test(t ?? ''));
+    if (tabs.length !== 1) throw new Error(`${tabs.length} Work tabs after the reload`);
+    return { detail: 'one Work tab, its builder rows rendered', shots: [await R.shot(page, 'restored')] };
+  });
+
+  await R.check('scenario 22: the webview never contacts Tower; the key is in no request', async () => {
+    const towerPort = R.opts['tower-port'];
+    const problems = [];
+    const toTower = requests.filter((r) => URL.canParse(r.url) && new URL(r.url).port === towerPort);
+    if (toTower.length) problems.push(`${toTower.length} browser request(s) to the Tower port: ${toTower.slice(0, 3).map((r) => r.url).join(', ')}`);
+    const keyed = requests.filter((r) => r.key);
+    if (keyed.length) problems.push(`${keyed.length} request(s) carry the key header`);
+    const webview = requests.filter((r) => /\/webview\/browser\/pre\//.test(r.frame));
+    const kinds = {};
+    for (const r of webview) {
+      const origin = URL.canParse(r.frame) ? new URL(r.frame).origin : '';
+      const kind = /^(blob|data):/.test(r.url) ? 'blob/data'
+        : URL.canParse(r.url) && /\.vscode-resource\./.test(new URL(r.url).hostname) ? 'extension resource'
+          : URL.canParse(r.url) && new URL(r.url).origin === origin ? "VS Code's webview host page"
+            : null;
+      if (!kind) problems.push(`unexpected webview request ${r.url}`);
+      else kinds[kind] = (kinds[kind] ?? 0) + 1;
+    }
+    if (!kinds['extension resource']) problems.push('the audit saw no extension resource load from a webview (is it attributing frames?)');
+    const html = await frame.content();
+    if (html.includes(process.env.COCKPIT_TOWER_KEY) || html.includes(`:${towerPort}`)) problems.push('the webview document holds the key or the Tower port');
+    if (problems.length) throw new Error(problems.slice(0, 8).join('; '));
+    return `${requests.length} browser requests, none to :${towerPort}, none keyed; webview frames: ${JSON.stringify(kinds)}`;
+  });
+
+  await R.check('scenario 19: Tower unreachable — both panels keep their content under a not-connected notice, no error toast, and recover', async () => {
+    await closeNotifications(page);
+    // After the reload, Decisions is restored in a background tab, and the window arranges again
+    // only once its first connection attempt has ended (auto-arrange); then Decisions is on screen
+    // and reads. So wait for its cards before taking Tower down. The frame is found again on each
+    // try, in case arranging moved the panel.
+    let dframe;
+    await waitFor('Decisions on screen with its cards', async () => {
+      dframe = await decisionsFrame(page, 5_000).catch(() => null);
+      return dframe ? (await dframe.locator('.decisions-card').count().catch(() => 0)) > 0 : false;
+    }, 60_000);
+    const cards = await dframe.locator('.decisions-card').count();
+    const dAlert = dframe.locator('.decisions-content > .decisions-error[role="alert"]');
+    const notice = work().locator('.work-error');
+    R.harness('tower-down');
+    await waitFor('the not-connected notice', async () => /Not connected to Tower/.test(await notice.textContent().catch(() => '') ?? ''), 60_000);
+    await waitFor('Decisions\' not-connected notice', async () => /Not connected to Tower/.test(await dAlert.textContent().catch(() => '') ?? ''), 20_000);
+    const kept = await frame.locator('.builder-table tbody tr').count();
+    const keptCards = await dframe.locator('.decisions-card').count();
+    const text = (await notice.textContent()).trim();
+    const dText = (await dAlert.textContent()).trim();
+    const downShot = await R.shot(page, 'tower-down');
+    const toasts = (await notifications(page)).filter((n) => /overview|work|error|failed/i.test(n));
+    R.harness('tower-up');
+    let reconnected = 'by itself';
+    try {
+      await waitFor('the notice to clear', async () => (await notice.count()) === 0, 60_000);
+    } catch {
+      await runCommand(page, 'Codev: Reconnect');
+      reconnected = 'after Codev: Reconnect';
+      await waitFor('the notice to clear', async () => (await notice.count()) === 0, 60_000);
+    }
+    // A restarted Tower does not keep the fixture's sessions (see the README), so the overview it
+    // serves now has its own builder count: the panel shows that one, under no notice.
+    const now = (await R.overview('alpha')).builders?.length ?? 0;
+    await waitFor(`the panel to show Tower's ${now} builder(s)`, async () => (now === 0
+      ? (await frame.locator('.work-empty', { hasText: 'No active builders' }).count()) === 1
+      : (await frame.locator('.builder-table tbody tr').count()) === now), 30_000);
+    await waitFor('Decisions\' notice to clear', async () => (await dAlert.count()) === 0, 30_000);
+    const cardsAfter = await dframe.locator('.decisions-card').count();
+    if (kept !== 3) throw new Error(`${kept} builder rows kept while down`);
+    if (!cards || keptCards !== cards || cardsAfter !== cards) throw new Error(`decision cards: ${cards} before, ${keptCards} while down, ${cardsAfter} after`);
+    if (toasts.length) throw new Error(`error toasts while down: ${JSON.stringify(toasts)}`);
+    return {
+      detail: `Work: "${text}" over ${kept} kept rows; Decisions: "${dText}" over ${keptCards} kept cards; no toast; recovered ${reconnected}: Work shows the restarted Tower's overview (${now} builders), Decisions its ${cardsAfter} cards under no notice`,
+      shots: [downShot, await R.shot(page, 'tower-back')],
+    };
+  });
+
+  await R.check('scenario 19: in a builder-worktree window, Open Work explains', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    await runCommand(page, 'Codev: Open Work');
+    const note = await waitForNotification(page, /Work is not offered in a builder-worktree window/);
+    if ((await editorTabs(page)).some((t) => /^Work/.test(t ?? ''))) throw new Error('a Work panel opened in the worktree window');
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'worktree-explains')] };
+  });
+
+  await R.check('scenario 19: in a no-workspace window, Open Work explains', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    await page.waitForTimeout(3000);
+    await runCommand(page, 'Codev: Open Work');
+    const note = await waitForNotification(page, /Work needs a Codev workspace/);
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
+  });
+};
+
+/**
+ * How the Work view fits its group: nothing scrolls sideways, each Open is whole, no backlog or
+ * recently-closed label runs into the links after it, each state on one line, and how many
+ * characters of a typical 44-character title show. `workFitProblems` names what does not fit.
+ */
+async function workFit(frame) {
+  return frame.evaluate(() => {
+    const content = document.querySelector('.work-content');
+    const right = content.getBoundingClientRect().right;
+    const opens = [...document.querySelectorAll('.builder-row-open')].map((b) => Math.round(b.getBoundingClientRect().right));
+    const overlaps = [...document.querySelectorAll('.backlog-row, .recently-closed-row')].flatMap((row) => {
+      const main = row.querySelector('.backlog-row-main, .recently-closed-row-main');
+      const links = row.querySelector('.backlog-artifacts');
+      if (!main || !links) return [];
+      const drawn = [...main.children].filter((c) => c.getClientRects().length).map((c) => c.getBoundingClientRect().right);
+      const last = Math.min(Math.max(...drawn), main.getBoundingClientRect().right);
+      return last > links.getBoundingClientRect().left + 0.5 ? [row.textContent.trim().slice(0, 30)] : [];
+    });
+    // Lines each state's text is drawn on: one rect per line box.
+    const stateLines = [...document.querySelectorAll('.builder-col-state')].map((cell) => {
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    });
+    // How much of a typical title shows: a copy of the first row (not React's) carrying a
+    // 44-character title, measured character by character against the cell's text box.
+    const TYPICAL = 'VS Code alternative layout: a second Cockpit';
+    const row = document.querySelector('.builder-table tbody .builder-row');
+    const probe = row.cloneNode(true);
+    const cell = probe.querySelector('.builder-col-title');
+    cell.textContent = TYPICAL;
+    row.parentElement.appendChild(probe);
+    const text = cell.firstChild;
+    const style = getComputedStyle(cell);
+    const edge = cell.getBoundingClientRect().right - parseFloat(style.paddingRight);
+    const range = document.createRange();
+    let fits = 0;
+    for (let i = 0; i < TYPICAL.length; i++) {
+      range.setStart(text, i);
+      range.setEnd(text, i + 1);
+      if (range.getBoundingClientRect().right > edge + 0.5) break;
+      fits++;
+    }
+    probe.remove();
+    // When the title is cut, the ellipsis takes the place of about one character.
+    const titleShown = fits === TYPICAL.length ? fits : Math.max(0, fits - 1);
+    return {
+      titleShown,
+      stateLines,
+      width: Math.round(content.clientWidth),
+      sideways: content.scrollWidth - content.clientWidth,
+      opens, right: Math.round(right),
+      hidden: ['.builder-col-elapsed', '.builder-col-progress', '.backlog-row-author'].filter((sel) => {
+        const el = document.querySelector(sel);
+        return el && getComputedStyle(el).display === 'none';
+      }),
+      overlaps,
+    };
+  });
+}
+
+const workFitProblems = (fit) => fit.sideways > 0 || fit.opens.length !== 3 || fit.opens.some((r) => r > fit.right) || fit.overlaps.length || fit.stateLines.some((n) => n !== 1) || fit.titleShown < 20;
+
+// ── arrange ──────────────────────────────────────────────────────────────────────────────────
+
+const ARCHITECT_TAB = /^Codev: Architect(?! \()/;
+/** The `main` architect terminal's name (`TerminalManager`), which its editor tab carries as its label. */
+const ARCHITECT_NAME = 'Codev: Architect';
+const NOTICE = /The editor area was arranged for the Cockpit/;
+const ARRANGE_TITLE = 'Codev: Arrange Cockpit';
+
+/**
+ * Each editor group in grid order (the grid's DOM order): its tabs, its active tab, its dirty tabs,
+ * its preview tabs, and where it is drawn. A preview tab is read from its italic label: VS Code
+ * keeps ", preview" in a tab's aria-label after the tab is kept, so the label is read without it.
+ */
+async function editorGroups(page) {
+  return page.locator('.editor-group-container').evaluateAll((els) => els.map((g) => {
+    const label = (t) => (t.getAttribute('aria-label') ?? t.textContent).trim().replace(/, preview(?=,|$)/, '');
+    const italic = (t) => { const name = t.querySelector('.label-name'); return !!name && getComputedStyle(name).fontStyle === 'italic'; };
+    const tabs = [...g.querySelectorAll('.tabs-container .tab')];
+    const active = g.querySelector('.tabs-container .tab.active');
+    const r = g.getBoundingClientRect();
+    return {
+      tabs: tabs.map(label),
+      active: active ? label(active) : null,
+      dirty: tabs.filter((t) => t.classList.contains('dirty')).map(label),
+      preview: tabs.filter(italic).map(label),
+      box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+    };
+  }));
+}
+
+/**
+ * What is wrong with `groups` as the Cockpit layout: three groups, one column on the left and two
+ * stacked on the right, the architect, Work and Decisions active in them (`architect: false` when
+ * no architect is expected on the left). An empty list when it is the layout.
+ */
+function cockpitProblems(groups, { architect = true } = {}) {
+  if (groups.length !== 3) return [`${groups.length} editor groups`];
+  const [left, top, bottom] = groups;
+  const problems = [];
+  if (!(left.box.x + left.box.w <= top.box.x + 2)) problems.push('the left group is not left of the right column');
+  if (Math.abs(top.box.x - bottom.box.x) > 2 || Math.abs(top.box.w - bottom.box.w) > 2) problems.push('the right groups are not one column');
+  if (!(top.box.y + top.box.h <= bottom.box.y + 2)) problems.push('Work\'s group is not above Decisions\'');
+  if (left.box.h < top.box.h + bottom.box.h - 8) problems.push('the left group is not full height');
+  if (architect && !ARCHITECT_TAB.test(left.active ?? '')) problems.push(`left active "${left.active}"`);
+  if (!/^Work/.test(top.active ?? '')) problems.push(`top-right active "${top.active}"`);
+  if (!/^Decisions/.test(bottom.active ?? '')) problems.push(`bottom-right active "${bottom.active}"`);
+  // One tab each (a restored tab not yet revived is replaced, never left beside the live panel), and
+  // neither a preview tab, which the next file opened in its group would replace.
+  const all = groups.flatMap((g) => g.tabs);
+  for (const name of ['Work', 'Decisions']) {
+    const tabs = all.filter((t) => new RegExp(`^${name},`).test(t));
+    if (tabs.length !== 1) problems.push(`${tabs.length} ${name} tabs`);
+    if (groups.some((g) => g.preview.some((t) => new RegExp(`^${name},`).test(t)))) problems.push(`${name} is a preview tab`);
+  }
+  return problems;
+}
+
+const groupsText = (groups) => groups.map((g, i) => `${i + 1}: [${g.tabs.join(', ')}] active "${g.active}"${g.dirty.length ? ` dirty [${g.dirty.join(', ')}]` : ''}${g.preview.length ? ` preview [${g.preview.join(', ')}]` : ''}`).join('; ');
+
+async function waitForCockpitLayout(page, opts, timeout = 60_000) {
+  let last = [];
+  try {
+    return await waitFor('the Cockpit layout', async () => {
+      last = await editorGroups(page);
+      return cockpitProblems(last, opts).length ? null : last;
+    }, timeout);
+  } catch {
+    throw new Error(`no Cockpit layout: ${cockpitProblems(last, opts).join('; ')} — ${groupsText(last)}`);
+  }
+}
+
+const activityLabels = (page) => page.locator('.activitybar .action-item a').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+
+/** The activity bar's item labels, and whether the Cockpit sits directly below Codev. */
+async function cockpitButtonOrder(page) {
+  const labels = await activityLabels(page);
+  const codev = labels.findIndex((l) => /^Codev( \(|$| -)/.test(l));
+  const cockpit = labels.findIndex((l) => /^Codev Cockpit( \(|$| -)/.test(l));
+  return { labels, below: codev >= 0 && cockpit === codev + 1, codev, cockpit };
+}
+
+/** The active tab of the focused editor group (`activeEditorTab` reads the first group's). */
+async function focusedGroupTab(page) {
+  const tab = page.locator('.editor-group-container.active .tabs-container .tab.active');
+  return (await tab.count()) ? tab.first().getAttribute('aria-label') : null;
+}
+
+/** Open a file of the workspace in the active group, through Quick Open. */
+async function quickOpenFile(page, name) {
+  await page.keyboard.press('F1');
+  const widget = await quickInput(page);
+  await widget.locator('input').fill(name);
+  await waitFor(`Quick Open to offer ${name}`, async () => (await widget.locator('.quick-input-list .monaco-list-row .label-name').allTextContents()).some((t) => t.trim() === name), 20_000);
+  await widget.locator('.quick-input-list .monaco-list-row', { has: page.locator('.label-name', { hasText: new RegExp(`^${escapeRe(name)}$`) }) }).first().click();
+  await waitFor(`${name} to be the active tab`, async () => (await focusedGroupTab(page) ?? '').startsWith(name), 10_000);
+}
+
+/** The first line of the active text editor. */
+async function activeFirstLine(page) {
+  return page.locator('.editor-group-container.active .monaco-editor .view-lines .view-line').first().textContent();
+}
+
+/** Click the tab whose label starts with `label` and read its first line. */
+async function tabFirstLine(page, label) {
+  await page.locator(`.tabs-container .tab[aria-label^="${label}"]`).first().click();
+  await waitFor(`${label} in front`, async () => (await focusedGroupTab(page) ?? '').startsWith(label), 10_000);
+  await page.waitForTimeout(300);
+  return (await activeFirstLine(page))?.replace(/\u00a0/g, ' ');
+}
+
+/**
+ * Close VS Code 1.147.0's modal editor (settings.json, and some first-run pages open in one), which
+ * takes clicks and keys while it is up: Escape, then its own close action. Returns its title, or null
+ * when none was open.
+ */
+async function dismissModalEditor(page) {
+  const block = page.locator('.monaco-modal-editor-block');
+  if (!(await block.count())) return null;
+  const title = ((await block.first().textContent()) ?? '').trim().slice(0, 80);
+  await page.keyboard.press('Escape');
+  if (await block.waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)) return title;
+  await block.locator('.action-label[aria-label^="Close"]').first().click();
+  await block.waitFor({ state: 'detached', timeout: 5000 });
+  return title;
+}
+
+/**
+ * Click the architect's tab. A terminal takes focus a moment after its tab is clicked, and would
+ * take the palette's typing if the palette opened first.
+ */
+async function clickArchitectTab(page) {
+  await page.locator('.tabs-container .tab[aria-label^="Codev: Architect,"]').first().click();
+  await page.waitForTimeout(1500);
+}
+
+/** The Cockpit title bar's Arrange Cockpit action, if it is shown. */
+const arrangeAction = (page) => page.locator(`.part.sidebar .title-actions .action-label[aria-label="${ARRANGE_TITLE}"]`);
+
+/**
+ * The pre-existing editors: four groups, two dirty files, a clean one, two untitled buffers. VS Code
+ * labels an untitled buffer by its first line, so those two are found by what was typed in them.
+ */
+const NOTE_FILES = { 'arrange-a.txt': 'alpha note a\n', 'arrange-b.txt': 'alpha note b\n', 'arrange-c.txt': 'alpha note c\n' };
+const UNTITLED_ONE = 'UNTITLED-ONE kept';
+const UNTITLED_TWO = 'UNTITLED-TWO kept';
+const TYPED = { 'arrange-a.txt': 'DIRTY-A ', 'arrange-b.txt': 'DIRTY-B ' };
+
+SCRIPTS.arrange = async (R, context, page) => {
+  for (const [name, text] of Object.entries(NOTE_FILES)) fs.writeFileSync(path.join(R.opts.fixtures, 'alpha', name), text);
+  const alphaWs = Buffer.from(path.join(R.opts.fixtures, 'alpha')).toString('base64url');
+  let frame;
+  let dframe;
+  const DRAFT = 'A draft typed before the re-run.';
+
+  /** Every pre-existing editor's tab, dirty state and first line. */
+  const userEditors = async () => {
+    const out = {};
+    for (const label of ['arrange-a.txt', 'arrange-b.txt', 'arrange-c.txt', UNTITLED_ONE, UNTITLED_TWO]) {
+      const groups = await editorGroups(page);
+      const group = groups.findIndex((g) => g.tabs.some((t) => t.startsWith(label)));
+      if (group < 0) { out[label] = 'MISSING'; continue; }
+      out[label] = { group: group + 1, dirty: groups[group].dirty.some((t) => t.startsWith(label)), line: await tabFirstLine(page, label) };
+    }
+    return out;
+  };
+
+  await R.check('fresh profile: the Cockpit button sits directly below Codev', async () => {
+    await loadWorkbench(page, R.folderUrl('alpha'));
+    const order = await cockpitButtonOrder(page);
+    if (!order.below) throw new Error(`activity bar order: ${JSON.stringify(order.labels)}`);
+    if ((await partState(page)).sidebar.title === 'Codev Cockpit') throw new Error('the Cockpit is already showing before it is clicked');
+    return `items ${order.codev}: "${order.labels[order.codev]}", ${order.cockpit}: "${order.labels[order.cockpit]}"`;
+  });
+
+  /**
+   * Type a file's marker once its editor has focus, and wait for its tab to turn dirty. Typed the
+   * moment Quick Open closed, the keys can land before the editor takes focus and be lost.
+   */
+  const typeInto = async (name) => {
+    await page.waitForTimeout(500);
+    await page.keyboard.type(TYPED[name]);
+    await waitFor(`${name} to turn dirty`, async () => (await editorGroups(page)).some((g) => g.dirty.some((t) => t.startsWith(name))), 5000);
+  };
+
+  let before;
+  await R.check('scenario 13 setup: editors across four groups, two dirty files, a clean file and two untitled buffers', async () => {
+    await quickOpenFile(page, 'arrange-a.txt');
+    await typeInto('arrange-a.txt');
+    await runCommand(page, 'File: New Untitled Text File');
+    await page.keyboard.type(UNTITLED_ONE);
+    await runCommand(page, 'View: New Editor Group to the Right');
+    await quickOpenFile(page, 'arrange-b.txt');
+    await typeInto('arrange-b.txt');
+    await runCommand(page, 'View: New Editor Group to the Right');
+    await quickOpenFile(page, 'arrange-c.txt');
+    await runCommand(page, 'View: New Editor Group to the Right');
+    await runCommand(page, 'File: New Untitled Text File');
+    await page.keyboard.type(UNTITLED_TWO);
+    await page.waitForTimeout(800);
+    before = await userEditors();
+    const groups = await editorGroups(page);
+    const want = { 'arrange-a.txt': [1, true], [UNTITLED_ONE]: [1, true], 'arrange-b.txt': [2, true], 'arrange-c.txt': [3, false], [UNTITLED_TWO]: [4, true] };
+    const problems = Object.entries(want).filter(([label, [group, dirty]]) => before[label]?.group !== group || before[label]?.dirty !== dirty).map(([label]) => `${label}: ${JSON.stringify(before[label])}`);
+    if (groups.length !== 4 || problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    return { detail: groupsText(groups), shots: [await R.shot(page, 'before')] };
+  });
+
+  let terminalsAtFirstShow;
+  await R.check('scenario 7 / 9: the first show of the Cockpit arranges main | (Work over Decisions), each active in its group', async () => {
+    terminalsAtFirstShow = await terminalIds(R);
+    await openCockpit(page);
+    const groups = await waitForCockpitLayout(page);
+    return { detail: groupsText(groups), shots: [await R.shot(page, 'arranged-dark')] };
+  });
+
+  await R.check("scenario 7: the one-time notice offers Don't arrange automatically; dismissing it changes nothing", async () => {
+    const text = await waitForNotification(page, NOTICE, 10_000);
+    const toast = page.locator('.notifications-toasts .notification-toast', { hasText: NOTICE });
+    const buttons = (await toast.locator('.monaco-button').allTextContents()).map((t) => t.trim());
+    if (!buttons.includes("Don't arrange automatically")) throw new Error(`the notice offers ${JSON.stringify(buttons)}`);
+    const shot = await R.shot(page, 'notice');
+    await closeNotifications(page);
+    return { detail: `"${text}" with ${JSON.stringify(buttons)}; dismissed`, shots: [shot] };
+  });
+
+  await R.check('scenario 13: every pre-existing editor survives the arrange with its unsaved content; the architect is the live session; both panels render', async () => {
+    frame = await workFrame(page);
+    dframe = await decisionsFrame(page);
+    await waitFor('a pending decision card', async () => (await dframe.locator('.decisions-card input[type="radio"]').count()) > 0, 30_000);
+    await waitFor('the Work view\'s builder rows', async () => (await frame.locator('.builder-table tbody tr').count()) === 3, 30_000);
+    const after = await userEditors();
+    const problems = [];
+    for (const [label, b] of Object.entries(before)) {
+      const a = after[label];
+      if (a === 'MISSING') { problems.push(`${label} was closed`); continue; }
+      if (a.dirty !== b.dirty || a.line !== b.line) problems.push(`${label}: ${JSON.stringify(b)} → ${JSON.stringify(a)}`);
+    }
+    const opened = await newTerminals(R, terminalsAtFirstShow);
+    if (opened.length !== 0) problems.push(`Tower terminals opened: ${JSON.stringify(opened.map((t) => t.label ?? t.id))} (the architect's session exists already)`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(await editorGroups(page))}`);
+    // Reading each editor made it the active tab of its group: arrange again.
+    await runCommand(page, ARRANGE_TITLE);
+    const groups = await waitForCockpitLayout(page);
+    return { detail: `editors after: ${JSON.stringify(after)}; ${groupsText(groups)}`, shots: [await R.shot(page, 'editors-kept')] };
+  });
+
+  await R.check('scenario 13: re-running Arrange Cockpit (title bar, then palette) changes nothing; a typed Decisions draft persists; no notice', async () => {
+    const card = dframe.locator('.decisions-card', { has: dframe.locator('input[type="radio"]') }).first();
+    await card.locator('textarea.decisions-comment').fill(DRAFT);
+    await frame.evaluate(() => { window.__codevMarker = 'kept'; });
+    await dframe.evaluate(() => { window.__codevMarker = 'kept'; });
+    const terminalsBefore = await terminalIds(R);
+    const shape = (gs) => JSON.stringify(gs.map((g) => ({ tabs: g.tabs, active: g.active, dirty: g.dirty })));
+    const was = shape(await editorGroups(page));
+    await closeNotifications(page);
+    if (!(await arrangeAction(page).count())) throw new Error('no Arrange Cockpit action on the Cockpit title bar');
+    await arrangeAction(page).click();
+    await page.waitForTimeout(3000);
+    const afterTitle = shape(await editorGroups(page));
+    await runCommand(page, ARRANGE_TITLE);
+    await page.waitForTimeout(3000);
+    const afterPalette = shape(await editorGroups(page));
+    const problems = [];
+    if (afterTitle !== was) problems.push(`the title-bar re-run changed the groups: ${was} → ${afterTitle}`);
+    if (afterPalette !== was) problems.push(`the palette re-run changed the groups: ${was} → ${afterPalette}`);
+    if (await frame.evaluate(() => window.__codevMarker) !== 'kept') problems.push('the Work webview reloaded');
+    if (await dframe.evaluate(() => window.__codevMarker) !== 'kept') problems.push('the Decisions webview reloaded');
+    const draft = await card.locator('textarea.decisions-comment').inputValue();
+    if (draft !== DRAFT) problems.push(`the draft reads ${JSON.stringify(draft)}`);
+    if ((await newTerminals(R, terminalsBefore)).length) problems.push('a Tower terminal was opened');
+    if ((await notifications(page)).some((n) => NOTICE.test(n))) problems.push('a manual arrange showed the first-auto-arrange notice');
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `groups unchanged ${was}; both webviews kept; draft kept`, shots: [await R.shot(page, 'rerun-draft')] };
+  });
+
+  await R.check("the architect's 14:00Z ruling: at the split's Work width the view fits and a typical title stays readable (20+ of 44 characters)", async () => {
+    const fit = await workFit(frame);
+    if (workFitProblems(fit)) throw new Error(`the Work view does not fit the split: ${JSON.stringify(fit)}`);
+    return `Work at ${fit.width} px: no sideways scroll, a typical 44-character title shows ${fit.titleShown} characters, each state on one line, Open buttons end by ${Math.max(...fit.opens)} of ${fit.right}, hidden ${fit.hidden.join(', ') || 'nothing'}`;
+  });
+
+  await R.check('rendered: the split with a pending decision, in Light Modern and Dark Modern', async () => {
+    const shots = [];
+    for (const [theme, cls] of [['Light Modern', 'vs'], ['Dark Modern', 'vs-dark']]) {
+      await setTheme(page, theme);
+      if (!(await page.locator('.monaco-workbench').evaluate((el, c) => el.classList.contains(c), cls))) throw new Error(`the workbench is not ${cls}`);
+      await waitForCockpitLayout(page, {}, 10_000);
+      shots.push(await R.shot(page, `split-${cls}`));
+    }
+    return { detail: 'arranged in both themes', shots };
+  });
+
+  await R.check('scenario 7: showing the Cockpit again leaves the editor area alone; the command arranges on demand', async () => {
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await waitFor('one editor group', async () => (await editorGroups(page)).length === 1, 10_000);
+    await runCommand(page, 'View: Show Explorer');
+    await page.waitForTimeout(1500);
+    await openCockpit(page);
+    await page.waitForTimeout(4000);
+    const groups = await editorGroups(page);
+    if (groups.length !== 1) throw new Error(`showing the Cockpit again rearranged: ${groupsText(groups)}`);
+    await runCommand(page, ARRANGE_TITLE);
+    const arranged = await waitForCockpitLayout(page);
+    return { detail: `still one group after re-showing; the command arranged: ${groupsText(arranged)}`, shots: [await R.shot(page, 'rearranged')] };
+  });
+
+  await R.check('the architect terminal moved into the panel comes back to the left group: the same session', async () => {
+    const terminalsBefore = await terminalIds(R);
+    await clickArchitectTab(page);
+    await runCommand(page, 'Terminal: Move Terminal into Panel');
+    await waitFor('the architect tab to leave the editor area', async () => !(await editorGroups(page)).some((g) => g.tabs.some((t) => ARCHITECT_TAB.test(t))), 10_000);
+    await runCommand(page, ARRANGE_TITLE);
+    const groups = await waitForCockpitLayout(page);
+    const opened = await newTerminals(R, terminalsBefore);
+    const architectTabs = groups.flatMap((g) => g.tabs).filter((t) => ARCHITECT_TAB.test(t));
+    if (opened.length || architectTabs.length !== 1) throw new Error(`new Tower terminals ${JSON.stringify(opened.map((t) => t.id))}; architect tabs ${JSON.stringify(architectTabs)}`);
+    return { detail: `${groupsText(groups)}; no new Tower terminal`, shots: [await R.shot(page, 'from-panel')] };
+  });
+
+  // The architect's tab is found by its label, the terminal's name (the tab API gives a terminal tab
+  // no identity). A second terminal carrying that name makes the label ambiguous: arrange refuses.
+  await R.check("another terminal named like the architect: arrange stops before moving an editor and says why; with that terminal closed, it arranges (codex review)", async () => {
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await waitFor('one editor group', async () => (await editorGroups(page)).length === 1, 10_000);
+    await closeNotifications(page);
+    const terminalsBefore = await terminalIds(R);
+    // A plain shell in the panel, renamed to the architect terminal's name. A new terminal takes focus
+    // a moment after it opens: wait, so the palette's typing is not swallowed.
+    await runCommand(page, 'Terminal: Create New Terminal');
+    await page.waitForTimeout(2500);
+    await runCommand(page, 'Terminal: Rename...');
+    const rename = await quickInput(page);
+    await rename.locator('input').fill(ARCHITECT_NAME);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(2000);
+    const was = await editorGroups(page);
+    await runCommand(page, ARRANGE_TITLE);
+    const refusal = await waitForNotification(page, new RegExp(`Arrange Cockpit stopped: another terminal is also named "${escapeRe(ARCHITECT_NAME)}"`), 30_000);
+    const refused = await editorGroups(page);
+    const problems = [];
+    const tabsOf = (gs) => JSON.stringify(gs.map((g) => g.tabs));
+    if (tabsOf(refused) !== tabsOf(was)) problems.push(`the editors moved: ${groupsText(was)} → ${groupsText(refused)}`);
+    const refusedShot = await R.shot(page, 'namesake-refused');
+    // Close the namesake: focus it in the panel (the architect is in the editor area), then kill the
+    // active terminal. A panel terminal is killed without a confirmation; a dialog means the target
+    // was the architect's editor-area terminal, so it is cancelled and the check fails.
+    await closeNotifications(page);
+    await setPart(page, 'panel', true);
+    await page.locator('.part.panel .xterm').first().click();
+    await page.waitForTimeout(1500);
+    await runCommand(page, 'Terminal: Kill the Active Terminal Instance');
+    if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 2000 }).then(() => true, () => false)) {
+      await page.keyboard.press('Escape');
+      throw new Error('killing the panel terminal asked for a confirmation: the active terminal was not the namesake');
+    }
+    await waitFor('the namesake to close', async () => (await page.locator('.part.panel .xterm').count()) === 0, 10_000);
+    if (!(await editorGroups(page)).some((g) => g.tabs.some((t) => ARCHITECT_TAB.test(t)))) problems.push('the architect tab is gone');
+    await runCommand(page, ARRANGE_TITLE);
+    const groups = await waitForCockpitLayout(page);
+    const opened = await newTerminals(R, terminalsBefore);
+    if (opened.length) problems.push(`Tower terminals opened: ${JSON.stringify(opened.map((t) => t.label ?? t.id))}`);
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    return { detail: `"${refusal}"; editors unmoved: ${groupsText(refused)}; namesake closed, then ${groupsText(groups)}`, shots: [refusedShot, await R.shot(page, 'namesake-closed-arranged')] };
+  });
+
+  await R.check('existing profile: after a reload the restored Cockpit arranges again, the architect reopened on the left; no notice; the button is still below Codev', async () => {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+    const groups = await waitForCockpitLayout(page, {}, 120_000);
+    await page.waitForTimeout(4000);
+    const problems = [];
+    if ((await notifications(page)).some((n) => NOTICE.test(n))) problems.push('the notice appeared again');
+    const order = await cockpitButtonOrder(page);
+    if (!order.below) problems.push(`activity bar order ${JSON.stringify(order.labels)}`);
+    if ((await partState(page)).sidebar.title !== 'Codev Cockpit') problems.push('the Cockpit was not restored as the visible container');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    frame = await workFrame(page);
+    dframe = await decisionsFrame(page);
+    return { detail: groupsText(groups), shots: [await R.shot(page, 'reloaded')] };
+  });
+
+  await R.check('scenario 14: main not live — the existing warning, no other architect opened, Work and Decisions still arranged', async () => {
+    const state = await R.tower('GET', `/workspace/${alphaWs}/api/state`);
+    const main = (state.architects ?? []).find((a) => a.name === 'main');
+    if (!main?.terminalId) throw new Error(`no live main to stop: ${JSON.stringify(state.architects)}`);
+    await R.tower('DELETE', `/api/terminals/${main.terminalId}`);
+    await waitFor('main to leave the roster', async () => !((await R.tower('GET', `/workspace/${alphaWs}/api/state`)).architects ?? []).some((a) => a.name === 'main'), 20_000);
+    // The old architect tab stays (its session is gone): close it, and collapse the groups, so the
+    // arrange has something to do.
+    await clickArchitectTab(page);
+    await runCommand(page, 'View: Close Editor');
+    if (await page.locator('.monaco-dialog-box').waitFor({ timeout: 2000 }).then(() => true, () => false)) await page.locator('.monaco-dialog-box .dialog-buttons .monaco-button').first().click();
+    await runCommand(page, 'View: Single Column Editor Layout');
+    await waitFor('one editor group', async () => (await editorGroups(page)).length === 1, 10_000);
+    await closeNotifications(page);
+    const terminalsBefore = await terminalIds(R);
+    await runCommand(page, ARRANGE_TITLE);
+    const warning = await waitForNotification(page, /No 'main' architect found/);
+    const groups = await waitForCockpitLayout(page, { architect: false }, 20_000);
+    const problems = [];
+    if (groups.flatMap((g) => g.tabs).some((t) => /Codev: Architect/.test(t))) problems.push('an architect tab opened');
+    if ((await newTerminals(R, terminalsBefore)).length) problems.push('a Tower terminal was opened');
+    if (await frame.locator('.builder-table tbody tr').count() !== 3) problems.push('Work does not show its builders');
+    if (!(await dframe.locator('.decisions-card').count())) problems.push('Decisions shows no cards');
+    if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+    return { detail: `"${warning}"; ${groupsText(groups)}`, shots: [await R.shot(page, 'main-not-live')] };
+  });
+
+  await R.check("scenario 7 (second fresh profile): Don't arrange automatically turns codev.cockpit.autoArrange off at the user level; the command still arranges", async () => {
+    const freshDir = `${R.opts.profile}-arrange-fresh`;
+    fs.rmSync(freshDir, { recursive: true, force: true });
+    const fresh = await newContext(R, freshDir);
+    try {
+      const p = fresh.pages()[0] ?? await fresh.newPage();
+      // gamma: main is live there, and it has no decisions file (the empty state renders).
+      await loadWorkbench(p, R.folderUrl('gamma'));
+      const order = await cockpitButtonOrder(p);
+      await openContainer(p, 'Codev Cockpit', 'codev-cockpit');
+      await waitForCockpitLayout(p);
+      await waitForNotification(p, NOTICE, 20_000);
+      await p.locator('.notifications-toasts .notification-toast', { hasText: NOTICE }).locator('.monaco-button', { hasText: "Don't arrange automatically" }).click();
+      await p.waitForTimeout(1500);
+      await runCommand(p, 'Preferences: Open User Settings (JSON)');
+      // 1.147.0 opens settings.json in a modal editor, not a group: read every editor's lines.
+      const editorTexts = () => p.locator('.monaco-editor .view-lines').evaluateAll((els) => els.map((e) => e.textContent.replace(/\u00a0/g, ' ')));
+      let texts = [];
+      try {
+        await waitFor('the user settings to show codev.cockpit.autoArrange', async () => {
+          texts = await editorTexts();
+          return texts.some((t) => /"codev\.cockpit\.autoArrange":\s*false/.test(t));
+        }, 15_000);
+      } catch {
+        throw new Error(`no editor shows "codev.cockpit.autoArrange": false; editors read ${JSON.stringify(texts)}`);
+      }
+      const settingsShown = async () => (await editorTexts()).some((t) => t.includes('codev.cockpit.autoArrange'));
+      const shot = await R.shot(p, 'dont-arrange');
+      // A new window session with the Cockpit showing: no arrange. The command still arranges.
+      // The palette does not open over the modal: close it directly.
+      await dismissModalEditor(p);
+      await waitFor('the settings editor to close', async () => !(await settingsShown()), 5000);
+      await runCommand(p, 'View: Single Column Editor Layout');
+      // The collapsed layout must be stored before the reload, or the reload restores the arranged one.
+      await waitFor('one editor group', async () => (await editorGroups(p)).length === 1, 10_000);
+      await p.waitForTimeout(3000);
+      await p.reload({ waitUntil: 'domcontentloaded' });
+      await p.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+      await p.locator('[id="cluesmith.codev-vscode"]').waitFor({ timeout: 120_000 });
+      await p.waitForTimeout(8000);
+      const afterReload = await editorGroups(p);
+      if (afterReload.length !== 1) throw new Error(`arranged with the setting off: ${groupsText(afterReload)}`);
+      await runCommand(p, ARRANGE_TITLE);
+      const arranged = await waitForCockpitLayout(p);
+      return {
+        detail: `button below Codev: ${order.below}; settings.json holds "codev.cockpit.autoArrange": false; reload with the Cockpit showing left ${afterReload.length} group; the command arranged ${groupsText(arranged)}`,
+        shots: [shot, await R.shot(p, 'setting-off-command')],
+      };
+    } catch (err) {
+      const p = fresh.pages()[0];
+      if (p) await R.shot(p, 'fresh-profile-failure').catch(() => {});
+      throw err;
+    } finally {
+      await fresh.close().catch(() => {});
+    }
+  });
+
+  await R.check('scenario 19: in a builder-worktree window, no auto-arrange, no title-bar action, and the command explains', async () => {
+    const wt = fs.readdirSync(path.join(R.opts.fixtures, 'alpha', '.builders')).find((d) => d.includes('101'));
+    await loadWorkbench(page, R.folderUrl('alpha', '.builders', wt));
+    await openCockpit(page);
+    await page.waitForTimeout(5000);
+    const groups = await editorGroups(page);
+    const problems = [];
+    if (groups.length !== 1 || groups[0].tabs.some((t) => /^(Work|Decisions)/.test(t) || ARCHITECT_TAB.test(t))) problems.push(`arranged: ${groupsText(groups)}`);
+    if (await arrangeAction(page).count()) problems.push('the title bar offers Arrange Cockpit');
+    await runCommand(page, ARRANGE_TITLE);
+    const note = await waitForNotification(page, /Arrange Cockpit is not offered in a builder-worktree window/);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'worktree-explains')] };
+  });
+
+  await R.check('scenario 19: in a no-workspace window, no auto-arrange, no title-bar action, and the command explains', async () => {
+    await loadWorkbench(page, R.url('ew=true'), { needCodev: false });
+    await openCockpit(page);
+    await page.waitForTimeout(4000);
+    const problems = [];
+    const groups = await editorGroups(page);
+    if (groups.length !== 1 || groups[0].tabs.some((t) => /^(Work|Decisions|Codev: Architect),/.test(t))) problems.push(`arranged: ${groupsText(groups)}`);
+    if (await arrangeAction(page).count()) problems.push('the title bar offers Arrange Cockpit');
+    await runCommand(page, ARRANGE_TITLE);
+    const note = await waitForNotification(page, /Arrange Cockpit needs a Codev workspace/);
+    if (problems.length) throw new Error(problems.join('; '));
+    return { detail: `"${note}"`, shots: [await R.shot(page, 'no-workspace-explains')] };
+  });
+
+  // Last: these two stop and restart the isolated Tower, which does not keep fixture sessions. They
+  // share a third fresh profile on alpha, whose page stands in for the run's page while they run.
+  // - With Tower down, the automatic arrange reads the roster quietly: logged, no toast (claude review,
+  //   iteration 1).
+  // - With no architect placed and the first group holding only the Cockpit's panels, arrange opens an
+  //   empty group to their left, or moving them right would close the left column. The panels are
+  //   counted by tab: after a reload the one behind is restored, not yet revived, and counts too
+  //   (claude review, iteration 2). VS Code may reopen its Welcome page on a reload, so that check
+  //   closes it and then runs the command, with the Cockpit hidden so nothing arranges first.
+  {
+    const dir = `${R.opts.profile}-arrange-restored`;
+    fs.rmSync(dir, { recursive: true, force: true });
+    const fresh = await newContext(R, dir);
+    const p = fresh.pages()[0] ?? await fresh.newPage();
+    const runPage = R.page;
+    R.page = p;
+    let towerDown = false;
+    const panelTab = /^(Work|Decisions)(,|$)/;
+    /** One group holding only Work and Decisions: close anything else, the architect to the panel. */
+    const onlyPanelsInOneGroup = async () => {
+      if ((await editorGroups(p)).length !== 1) {
+        await runCommand(p, 'View: Single Column Editor Layout');
+        await waitFor('one editor group', async () => (await editorGroups(p)).length === 1, 10_000);
+      }
+      // Closing the architect's tab would end its session: it goes to the panel. A lone group's tab
+      // labels carry no ", Editor Group N".
+      if ((await editorGroups(p))[0].tabs.some((t) => ARCHITECT_TAB.test(t))) {
+        await p.locator(`.tabs-container .tab[aria-label="${ARCHITECT_NAME}"], .tabs-container .tab[aria-label^="${ARCHITECT_NAME},"]`).first().click();
+        await p.waitForTimeout(1500);
+        await runCommand(p, 'Terminal: Move Terminal into Panel');
+        await waitFor('the architect tab to leave the editor area', async () => !(await editorGroups(p)).some((g) => g.tabs.some((t) => ARCHITECT_TAB.test(t))), 10_000);
+      }
+      // A visible terminal panel that a reload leaves empty (the architect cannot reconnect while
+      // Tower is down) gets a new local shell, whose prompt names the machine and the user, in a
+      // screenshot: keep the panel hidden.
+      await setPart(p, 'panel', false);
+      for (const label of (await editorGroups(p))[0].tabs.filter((t) => !panelTab.test(t))) {
+        await p.locator(`.tabs-container .tab[aria-label^="${label}"]`).first().click();
+        await p.waitForTimeout(500);
+        await runCommand(p, 'View: Close Editor');
+      }
+      return waitFor('Work and Decisions alone in one group', async () => {
+        const gs = await editorGroups(p);
+        return gs.length === 1 && gs[0].tabs.length === 2 && gs[0].tabs.every((t) => panelTab.test(t)) ? gs : null;
+      }, 10_000);
+    };
+    const reload = async () => {
+      // The layout must be stored before the reload, or the reload restores the previous one.
+      await p.waitForTimeout(3000);
+      await p.reload({ waitUntil: 'domcontentloaded' });
+      await p.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+      await p.locator('[id="cluesmith.codev-vscode"]').waitFor({ timeout: 120_000 });
+    };
+    try {
+      await R.check('a reload with Tower down and the Cockpit showing: the automatic arrange places Work over Decisions and shows no error toast (claude review)', async () => {
+        // Loading alpha activates it again, so its main is live: the first show arranges all three.
+        await loadWorkbench(p, R.folderUrl('alpha'));
+        await openContainer(p, 'Codev Cockpit', 'codev-cockpit');
+        await waitForCockpitLayout(p, { architect: false });
+        await closeNotifications(p);
+        await onlyPanelsInOneGroup();
+        R.harness('tower-down');
+        towerDown = true;
+        await reload();
+        const groups = await waitForCockpitLayout(p, { architect: false }, 120_000);
+        await p.waitForTimeout(3000);
+        const seen = await notifications(p);
+        const errors = seen.filter((n) => /Not connected to Tower|Failed to get workspace state|Arrange Cockpit stopped/.test(n));
+        if (errors.length) throw new Error(`error toasts ${JSON.stringify(errors)} — ${groupsText(groups)}`);
+        return { detail: `with Tower down: ${groupsText(groups)}; toasts ${JSON.stringify(seen)}`, shots: [await R.shot(p, 'auto-tower-down')] };
+      });
+
+      await R.check('a restored, not yet revived panel tab counts: with no architect and only Work and Decisions in the first group after a reload, arrange keeps an empty left column (claude review)', async () => {
+        const before = await onlyPanelsInOneGroup();
+        await p.locator('.tabs-container .tab[aria-label^="Decisions"]').first().click();
+        await waitFor('Decisions in front', async () => /^Decisions(,|$)/.test((await editorGroups(p))[0].active ?? ''), 10_000);
+        // Hide the Cockpit, so the reload's new window session does not arrange by itself. Clicked, not
+        // through the palette: focus is in the Decisions webview, and the palette's filter was lost.
+        await activityItem(p, 'Explorer').click();
+        await waitFor('the Explorer in the side bar', async () => /^explorer/i.test((await partState(p)).sidebar.title ?? ''), 10_000);
+        await reload();
+        if (!/^explorer/i.test((await partState(p)).sidebar.title ?? '')) throw new Error(`the side bar shows "${(await partState(p)).sidebar.title}" after the reload, not the Explorer`);
+        await p.waitForTimeout(5000);
+        await onlyPanelsInOneGroup();
+        const ready = await editorGroups(p);
+        const behind = ready[0].tabs.find((t) => t !== ready[0].active);
+        if (!behind) throw new Error(`no panel tab behind the active one: ${groupsText(ready)}`);
+        await closeNotifications(p);
+        await runCommand(p, ARRANGE_TITLE);
+        const groups = await waitForCockpitLayout(p, { architect: false }, 30_000);
+        await p.waitForTimeout(2000);
+        const problems = [];
+        if (groups[0].tabs.length) problems.push(`the left group holds ${JSON.stringify(groups[0].tabs)}`);
+        const seen = await notifications(p);
+        if (seen.some((n) => /Arrange Cockpit stopped/.test(n))) problems.push(`arrange stopped: ${JSON.stringify(seen)}`);
+        // The command, unlike the automatic arrange, says why the architect was not placed.
+        if (!seen.some((n) => /Not connected to Tower/.test(n))) problems.push(`no "Not connected to Tower" toast for the command: ${JSON.stringify(seen)}`);
+        if (problems.length) throw new Error(`${problems.join('; ')} — ${groupsText(groups)}`);
+        return {
+          detail: `before the reload ${groupsText(before)}; after it, "${behind}" never shown, under "${ready[0].active}"; the command arranged ${groupsText(groups)}; toasts ${JSON.stringify(seen)}`,
+          shots: [await R.shot(p, 'restored-tab-empty-left')],
+        };
+      });
+    } finally {
+      R.page = runPage;
+      try {
+        if (towerDown) R.harness('tower-up');
+      } finally {
+        await fresh.close().catch(() => {});
+      }
+    }
+  }
+};
+
+// ── webviews (diagnostic) ────────────────────────────────────────────────────────────────────
+
+/**
+ * Run inside a webview's content frame: what it holds and which of its scripts and stylesheets
+ * arrived. Resource URLs are cut to their last three path segments.
+ */
+function webviewContentProbe() {
+  const short = (u) => (u || '').split('?')[0].split('/').slice(-3).join('/');
+  const root = document.getElementById('root');
+  const text = (document.body?.innerText ?? '').trim();
+  return {
+    readyState: document.readyState,
+    title: document.title,
+    bodyClass: document.body?.className ?? null,
+    rootChildren: root ? root.childElementCount : null,
+    workView: !!document.querySelector('.work-view'),
+    markdownBody: !!document.querySelector('.markdown-body'),
+    textLength: text.length,
+    text: text.slice(0, 100),
+    scripts: [...document.scripts].map((s) => (s.src ? short(s.src) : '(inline)')),
+    stylesheets: [...document.querySelectorAll('link[rel="stylesheet"]')].map((l) => ({ href: short(l.href), loaded: !!l.sheet })),
+    resources: performance.getEntriesByType('resource').map((e) => ({ name: short(e.name), status: e.responseStatus ?? null, ms: Math.round(e.duration) })),
+  };
+}
+
+/** Every webview host frame (`pre/index.html`) on the page, with a probe of each content frame in it. */
+async function webviewHosts(page) {
+  const out = [];
+  for (const host of page.frames()) {
+    if (!/\/webview\/browser\/pre\/index\.html/.test(host.url())) continue;
+    const q = URL.canParse(host.url()) ? new URL(host.url()).searchParams : new URLSearchParams();
+    const frames = await host.evaluate(() => [...document.querySelectorAll('iframe')].map((f) => ({ id: f.id, visibility: f.style.visibility })))
+      .catch((err) => [{ error: String(err.message ?? err) }]);
+    const content = [];
+    for (const child of host.childFrames()) {
+      content.push({ url: child.url().split('?')[0].split('/').pop(), ...await child.evaluate(webviewContentProbe).catch((err) => ({ error: String(err.message ?? err) })) });
+    }
+    out.push({ id: q.get('id'), extensionId: q.get('extensionId') ?? '', purpose: q.get('purpose') ?? '', hostOrigin: URL.canParse(host.url()) ? new URL(host.url()).hostname.split('.').slice(1).join('.') : '', frames, content });
+  }
+  return out;
+}
+
+/**
+ * Diagnostic, not a Cockpit check: does a webview render on this server, and if not, what the
+ * browser saw. Opens VS Code's own Markdown preview, the Codev contextual panel, the Codev
+ * Markdown preview and Work, one after another. For each it records a screenshot, a probe of each
+ * new webview's content frame, and the console messages, page errors and webview requests (with
+ * their outcome, or still pending) since it was opened. The full capture goes to
+ * `<out>-capture.json`; each check passes only if its webview rendered.
+ */
+SCRIPTS.webviews = async (R, context, page) => {
+  const t0 = Date.now();
+  const cap = { console: [], errors: [], serviceWorkers: [], observations: [] };
+  const requests = [];
+  const since = () => Date.now() - t0;
+  const frameOf = (r) => { try { return r.frame().url(); } catch { return null; } };
+  context.on('console', (m) => cap.console.push({ at: since(), type: m.type(), text: m.text(), source: m.location()?.url ?? '', worker: m.worker()?.url() ?? null }));
+  context.on('weberror', (e) => cap.errors.push({ at: since(), kind: 'weberror', text: String(e.error()?.stack ?? e.error()) }));
+  page.on('pageerror', (e) => cap.errors.push({ at: since(), kind: 'pageerror', text: String(e.stack ?? e) }));
+  context.on('serviceworker', (w) => {
+    cap.serviceWorkers.push({ at: since(), url: w.url() });
+    w.on('console', (m) => cap.console.push({ at: since(), type: m.type(), text: m.text(), source: m.location()?.url ?? '', worker: w.url() }));
+  });
+  const byRequest = new Map();
+  context.on('request', (r) => {
+    const e = { n: requests.length, at: since(), method: r.method(), url: r.url(), type: r.resourceType(), frame: frameOf(r), state: 'pending' };
+    requests.push(e);
+    byRequest.set(r, e);
+  });
+  context.on('requestfinished', async (r) => {
+    const e = byRequest.get(r);
+    if (!e) return;
+    const res = await r.response().catch(() => null);
+    Object.assign(e, { state: 'finished', status: res?.status() ?? null, fromServiceWorker: res?.fromServiceWorker() ?? false, doneAt: since() });
+  });
+  context.on('requestfailed', (r) => {
+    const e = byRequest.get(r);
+    if (e) Object.assign(e, { state: 'failed', failure: r.failure()?.errorText ?? '', doneAt: since() });
+  });
+  const isWebviewRequest = (e) => /vscode-cdn\.net|vscode-resource|\/webview\//.test(e.url) || /\/webview\/browser\/pre\//.test(e.frame ?? '');
+  const shortUrl = (u) => {
+    if (!URL.canParse(u)) return u;
+    const url = new URL(u);
+    return `${url.hostname.replace(/^[a-z0-9]{40,}\./, '<uuid>.')}/…/${url.pathname.split('/').slice(-3).join('/')}`;
+  };
+
+  /**
+   * Open one webview with `open`, then wait up to `timeout` for a content frame that `rendered`
+   * accepts, in a webview that is new since `open` or that `target` picks (the contextual panel
+   * may exist before it is shown). Record what the browser saw; throw (so the check fails) when
+   * nothing rendered.
+   */
+  async function observe(label, slug, open, { target, rendered }, timeout = 45_000) {
+    const known = new Set((await webviewHosts(page)).map((h) => h.id));
+    const c0 = cap.console.length;
+    const e0 = cap.errors.length;
+    const r0 = requests.length;
+    const started = since();
+    await open();
+    const candidates = async () => (await webviewHosts(page)).filter((h) => !known.has(h.id) || target(h));
+    let fresh = [];
+    let ok = false;
+    try {
+      await waitFor(`${label} to render`, async () => {
+        fresh = await candidates();
+        return fresh.some((h) => h.content.some((c) => rendered(c)));
+      }, timeout, 1000);
+      ok = true;
+    } catch { /* recorded below as not rendered */ }
+    await page.waitForTimeout(2000);
+    fresh = await candidates();
+    const shot = await R.shot(page, slug);
+    const webviewRequests = requests.slice(r0).filter(isWebviewRequest)
+      .map((e) => ({ ...e, url: shortUrl(e.url), frame: e.frame ? shortUrl(e.frame) : null }));
+    const observation = {
+      label, rendered: ok, existing: fresh.filter((h) => known.has(h.id)).map((h) => h.id), openedAt: started, observedAt: since(), webviews: fresh,
+      console: cap.console.slice(c0).filter((m) => m.type === 'error' || m.type === 'warning'),
+      errors: cap.errors.slice(e0),
+      requests: webviewRequests,
+    };
+    cap.observations.push(observation);
+    const content = fresh.flatMap((h) => h.content);
+    const pending = webviewRequests.filter((e) => e.state === 'pending');
+    const failed = webviewRequests.filter((e) => e.state === 'failed' || (e.status ?? 0) >= 400);
+    const missing = content.flatMap((c) => (c.stylesheets ?? []).filter((s) => !s.loaded).map((s) => s.href));
+    const summary = [
+      `${fresh.length} webview(s): ${fresh.map((h) => `${known.has(h.id) ? 'existing ' : 'new '}${h.extensionId || '(no extension id)'}${h.purpose ? `/${h.purpose}` : ''} [${h.frames.map((f) => `${f.id || '?'}:${f.visibility || '-'}`).join(',')}]`).join('; ') || 'none'}`,
+      `content: ${content.map((c) => `${c.url} ${c.readyState} root=${c.rootChildren} text=${c.textLength} scripts=${JSON.stringify(c.scripts)} resources=${(c.resources ?? []).length}`).join('; ') || 'none'}`,
+      `stylesheets not loaded: ${missing.length ? missing.join(', ') : 'none'}`,
+      `webview requests ${webviewRequests.length}: ${pending.length} pending${pending.length ? ` (${pending.slice(0, 4).map((e) => e.url).join(', ')})` : ''}, ${failed.length} failed${failed.length ? ` (${failed.slice(0, 4).map((e) => `${e.url} ${e.failure ?? e.status}`).join(', ')})` : ''}`,
+      `console errors ${observation.console.filter((m) => m.type === 'error').length}${observation.console.length ? `: ${observation.console.slice(0, 4).map((m) => JSON.stringify(m.text.slice(0, 160))).join(' | ')}` : ''}`,
+      `page errors ${observation.errors.length}${observation.errors.length ? `: ${observation.errors.slice(0, 3).map((e) => JSON.stringify(e.text.split('\n')[0].slice(0, 160))).join(' | ')}` : ''}`,
+    ].join('; ');
+    if (!ok) throw new Error(`did not render. ${summary} (screenshot ${shot})`);
+    return { detail: summary, shots: [shot] };
+  }
+
+  const SPEC = 'codev/specs/401-fixture-backlog.md';
+  try {
+    await R.check('workbench loads on alpha', async () => {
+      await loadWorkbench(page, R.folderUrl('alpha'));
+      return `${page.frames().length} frames`;
+    });
+    await R.check('built-in webview: VS Code\'s own Markdown preview of a fixture .md renders styled content', async () =>
+      observe('the built-in Markdown preview', 'builtin-markdown-preview', async () => {
+        await quickOpenFile(page, path.basename(SPEC));
+        await runCommand(page, 'Markdown: Open Preview');
+      }, {
+        target: (h) => h.extensionId === 'vscode.markdown-language-features',
+        rendered: (c) => c.markdownBody && c.textLength > 0 && (c.stylesheets ?? []).length > 0 && c.stylesheets.every((s) => s.loaded),
+      }));
+    await R.check('existing Codev webview: the contextual panel (codev.contextualPanel) renders', async () =>
+      observe('the Codev contextual panel', 'codev-contextual-panel', async () => {
+        await setPart(page, 'panel', true);
+        await page.locator('.part.panel .composite-bar .action-item .action-label[aria-label^="Codev"]').first().click();
+      }, {
+        target: (h) => h.extensionId === 'cluesmith.codev-vscode' && h.purpose === 'webviewView',
+        rendered: (c) => (c.scripts ?? []).some((s) => /contextual-panel\.js$/.test(s)) && c.rootChildren > 0,
+      }));
+    await R.check('existing Codev webview: the Codev Markdown preview (codev.markdownPreview) renders', async () =>
+      observe('the Codev Markdown preview', 'codev-markdown-preview', async () => {
+        await quickOpenFile(page, path.basename(SPEC));
+        await runCommand(page, 'Codev: Open Markdown Preview');
+      }, {
+        target: (h) => h.content.some((c) => (c.scripts ?? []).some((s) => /markdown-preview\.js$/.test(s))),
+        rendered: (c) => (c.scripts ?? []).some((s) => /markdown-preview\.js$/.test(s)) && c.rootChildren > 0,
+      }));
+    await R.check('this PR\'s Work panel renders', async () =>
+      observe('the Work panel', 'work-panel', async () => {
+        await runCommand(page, 'Codev: Open Work');
+      }, {
+        target: (h) => h.content.some((c) => (c.scripts ?? []).some((s) => /work\.js$/.test(s))),
+        rendered: (c) => c.workView,
+      }));
+  } finally {
+    const file = R.opts.out.replace(/\.json$/, '-capture.json');
+    fs.writeFileSync(file, `${JSON.stringify({
+      at: new Date().toISOString(), serviceWorkers: cap.serviceWorkers, observations: cap.observations,
+      allConsole: cap.console, allErrors: cap.errors,
+    }, null, 2)}\n`);
+    console.log(`capture written to ${file}`);
+  }
+};
+
+// ── profile-seed / profile-existing ──────────────────────────────────────────────────────────
+
+/**
+ * A browser profile that used Codev before the Cockpit existed (the spec's risk: VS Code persists
+ * activity-bar order). `profile-seed` runs against an install whose package.json lacks the
+ * `codev-cockpit` container, as origin/main's does; `profile-existing` runs against the branch's
+ * install on the same profile, and records where VS Code puts the new button.
+ */
+const existingProfile = (R) => `${R.opts.profile}-existing`;
+
+SCRIPTS['profile-seed'] = async (R) => {
+  await R.check("existing profile, seeded: a new browser profile uses Codev on a build without the Cockpit container (origin/main's activity bar)", async () => {
+    const dir = existingProfile(R);
+    fs.rmSync(dir, { recursive: true, force: true });
+    const context = await newContext(R, dir);
+    try {
+      const p = context.pages()[0] ?? await context.newPage();
+      await p.goto(R.folderUrl('alpha'), { timeout: 240_000, waitUntil: 'domcontentloaded' });
+      await p.waitForSelector('.monaco-workbench', { timeout: 240_000 });
+      await waitFor('the Codev activity-bar item', async () => {
+        const trust = p.getByRole('button', { name: TRUST_BUTTON });
+        if (await trust.count()) await trust.first().click();
+        return (await activityItem(p, 'Codev').count()) > 0;
+      }, 120_000);
+      await ensureTrusted(p);
+      const modal = await dismissModalEditor(p);
+      const labels = await activityLabels(p);
+      if (labels.some((l) => /^Codev Cockpit/.test(l))) throw new Error(`this install offers the Cockpit: ${JSON.stringify(labels)}`);
+      await openCodev(p);
+      // VS Code writes UI state to the profile's storage shortly after it changes.
+      await p.waitForTimeout(5000);
+      const shot = path.join(R.opts.shots, 'profile-seed-activity-bar.png');
+      await p.locator('.part.activitybar').screenshot({ path: shot });
+      return { detail: `activity bar ${JSON.stringify(labels)}; Codev opened${modal ? `; a modal editor was open on load and was closed: "${modal}"` : ''}`, shots: [shot, await R.shot(p, 'seeded')] };
+    } catch (err) {
+      const p = context.pages()[0];
+      if (p) await R.shot(p, 'seed-failure').catch(() => {});
+      throw err;
+    } finally {
+      await context.close().catch(() => {});
+    }
+  });
+};
+
+SCRIPTS['profile-existing'] = async (R) => {
+  await R.check('existing profile: where VS Code places the Cockpit button for a profile that used Codev before the Cockpit existed', async () => {
+    const dir = existingProfile(R);
+    if (!fs.existsSync(dir)) throw new Error(`no seeded profile at ${dir}: run verify profile-seed first`);
+    const context = await newContext(R, dir);
+    try {
+      const p = context.pages()[0] ?? await context.newPage();
+      await loadWorkbench(p, R.folderUrl('alpha'));
+      const order = await cockpitButtonOrder(p);
+      if (order.cockpit < 0) throw new Error(`no Cockpit button: ${JSON.stringify(order.labels)}`);
+      const shot = path.join(R.opts.shots, 'profile-existing-activity-bar.png');
+      await p.locator('.part.activitybar').screenshot({ path: shot });
+      return { detail: `${order.below ? 'directly below Codev' : 'NOT directly below Codev'}: ${JSON.stringify(order.labels)}`, shots: [shot] };
+    } finally {
+      await context.close().catch(() => {});
+    }
+  });
+};
+
+/** A shell prompt naming the machine and the user, as macOS's /etc/bashrc sets it: `host:dir user$`. */
+const HOST_PROMPT = /[\w-]+:[\w.~\/-]+ \w+ ?[$§]/;
+
+/**
+ * The screenshots are committed, and a shell VS Code opens by itself shows the machine's prompt
+ * unless the harness HOME overrides it. OCR every shot this run wrote and return the lines that show
+ * such a prompt, or the user's name before `$` or `@`. Tesseract is required: without it this
+ * throws, and the run fails rather than skip the check.
+ */
+function shellPromptLeaks(shotsDir, script, since) {
+  const user = os.userInfo().username;
+  const shots = fs.readdirSync(shotsDir)
+    .filter((f) => f.startsWith(`${script}-`) && f.endsWith('.png'))
+    .map((f) => path.join(shotsDir, f))
+    .filter((f) => fs.statSync(f).mtimeMs >= since);
+  const leaks = [];
+  for (const file of shots) {
+    const r = spawnSync('tesseract', [file, '-'], { encoding: 'utf-8' });
+    if (r.error || r.status !== 0) {
+      throw new Error(`tesseract could not read ${file} (${r.error?.message ?? r.stderr.trim()}); the shell-prompt check needs it (brew install tesseract)`);
+    }
+    const hit = r.stdout.split('\n').find((l) => HOST_PROMPT.test(l) || l.includes(` ${user}$`) || l.includes(`${user}@`));
+    if (hit) leaks.push(`${path.basename(file)}: "${hit.trim()}"`);
+  }
+  return { count: shots.length, leaks };
+}
+
+async function main() {
+  const startedAt = Date.now();
+  const [script, ...rest] = process.argv.slice(2);
+  if (!SCRIPTS[script]) {
+    console.error(`usage: cockpit-verify.mjs <${Object.keys(SCRIPTS).join('|')}> --url-template … (run via harness.mjs verify)`);
+    process.exit(64);
+  }
+  const opts = parseArgs(rest);
+  fs.mkdirSync(opts.shots, { recursive: true });
+  const R = new Run(script, opts);
+  const context = await newContext(R);
+  try {
+    const page = context.pages()[0] ?? await context.newPage();
+    R.page = page;
+    await SCRIPTS[script](R, context, page);
+  } catch (err) {
+    R.results.push({ name: 'script error', ok: false, detail: String(err.stack ?? err) });
+    console.log(`FAIL  script error — ${err.message ?? err}`);
+  } finally {
+    await context.close().catch(() => {});
+    if (R.ownerPortRequests.length) {
+      R.results.push({ name: 'no browser request to the owner port', ok: false, detail: R.ownerPortRequests.join(', ') });
+    }
+    const promptCheck = 'no screenshot shows the machine\'s shell prompt (host:dir user$)';
+    try {
+      const { count, leaks } = shellPromptLeaks(opts.shots, script, startedAt);
+      R.results.push({ name: promptCheck, ok: !leaks.length, detail: leaks.length ? leaks.join('; ') : `${count} screenshots read` });
+      console.log(`${leaks.length ? 'FAIL' : 'PASS'}  ${promptCheck} — ${leaks.length ? leaks.join('; ') : `${count} screenshots read`}`);
+    } catch (err) {
+      R.results.push({ name: promptCheck, ok: false, detail: String(err.message ?? err) });
+      console.log(`FAIL  ${promptCheck} — ${err.message ?? err}`);
+    }
+    R.write();
+  }
+  const failed = R.results.filter((r) => !r.ok).length;
+  console.log(failed ? `${script}: ${failed} of ${R.results.length} FAILED` : `${script}: all ${R.results.length} passed`);
+  process.exit(failed ? 1 : 0);
+}
+
+export {
+  Run, loadWorkbench, openCockpit, openCodev, rows, findRow, subtree, waitRow, setExpanded, expandPath, contextAction, contextTitles, requestGate,
+  inlineTitles, inlineAction, notifications, closeNotifications, waitForNotification, dialogButton, quickType,
+  quickItems, quickPick, editorTabs, activeEditorTab, waitFor, runCommand, setTheme, nextPopup,
+};
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main();

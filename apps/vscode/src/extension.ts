@@ -4,7 +4,7 @@ import { wireCommandProvider } from './command-relay.js';
 import { fireActivity, setActivityHooks, setActivityHooksSuppressed } from './activity-hooks.js';
 import { loadActivityHooks } from './load-activity-hooks.js';
 import { TerminalManager } from './terminal-manager.js';
-import { openResolvedArchitect } from './open-architect.js';
+import { openResolvedArchitect, type ResolvableArchitect } from './open-architect.js';
 import { OverviewCache } from './views/overview-data.js';
 import { spawnBuilder } from './commands/spawn.js';
 import { sendMessage } from './commands/send.js';
@@ -22,6 +22,7 @@ import { stopWorktreeDev } from './commands/stop-worktree-dev.js';
 import { runWorkspaceDev, stopWorkspaceDev } from './commands/run-workspace-dev.js';
 import { stopDev, restartDev, switchDevTarget } from './commands/dev-actions.js';
 import { openDevUrl } from './commands/open-dev-url.js';
+import { architectNameFromArg, extractBuilderId, extractIssueId, extractIssueTitle, type IssueCommandArg } from './commands/command-args.js';
 import { pasteImage } from './commands/paste-image.js';
 import { openWorktreeFolder } from './commands/open-worktree-folder.js';
 import { runWorktreeSetup } from './commands/run-worktree-setup.js';
@@ -36,7 +37,7 @@ import { listCronTasks } from './commands/cron.js';
 import { addReviewComment } from './commands/review.js';
 import { activateGateToasts } from './notifications/gate-toast.js';
 import { activateMailboxEscalationToasts } from './notifications/mailbox-escalation-toast.js';
-import { composeStatusBarText, composeStatusBarTooltip, composeActivityBadge } from './mailbox-indicators.js';
+import { composeStatusBarText, composeStatusBarTooltip, workspaceActivityBadge } from './mailbox-indicators.js';
 import { activateReviewDecorations } from './review-decorations.js';
 import { activateReviewComments } from './comments/plan-review.js';
 import { activateBuilderReviewComments } from './comments/builder-review.js';
@@ -63,7 +64,17 @@ import { computeBuildersToClose, roleIdsFromBuilders } from './prune-builder-ter
 import { buildBuilderPickRows } from './builder-pick-rows.js';
 import { readBuildersFileViewAsTree } from './builders-config.js';
 import { deriveAttention, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
-import { BuildersProvider, AccordionGate, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+import { BuildersProvider, runBuilderRowClick, agentTargetIsFocused, agentCycleAttemptOrder, type AgentTarget } from './views/builders.js';
+import { AgentTreeHosts, agentCycleRoster } from './views/agent-tree-hosts.js';
+import { CockpitProvider, COCKPIT_VIEW_ID, cockpitConnectionMode, type CockpitNode } from './views/cockpit.js';
+import { DecisionsPanels } from './workspace-views/decisions-panel.js';
+import { DecisionsBridge } from './workspace-views/decisions-bridge.js';
+import { WorkPanels } from './workspace-views/work-panel.js';
+import { DECISIONS_VIEW_TYPE, WORK_VIEW_TYPE } from './workspace-views/messages.js';
+import { workspaceViewUnavailableReason } from './workspace-views/availability.js';
+import { CockpitArranger } from './cockpit/arrange.js';
+import { CockpitAutoArrange } from './cockpit/auto-arrange.js';
+import { OverviewRefreshGate } from './views/overview-refresh-gate.js';
 // Codev Tower (#1566): the cross-workspace navigation hub — its own activity-bar container.
 import { TowerFleetCache } from './views/tower-cache.js';
 import { TowerProvider } from './views/tower.js';
@@ -76,7 +87,7 @@ import { TeamProvider } from './views/team.js';
 import { StatusProvider } from './views/status.js';
 import { ContextualPanelProvider } from './contextual-panel/panel-provider.js';
 import { formatTargetName } from './views/dev-format.js';
-import { WorkspaceProvider } from './views/workspace.js';
+import { WorkspaceProvider, buildDashboardUrl } from './views/workspace.js';
 import { displayArchitectName, sortArchitectsForPicker } from './views/architect-display.js';
 import { validateArchitectName } from '@cluesmith/codev-sdk/architect-name';
 import { resolveMainArchitect, addArchitectRequestMessage, ADD_ARCHITECT_RECIPIENT } from './commands/add-architect.js';
@@ -106,64 +117,6 @@ let devChipItem: vscode.StatusBarItem | null = null;
 // welcome notification + walkthrough, fired only on the very first
 // empty-window launch of the Codev IDE.
 const IDE_FIRST_RUN_KEY = 'codev.ideFirstRunShown';
-
-/**
- * Resolve a builder id from a command argument.
- *
- * Tree-item context-menu invocations pass a BuilderTreeItem; command-palette
- * invocations pass nothing; programmatic invocations may pass a string id.
- * Anything else → undefined → the command falls back to its quick-pick.
- */
-function extractBuilderId(arg: vscode.TreeItem | string | undefined): string | undefined {
-	if (typeof arg === 'string') { return arg; }
-	if (arg instanceof BuilderTreeItem) { return arg.builderId; }
-	return undefined;
-}
-
-/**
- * Resolve an issue number from a command argument.
- *
- * Backlog row-click passes the issue id as a string via
- * `item.command.arguments`; right-click context-menu invocations pass the
- * BacklogTreeItem itself; command-palette invocations pass nothing →
- * undefined → spawnBuilder falls back to its full quick-pick flow.
- */
-/**
- * Argument shape accepted by the backlog issue commands. Beyond the sidebar's
- * `TreeItem` and the row-click `string`, the Search Backlog webview (#920)
- * passes a plain `{ issueId, issueTitle }` object so its inline "reference in
- * architect" action can carry the title (which a bare id string can't).
- */
-type IssueCommandArg =
-	| vscode.TreeItem
-	| string
-	| { issueId: string; issueTitle?: string }
-	| undefined;
-
-function extractIssueId(arg: IssueCommandArg): string | undefined {
-	if (typeof arg === 'string') { return arg; }
-	if (arg instanceof BacklogTreeItem) { return arg.issueId; }
-	if (arg && typeof arg === 'object' && 'issueId' in arg) { return arg.issueId; }
-	return undefined;
-}
-
-/**
- * Resolve an issue title from a command argument.
- *
- * Only `BacklogTreeItem` carries the title; string args (used by row-click
- * which only passes the id) and undefined return undefined so callers can
- * fall back. An empty title is normalised to undefined so the fallback
- * branch handles it identically to a missing title.
- */
-function extractIssueTitle(arg: IssueCommandArg): string | undefined {
-	if (arg instanceof BacklogTreeItem) {
-		return arg.issueTitle || undefined;
-	}
-	if (arg && typeof arg === 'object' && 'issueId' in arg) {
-		return arg.issueTitle || undefined;
-	}
-	return undefined;
-}
 
 /** Map the pure `ConfigScope` onto the VS Code `ConfigurationTarget` enum (#1070). */
 function configTargetFor(scope: ConfigScope): vscode.ConfigurationTarget {
@@ -552,31 +505,20 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (recentlyClosedView) { recentlyClosedView.title = withCount('Recently Closed', data?.recentlyClosed.length); }
 	};
 
-	// Activity-bar badge — paint the "needs me" count on the Codev icon.
-	// Combines both signals: blocked (formal gate) + idle-waiting (PTY
-	// silent past threshold). VSCode has no container-level badge API;
-	// per-view `TreeView.badge` bubbles up to the activity-bar icon
-	// when the sidebar is hidden, so badging `buildersView` is how
-	// we paint the icon. Badge only set when there's at least one
-	// item needing the user.
+	// Activity-bar badge — paint the "needs me" count on the Codev icon and, with
+	// the same value, on the Cockpit's (Spec 1963). Combines blocked (formal gate),
+	// idle-waiting (PTY silent past threshold), held mail and waiting architects.
+	// VSCode has no container-level badge API; per-view `TreeView.badge` bubbles up
+	// to the activity-bar icon when the sidebar is hidden, so badging the Agents and
+	// Cockpit views is how we paint the two icons. The count, and its suppression
+	// (disconnected, no data, builder-worktree window #1809), is computed once in
+	// the pure `workspaceActivityBadge` and assigned to every agent view.
+	let agentTreeHosts: AgentTreeHosts | undefined;
 	const updateActivityBadge = () => {
-		if (!buildersView) { return; }
-		const data = overviewCache.getData();
-		if (isBuilderWorktreeWindow || connectionManager?.getState() !== 'connected' || !data) {
-			buildersView.badge = undefined;
-			return;
-		}
-		const now = Date.now();
-		const blockedCount = data.builders.filter(b => b.blocked).length;
-		const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
-		// Spec 1595: architects at a prompt or with their agent dead fold in by name.
-		const waitingArchitects = deriveAttention(data, now).architects.map(a => a.architect);
-		// Spec 1313 Phase 8: fold the workspace held-mail count into the badge so the
-		// activity-bar icon reflects it even when the sidebar is collapsed. Held is a
-		// count only (not a per-builder "needs me" gate); the tooltip disambiguates it
-		// from the blocked/idle signals. The fold + tooltip composition (and the
-		// undefined-when-empty clear) is pure + unit-tested in `composeActivityBadge`.
-		buildersView.badge = composeActivityBadge(blockedCount, idleCount, data.heldCount, waitingArchitects);
+		agentTreeHosts?.setBadge(workspaceActivityBadge(overviewCache.getData(), {
+			connected: connectionManager?.getState() === 'connected',
+			builderWorktreeWindow: isBuilderWorktreeWindow,
+		}));
 	};
 
 	// Close builder/dev terminal tabs when their builder disappears from the
@@ -631,17 +573,158 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.workspaceState.update('codev.buildersStageGroupExpansion', undefined);
 	}
 
+	// The machine-wide fleet cache (#1566). Created here, ahead of the Tower view
+	// below, because the Cockpit reads it too: other workspaces' rows come from the
+	// overviews it already fetches (Spec 1963).
+	const towerCache = new TowerFleetCache(connectionManager);
+	context.subscriptions.push({ dispose: () => towerCache.dispose() });
+
 	// List views use createTreeView so their title can carry a live item
 	// count; the rest stay on registerTreeDataProvider.
 	const buildersProvider = new BuildersProvider(overviewCache, builderDiffCache);
 	buildersView = vscode.window.createTreeView('codev.agents', { treeDataProvider: buildersProvider });
-	// Publish a builder-active event when a builder row is selected in the sidebar.
+	// The Codev Cockpit (Spec 1963): one tree, Tower → workspaces → architects →
+	// builders. This window's workspace acts (same rows as Agents, scoped ids);
+	// every other workspace navigates to its own window.
+	const cockpitProvider = new CockpitProvider({
+		connectionManager,
+		terminalManager: terminalManager!,
+		loadWorktreeConfig: () => loadWorktreeConfig(connectionManager!),
+		towerCache,
+		overviewCache,
+		diffCache: builderDiffCache,
+		builderWorktreeWindow: isBuilderWorktreeWindow,
+		connection: cockpitConnectionMode(
+			policy.initializeConnection,
+			vscode.workspace.getConfiguration('codev').get<boolean>('autoConnect', true),
+		),
+	});
+	const cockpitView: vscode.TreeView<CockpitNode> = vscode.window.createTreeView(COCKPIT_VIEW_ID, { treeDataProvider: cockpitProvider });
+	// The Decisions panel (Spec 1963): one per window, for this window's workspace, with every Tower
+	// call made here. Its serializer restores an open panel after a window reload.
+	// Whether the window has a workspace is read from its folders, not from the connection manager:
+	// a reload's restore reaches the serializer before `initialize()` has set the manager's workspace,
+	// and a null there would close the restored panel.
+	const decisionsPanels = new DecisionsPanels({
+		extensionUri: context.extensionUri,
+		bridge: new DecisionsBridge(connectionManager),
+		unavailableReason: () => workspaceViewUnavailableReason('Decisions', {
+			builderWorktreeWindow: isBuilderWorktreeWindow,
+			workspacePath: detectWorkspacePath(),
+		}),
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	context.subscriptions.push(
+		decisionsPanels,
+		vscode.window.registerWebviewPanelSerializer(DECISIONS_VIEW_TYPE, decisionsPanels),
+	);
+	// The Work panel (Spec 1963): one per window, fed from this window's OverviewCache (the
+	// sidebar's source), with each kept dashboard action mapped to its VS Code equivalent. Its
+	// availability is read from the window's folders, as Decisions' is.
+	const workPanels = new WorkPanels({
+		extensionUri: context.extensionUri,
+		overview: overviewCache,
+		connection: connectionManager,
+		actions: {
+			openBuilder: async (builderId) => terminalManager?.openBuilderByRoleOrId(builderId, true),
+			newShell: async () => vscode.commands.executeCommand('codev.newShell'),
+			openFile: async (fsPath) => vscode.commands.executeCommand('vscode.open', vscode.Uri.file(fsPath)),
+			warn: (message) => { void vscode.window.showWarningMessage(message); },
+		},
+		workspacePath: () => detectWorkspacePath(),
+		unavailableReason: () => workspaceViewUnavailableReason('Work', {
+			builderWorktreeWindow: isBuilderWorktreeWindow,
+			workspacePath: detectWorkspacePath(),
+		}),
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	context.subscriptions.push(
+		workPanels,
+		vscode.window.registerWebviewPanelSerializer(WORK_VIEW_TYPE, workPanels),
+	);
+	// The live architect roster of this window's workspace, read from Tower as `codev.openArchitectTerminal`
+	// and *Arrange Cockpit* resolve it. Undefined when it cannot be read: the user is told why, or, with
+	// `quiet` (the Cockpit's automatic arrange, which nobody asked for), it is only logged.
+	const readArchitectRoster = async (quiet = false): Promise<ResolvableArchitect[] | undefined> => {
+		const tell = (message: string) => {
+			if (quiet) { outputChannel?.appendLine(`${message} (the architect was not placed)`); } else { vscode.window.showErrorMessage(message); }
+		};
+		const client = connectionManager?.getClient();
+		const workspacePath = connectionManager?.getWorkspacePath();
+		if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
+			tell('Codev: Not connected to Tower');
+			return undefined;
+		}
+		try {
+			const state = await client.getWorkspaceState(workspacePath);
+			// Resolve the architect list. Prefer the new `architects`
+			// collection (Spec 786 Phase 5); fall back to the scalar
+			// `architect` for older Tower versions.
+			const architects = state?.architects ?? (state?.architect ? [state.architect] : []);
+			return architects;
+		} catch {
+			tell('Codev: Failed to get workspace state');
+			return undefined;
+		}
+	};
+	// *Arrange Cockpit* (Spec 1963): the `main` architect | (Work over Decisions). Offered where Work and
+	// Decisions are: not in a builder-worktree or no-workspace window, where the command says why.
+	const arrangeUnavailableReason = () => workspaceViewUnavailableReason('Arrange Cockpit', {
+		builderWorktreeWindow: isBuilderWorktreeWindow,
+		workspacePath: detectWorkspacePath(),
+	});
+	const cockpitArranger = new CockpitArranger({
+		unavailableReason: arrangeUnavailableReason,
+		readArchitects: readArchitectRoster,
+		// The editor-area override: this action puts the architect in the left editor group even with
+		// `codev.terminalPosition: panel`.
+		// Thrown, not skipped: arrange then stops and says why. (Set in activation before this; cleared
+		// only on deactivate.)
+		openArchitect: async (terminalId, name) => {
+			if (!terminalManager) { throw new Error('the terminal manager is not running'); }
+			return terminalManager.openArchitect(terminalId, name, true, 'editor');
+		},
+		architectTerminal: (name) => terminalManager?.getArchitectTerminal(name),
+		work: workPanels,
+		decisions: decisionsPanels,
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	// The first show of the Cockpit in a window session arranges it, once the first connection attempt
+	// has finished (`ready()`, at the end of activation), unless `codev.cockpit.autoArrange` is off.
+	const cockpitAutoArrange = new CockpitAutoArrange({
+		view: cockpitView,
+		offered: () => arrangeUnavailableReason() === null,
+		enabled: () => vscode.workspace.getConfiguration('codev').get<boolean>('cockpit.autoArrange', true),
+		arrange: () => cockpitArranger.arrange('auto'),
+		globalState: context.globalState,
+		disable: () => vscode.workspace.getConfiguration('codev')
+			.update('cockpit.autoArrange', false, vscode.ConfigurationTarget.Global),
+		log: (line) => outputChannel?.appendLine(line),
+	});
+	context.subscriptions.push(cockpitAutoArrange);
+	// Builders accordion (#913), row-click expand, follow-reveals, the
+	// builder-active hook and the badge act on whichever of the two views a row
+	// belongs to. The accordion is toggled via the header button /
+	// `codev.buildersAutoCollapse`; expanding one builder auto-collapses the OTHER
+	// builder rows of the same view, so a reviewer can't have diffs from unrelated
+	// worktrees open at once. Group headers are left alone.
+	const readAccordion = () =>
+		vscode.workspace.getConfiguration('codev').get<boolean>('buildersAutoCollapse', true);
+	agentTreeHosts = new AgentTreeHosts([
+		{ view: buildersView, rows: buildersProvider, revealWhenNoneVisible: true },
+		{ view: cockpitView, rows: cockpitProvider },
+	], readAccordion());
+	const hosts = agentTreeHosts;
+	// Publish a builder-active event when a builder row is selected in either view.
 	// Builder tree items carry `builderId` (= OverviewBuilder.id); selecting a
 	// builder's root node or a file row re-targets any configured hook.
-	context.subscriptions.push(buildersView.onDidChangeSelection((e) => {
-		const sel = e.selection[0] as { builderId?: string } | undefined;
-		if (sel?.builderId) { fireActivity(connectionManager?.getWorkspacePath() ?? null, 'builder-active', { builder: sel.builderId }); }
-	}));
+	context.subscriptions.push(
+		cockpitView,
+		cockpitProvider,
+		...hosts.wireSelection((builderId) => {
+			fireActivity(connectionManager?.getWorkspacePath() ?? null, 'builder-active', { builder: builderId });
+		}),
+	);
 	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
 	const backlogProvider = new BacklogProvider(overviewCache, context.workspaceState);
 	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: backlogProvider });
@@ -652,6 +735,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Seed the badge so it's correct immediately if overview data is already
 	// cached, instead of waiting for the next onDidChange tick.
 	updateActivityBadge();
+	// And follow the connection: `OverviewCache` keeps its last-known data and
+	// emits nothing on a disconnect, so without this both buttons would keep a
+	// stale badge through a Tower outage.
+	context.subscriptions.push(connectionManager.onStateChange(() => updateActivityBadge()));
 	const teamProvider = new TeamProvider(connectionManager);
 	// A tree view (not a bare provider registration) so the provider can skip
 	// fetches while the Team view is hidden (#1919).
@@ -741,26 +828,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.globalState.update(PANEL_REVEALED_KEY, true);
 	}
 
-	// Builders accordion: expanding one builder auto-collapses the OTHER builder
-	// rows so a reviewer can't have diffs from unrelated worktrees open at once.
-	// It deliberately leaves group headers alone (#913) — `collapseBuildersExcept`
-	// only re-ids builder rows, never the group rows. Toggle via the header
-	// button / `codev.buildersAutoCollapse`.
-	const readAccordion = () =>
-		vscode.workspace.getConfiguration('codev').get<boolean>('buildersAutoCollapse', true);
-	const accordion = new AccordionGate(readAccordion());
+	// Builders accordion, per view (see `agentTreeHosts` above). The context key
+	// drives the toggle buttons in both title bars.
 	vscode.commands.executeCommand('setContext', 'codev.buildersAutoCollapse', readAccordion());
 	context.subscriptions.push(
-		buildersView.onDidExpandElement((e) => {
-			if (!(e.element instanceof BuilderTreeItem)) { return; }
-			if (accordion.shouldCollapseOthers(e.element.builderId)) {
-				buildersProvider.collapseBuildersExcept(e.element);
-			}
-		}),
+		...hosts.wireAccordion(),
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (!e.affectsConfiguration('codev.buildersAutoCollapse')) { return; }
 			const on = readAccordion();
-			accordion.setEnabled(on);
+			hosts.setAccordionEnabled(on);
 			vscode.commands.executeCommand('setContext', 'codev.buildersAutoCollapse', on);
 		}),
 	);
@@ -795,16 +871,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		// hijacking the sidebar selection. (Checking "plain text tab" rather than
 		// "diff tab" avoids TabInputTextMultiDiff, absent from stable @types/vscode.)
 		if (isStandaloneTextTab(vscode.window.tabGroups.activeTabGroup?.activeTab?.input)) { return; }
-		const item = await buildersProvider.findFileItem(entry.builderId, entry.relPath);
-		if (!item) { return; }
-		// The active editor may have changed during the await (rapid navigation);
-		// don't let a slow lookup override a newer file's reveal.
-		if (vscode.window.activeTextEditor?.document.uri.fsPath !== fsPath) { return; }
-		try {
-			await buildersView!.reveal(item, { select: true, expand: true, focus: false });
-		} catch {
-			// Benign if the row is no longer present (e.g. mid-cleanup).
-		}
+		// Reveal in every visible agent view that holds the row (the Agents view
+		// alone when none is visible, as before the Cockpit). The active editor may
+		// change during a lookup (rapid navigation); a slow lookup must not
+		// override a newer file's reveal.
+		await hosts.revealFile(entry.builderId, entry.relPath,
+			() => vscode.window.activeTextEditor?.document.uri.fsPath === fsPath);
 	};
 	// Publish a builder-active event when a builder diff is under review, so a
 	// configured hook can follow it. The diff session entry already carries the
@@ -835,7 +907,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (!e.affectsConfiguration('codev.buildersFileViewAsTree')) { return; }
 			vscode.commands.executeCommand('setContext', 'codev.buildersFileViewAsTree', readBuildersFileViewAsTree());
-			buildersProvider.refresh();
+			// Both views render changed files (Agents and the Cockpit).
+			hosts.refreshAll();
 		}),
 	);
 
@@ -874,48 +947,28 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	);
 
-	// Periodic overview refresh. VSCode has no timer-based refresh (event-only),
-	// so an idle workspace never sees externally-merged PRs / new issues. Mirror
-	// the dashboard's poll idiom: refresh on a cadence while the Codev sidebar is
-	// visible, paused when it isn't. The shared Tower-side 30s cache throttles gh
-	// cost across windows; refresh() is last-write-wins so periodic + event-driven
-	// refreshes coexist without flicker.
-	const setupPeriodicOverviewRefresh = () => {
-		let timer: ReturnType<typeof setInterval> | undefined;
-		const readIntervalSeconds = (): number => {
-			const s = vscode.workspace.getConfiguration('codev').get<number>('overviewRefreshSeconds', 60);
-			return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
-		};
-		const anyVisible = (): boolean =>
-			!!buildersView?.visible || !!pullRequestsView?.visible
-			|| !!backlogView?.visible || !!recentlyClosedView?.visible;
-		const stop = () => {
-			if (timer) { clearInterval(timer); timer = undefined; }
-		};
-		const reconcile = () => {
-			const seconds = readIntervalSeconds();
-			if (seconds === 0 || !anyVisible()) { stop(); return; }
-			if (!timer) {
-				timer = setInterval(() => {
-					if (connectionManager?.getState() === 'connected') { void overviewCache.refresh(); }
-				}, seconds * 1000);
-				void overviewCache.refresh(); // resume → immediate refresh
-			}
-		};
-
-		context.subscriptions.push(
-			buildersView!.onDidChangeVisibility(reconcile),
-			pullRequestsView!.onDidChangeVisibility(reconcile),
-			backlogView!.onDidChangeVisibility(reconcile),
-			recentlyClosedView!.onDidChangeVisibility(reconcile),
-			vscode.workspace.onDidChangeConfiguration(e => {
-				if (e.affectsConfiguration('codev.overviewRefreshSeconds')) { stop(); reconcile(); }
-			}),
-			{ dispose: stop },
-		);
-		reconcile();
+	// Periodic overview refresh while any overview-backed view is visible
+	// (`OverviewRefreshGate`): the Codev container's list views, the Cockpit and
+	// the Work panel, so with only the Cockpit or only Work visible this
+	// workspace's overview stays current.
+	const readOverviewRefreshSeconds = (): number => {
+		const s = vscode.workspace.getConfiguration('codev').get<number>('overviewRefreshSeconds', 60);
+		return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
 	};
-	setupPeriodicOverviewRefresh();
+	const overviewRefreshGate = new OverviewRefreshGate(
+		[buildersView, pullRequestsView, backlogView, recentlyClosedView, cockpitView, workPanels],
+		readOverviewRefreshSeconds,
+		() => { if (connectionManager?.getState() === 'connected') { void overviewCache.refresh(); } },
+		() => { void overviewCache.refresh(); }, // resume → immediate refresh
+	);
+	context.subscriptions.push(
+		...overviewRefreshGate.wire(),
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('codev.overviewRefreshSeconds')) { overviewRefreshGate.restart(); }
+		}),
+		overviewRefreshGate,
+	);
+	overviewRefreshGate.reconcile();
 
 	// Refresh overview on connect + set team visibility
 	connectionManager.onStateChange(async (state) => {
@@ -970,8 +1023,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	// (connectionManager.onSSEEvent) — no second EventSource. The container icon's badge carries the
 	// machine-wide needs-attention count (only this container badges — the badge means machine-scope).
 	// Registered here (after reg/regCli) so its commands route through the CLI-preflight guard.
-	const towerCache = new TowerFleetCache(connectionManager);
-	context.subscriptions.push({ dispose: () => towerCache.dispose() });
 	const towerProvider = new TowerProvider(towerCache, connectionManager);
 	context.subscriptions.push(towerProvider);
 	const towerView = vscode.window.createTreeView('codev.tower', {
@@ -992,6 +1043,18 @@ export async function activate(context: vscode.ExtensionContext) {
 		towerView,
 		towerCache.onDidChange(updateTowerBadge),
 		reg('codev.tower.refresh', () => towerCache.refresh()),
+		// The Cockpit reads both caches: this window's overview and the fleet.
+		reg('codev.cockpit.refresh', () => Promise.all([overviewCache.refresh(), towerCache.refresh()])),
+		// The Workspace view's *Open Web Interface* row, as an action on this window's workspace row.
+		// The row's menu passes the row; the URL is always this window's workspace.
+		reg('codev.cockpit.openWebInterface', async () => {
+			const url = buildDashboardUrl(connectionManager!);
+			if (!url) {
+				vscode.window.showErrorMessage('Codev: This window has no Codev workspace, so there is no web interface to open.');
+				return;
+			}
+			await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(url));
+		}),
 	);
 	// Populate as soon as Tower is reachable; refreshes thereafter ride the shared SSE + poll.
 	towerCache.refresh();
@@ -1029,7 +1092,16 @@ export async function activate(context: vscode.ExtensionContext) {
 	};
 
 	const cycleAgentTerminal = async (direction: 1 | -1): Promise<void> => {
-		const order = buildersProvider.agentCycleOrder();
+		// The Cockpit's own order while it is the visible agent view (Spec 1963); else the Agents
+		// view's order, unchanged.
+		const order = agentCycleRoster(
+			{ visible: buildersView?.visible ?? false, agentCycleOrder: () => buildersProvider.agentCycleOrder() },
+			{
+				visible: cockpitView.visible,
+				acting: cockpitProvider.actingScope() !== undefined,
+				agentCycleOrder: () => cockpitProvider.agentCycleOrder(),
+			},
+		);
 		// Current position = the focused agent terminal (builder id, else architect name).
 		// VSCode keeps `activeTerminal` set from an editor too, so this resumes from the
 		// last-focused agent; nothing focused starts at the ends.
@@ -1055,16 +1127,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		for (const target of attempts) {
 			if (!(await openAgentTarget(target))) { continue; }
-			// Mirror a row click: select the agent's sidebar row so the tree highlight
-			// follows the focused terminal. `focus: false` keeps the terminal focused.
-			const item = buildersProvider.revealTargetForAgent(target);
-			if (item) {
-				try {
-					await buildersView?.reveal(item, { select: true, focus: false });
-				} catch {
-					// Benign: the row may have changed between open and reveal.
-				}
-			}
+			// Mirror a row click: select the agent's row in the visible agent view(s)
+			// so the tree highlight follows the focused terminal. `focus: false`
+			// keeps the terminal focused.
+			await hosts.revealAgent(target);
 			return;
 		}
 	};
@@ -1085,19 +1151,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			// like `codev.referenceIssueInArchitect` can inject into the same
 			// terminal the user picked. Every failure path (not connected,
 			// picker dismissed, architect not found) returns undefined.
-			const client = connectionManager?.getClient();
-			const workspacePath = connectionManager?.getWorkspacePath();
-			if (!client || !workspacePath || connectionManager?.getState() !== 'connected') {
-				vscode.window.showErrorMessage('Codev: Not connected to Tower');
-				return undefined;
-			}
+			const architects = await readArchitectRoster();
+			if (!architects) { return undefined; }
 			try {
-				const state = await client.getWorkspaceState(workspacePath);
-				// Resolve the architect list. Prefer the new `architects`
-				// collection (Spec 786 Phase 5); fall back to the scalar
-				// `architect` for older Tower versions.
-				const architects = state?.architects ?? (state?.architect ? [state.architect] : []);
-
 				// Issue 841 Gap 2: when invoked with no name (keybinding Cmd/Ctrl+K A
 				// or the Command Palette) and the workspace has more than one
 				// architect, prompt for which to open. Single-architect workspaces
@@ -1206,23 +1262,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		// from Phase 4. Wired to the right-click context menu on sibling
 		// entries (`viewItem == workspace-architect-sibling`) — see
 		// package.json's menus contribution. Refuses to remove `main`.
-		regCli('codev.removeArchitect', async (arg: vscode.TreeItem | string | undefined) => {
-				let name: string | undefined;
-			if (typeof arg === 'string') {
-				name = arg;
-			} else if (arg instanceof vscode.TreeItem) {
-				// Issue 841 Gap 3: the row label is now UPPERCASE (display-only),
-				// so it no longer equals the canonical name. Resolve the raw
-				// lowercase name from `item.id` (`workspace-architect-<name>`),
-				// which the Architects tree sets for exactly this reason. Fall
-				// back to the label only if the id is somehow absent.
-				const id = arg.id;
-				if (typeof id === 'string' && id.startsWith('workspace-architect-')) {
-					name = id.slice('workspace-architect-'.length);
-				} else if (typeof arg.label === 'string') {
-					name = arg.label;
-				}
-			}
+		regCli('codev.removeArchitect', async (arg: unknown) => {
+			// A Workspace-view row, a Cockpit architect row (Spec 1963) or a name.
+			const name = architectNameFromArg(arg);
 			if (!name) {
 				vscode.window.showErrorMessage('Codev: Could not determine which architect to remove.');
 				return;
@@ -1322,13 +1364,14 @@ export async function activate(context: vscode.ExtensionContext) {
 				vscode.workspace.getConfiguration('codev').get<boolean>('buildersClickExpands', true);
 			await runBuilderRowClick(clickExpands, {
 				openTerminal: () => terminalManager?.openBuilderByRoleOrId(item.builderId, true),
-				expandRow: () => buildersView!.reveal(item, { expand: true, select: false, focus: false }),
+				// Expand in the row's own view (Agents or the Cockpit).
+				expandRow: () => hosts.expandRow(item),
 			});
 		}),
 		reg('codev.focusNextAgentTerminal', () => cycleAgentTerminal(1)),
 		reg('codev.focusPreviousAgentTerminal', () => cycleAgentTerminal(-1)),
 		regCli('codev.spawnBuilder', (arg: vscode.TreeItem | string | undefined) =>
-			spawnBuilder(extractIssueId(arg))),
+			spawnBuilder(extractIssueId(arg), detectWorkspacePath())),
 		reg('codev.openBacklogIssue', (arg: vscode.TreeItem | undefined) => {
 			if (arg instanceof BacklogTreeItem) {
 				void vscode.env.openExternal(vscode.Uri.parse(arg.issueUrl));
@@ -1344,6 +1387,14 @@ export async function activate(context: vscode.ExtensionContext) {
 			viewBacklogIssue(connectionManager!, extractIssueId(arg))),
 		reg('codev.openBacklogSearch', () =>
 			BacklogSearchPanel.createOrShow(connectionManager!, overviewCache, context.extensionUri)),
+		// The Decisions panel (Spec 1963): the palette and the Cockpit's Decisions entry. Where it is
+		// not offered (a builder-worktree or no-workspace window) it says why.
+		regCli('codev.openDecisions', () => decisionsPanels.show()),
+		// The Work panel (Spec 1963): the palette. Where it is not offered it says why.
+		regCli('codev.openWork', () => workPanels.show()),
+		// *Arrange Cockpit* (Spec 1963): the palette and the Cockpit's title bar. Where it is not offered
+		// it says why. A manual arrange never shows the first-auto-arrange notice.
+		regCli('codev.cockpit.arrange', () => cockpitArranger.arrange()),
 		reg('codev.searchBacklog', () => searchBacklog(connectionManager!, overviewCache)),
 		reg('codev.openIssueById', () => openIssueById(connectionManager!, () => overviewCache.getData())),
 		reg('codev.openPRById', () => openPRById(connectionManager!)),
@@ -1625,8 +1676,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		// The dev status-bar chip's click target (#1049 removed the Codev Dev panel it used to focus).
 		reg('codev.dev.reveal', () =>
 			terminalManager!.revealDevTerminal()),
-		reg('codev.openDevUrl', (urlArg?: unknown) =>
-			openDevUrl(connectionManager!, typeof urlArg === 'string' ? urlArg : undefined)),
+		// A dev-URL row passes its URL; the palette and a Cockpit row's menu pass none (or the
+		// row), which `openDevUrl` resolves from the config.
+		reg('codev.openDevUrl', (urlArg?: unknown) => openDevUrl(connectionManager!, urlArg)),
 		reg('codev.pasteImage', () =>
 			pasteImage(connectionManager!, terminalManager!)),
 		reg('codev.refreshTeam', () => teamProvider.refresh()),
@@ -1851,7 +1903,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Tower and auto-starts it even when no codev workspace is detected, so a
 	// dormant window must never reach it.
 	if (policy.initializeConnection) {
-		await connectionManager.initialize();
+		try {
+			await connectionManager.initialize();
+		} finally {
+			// The Cockpit's first-show arrange waits for this attempt, so it can resolve the architect.
+			cockpitAutoArrange.ready();
+		}
+	} else {
+		cockpitAutoArrange.ready();
 	}
 }
 

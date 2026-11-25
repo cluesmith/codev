@@ -1,0 +1,3 @@
+#!/bin/sh
+# Cockpit-harness recording stub for `porch`: logs argv and cwd, runs nothing. See ../README.md.
+exec node "$(dirname "$0")/record.mjs" porch "$@"

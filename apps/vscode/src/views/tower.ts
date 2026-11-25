@@ -31,7 +31,7 @@ type TowerNode =
   | { kind: 'attention'; label: string; description: string; icon: string; color?: string };
 
 /** The `WorkspaceTarget` for a labelled row. */
-function targetOf(ws: LabelledEntry): WorkspaceTarget {
+export function targetOf(ws: LabelledEntry): WorkspaceTarget {
   return { path: ws.entry.workspace.path, active: ws.entry.workspace.active, name: ws.label, isCurrent: ws.isCurrent };
 }
 
@@ -88,14 +88,16 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
         item.iconPath = new vscode.ThemeIcon(node.icon);
         return item;
       }
-      case 'dormant-group': {
-        const item = new vscode.TreeItem(`Dormant (${node.rows.length})`, vscode.TreeItemCollapsibleState.Collapsed);
-        item.iconPath = new vscode.ThemeIcon('circle-outline');
-        item.contextValue = 'tower-dormant-group';
-        return item;
+      case 'dormant-group':
+        return dormantGroupRow(node.rows.length);
+      case 'workspace': {
+        // Expandable only when there are attention rows to show; a quiet row is a leaf whose
+        // click opens it.
+        const hasDetail = !node.ws.entry.attention.isEmpty && node.ws.entry.workspace.active;
+        let children: WorkspaceRowChildren = 'none';
+        if (hasDetail) { children = 'collapsed'; }
+        return workspaceRow(node.ws, children);
       }
-      case 'workspace':
-        return this.workspaceItem(node.ws);
       case 'attention': {
         const item = new vscode.TreeItem(node.label);
         item.description = node.description;
@@ -133,48 +135,67 @@ export class TowerProvider implements vscode.TreeDataProvider<TowerNode> {
     }
     return nodes;
   }
+}
 
-  private workspaceItem(ws: LabelledEntry): vscode.TreeItem {
-    const { entry, label, isCurrent } = ws;
-    const state = describeAttention(entry.attention);
-    const hasDetail = !entry.attention.isEmpty && entry.workspace.active;
+/**
+ * Whether a workspace row has children, and how it starts: `none` makes it a leaf whose click
+ * opens the workspace; `collapsed` / `expanded` make it a container that a click toggles.
+ */
+export type WorkspaceRowChildren = 'none' | 'collapsed' | 'expanded';
 
-    let collapsibleState = vscode.TreeItemCollapsibleState.None;
-    if (hasDetail) { collapsibleState = vscode.TreeItemCollapsibleState.Collapsed; }
-    const item = new vscode.TreeItem(label, collapsibleState);
+/** The *Dormant (N)* group row, shared by the Tower view and the Cockpit. */
+export function dormantGroupRow(count: number): vscode.TreeItem {
+  const item = new vscode.TreeItem(`Dormant (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
+  item.iconPath = new vscode.ThemeIcon('circle-outline');
+  item.contextValue = 'tower-dormant-group';
+  return item;
+}
 
-    const descriptionParts: string[] = [];
-    if (isCurrent) { descriptionParts.push('current'); }
-    if (state) { descriptionParts.push(state.text); }
-    item.description = descriptionParts.join(' · ');
+/**
+ * A workspace row: label, *current* marker and attention summary in the description, icon,
+ * tooltip and the `contextValue` the Open / Deactivate menus key on. Shared by the Tower view and
+ * the Cockpit (Spec 1963), which differ only in whether the row has children.
+ */
+export function workspaceRow(ws: LabelledEntry, children: WorkspaceRowChildren): vscode.TreeItem {
+  const { entry, label, isCurrent } = ws;
+  const state = describeAttention(entry.attention);
 
-    if (entry.workspace.active) {
-      if (state) { item.iconPath = iconFor(state.icon, state.color); }
-      // The current window's workspace is the folder that's open here — an opened folder, distinct
-      // from the plain `folder` other active workspaces use (and not a map-pin).
-      else if (isCurrent) { item.iconPath = new vscode.ThemeIcon('folder-opened'); }
-      else { item.iconPath = new vscode.ThemeIcon('folder'); }
-    } else {
-      item.iconPath = new vscode.ThemeIcon('circle-outline');
-    }
+  let collapsibleState = vscode.TreeItemCollapsibleState.None;
+  if (children === 'collapsed') { collapsibleState = vscode.TreeItemCollapsibleState.Collapsed; }
+  if (children === 'expanded') { collapsibleState = vscode.TreeItemCollapsibleState.Expanded; }
+  const item = new vscode.TreeItem(label, collapsibleState);
 
-    item.tooltip = `${label}\n${entry.workspace.path}`;
+  const descriptionParts: string[] = [];
+  if (isCurrent) { descriptionParts.push('current'); }
+  if (state) { descriptionParts.push(state.text); }
+  item.description = descriptionParts.join(' · ');
 
-    // contextValue gates the row's inline menu (open / deactivate) in package.json.
-    let contextValue = 'tower-workspace-dormant';
-    if (entry.workspace.active) {
-      contextValue = 'tower-workspace-active';
-      if (isCurrent) { contextValue = 'tower-workspace-active-current'; }
-    }
-    item.contextValue = contextValue;
-
-    // Click-to-open ONLY on rows with nothing to expand — otherwise a single click that means
-    // "expand this" would also fire openFolder. Expandable rows open via the inline button instead.
-    if (!hasDetail) {
-      item.command = { command: OPEN_WORKSPACE_COMMAND, title: 'Open Workspace', arguments: [targetOf(ws)] };
-    }
-    return item;
+  if (entry.workspace.active) {
+    if (state) { item.iconPath = iconFor(state.icon, state.color); }
+    // The current window's workspace is the folder that's open here — an opened folder, distinct
+    // from the plain `folder` other active workspaces use (and not a map-pin).
+    else if (isCurrent) { item.iconPath = new vscode.ThemeIcon('folder-opened'); }
+    else { item.iconPath = new vscode.ThemeIcon('folder'); }
+  } else {
+    item.iconPath = new vscode.ThemeIcon('circle-outline');
   }
+
+  item.tooltip = `${label}\n${entry.workspace.path}`;
+
+  // contextValue gates the row's inline menu (open / deactivate) in package.json.
+  let contextValue = 'tower-workspace-dormant';
+  if (entry.workspace.active) {
+    contextValue = 'tower-workspace-active';
+    if (isCurrent) { contextValue = 'tower-workspace-active-current'; }
+  }
+  item.contextValue = contextValue;
+
+  // Click-to-open ONLY on rows with nothing to expand — otherwise a single click that means
+  // "expand this" would also fire openFolder. Expandable rows open via the inline button instead.
+  if (children === 'none') {
+    item.command = { command: OPEN_WORKSPACE_COMMAND, title: 'Open Workspace', arguments: [targetOf(ws)] };
+  }
+  return item;
 }
 
 /** The expanded per-workspace attention rows, in the summary's own order. */
