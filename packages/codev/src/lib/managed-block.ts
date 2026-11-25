@@ -132,6 +132,8 @@ export interface SyncHotContextOptions {
   dryRun?: boolean;
   /** Hot files (workspace-relative) a dry run would have created by now. */
   pendingHotFiles?: readonly string[];
+  /** Root docs a dry run would have written by now, by name, with their content (#1985). */
+  pendingRootDocs?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -146,15 +148,16 @@ export function syncHotContextBlock(
   workspaceRoot: string = targetDir,
   options: SyncHotContextOptions = {},
 ): string[] {
-  const { dryRun = false, pendingHotFiles = [] } = options;
+  const { dryRun = false, pendingHotFiles = [], pendingRootDocs = {} } = options;
   const block = renderHotContextBlock(workspaceRoot, pendingHotFiles);
   if (block === '') return [];
 
   const changed: string[] = [];
   for (const name of ROOT_DOCS) {
     const p = path.join(targetDir, name);
-    if (!fs.existsSync(p)) continue;
-    const before = fs.readFileSync(p, 'utf-8');
+    const pending = pendingRootDocs[name];
+    if (pending === undefined && !fs.existsSync(p)) continue;
+    const before = pending ?? fs.readFileSync(p, 'utf-8');
     const after = upsertHotContextBlock(before, block);
     if (after !== before) {
       if (!dryRun) fs.writeFileSync(p, after);
