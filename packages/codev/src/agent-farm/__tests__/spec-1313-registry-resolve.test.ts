@@ -29,6 +29,8 @@ const {
 
 vi.mock('../servers/tower-terminals.js', () => ({
   getWorkspaceTerminals: () => mockGetWorkspaceTerminals(),
+  // Every terminal on the fake map is open, so a workspace with one is running (Issue #1978).
+  getTerminalManager: () => ({ getSession: () => ({ status: 'running' }) }),
 }));
 
 vi.mock('../state.js', () => ({
@@ -56,7 +58,16 @@ function resolveInRegistry(target: string, workspace?: string, sender?: string) 
   return resolveAgentInRegistry(address, { id: sender, workspace });
 }
 
-/** A minimal WorkspaceTerminals; the resolver only cares that the key (path) exists. */
+/**
+ * A running workspace: its architect `main` has a terminal, and no builder does, so every
+ * registered builder is offline. Issue #1978: a workspace runs while it has a terminal, not
+ * while its key is on the map.
+ */
+function runningEntry(): WorkspaceTerminals {
+  return { architects: new Map([['main', 'term-main']]), builders: new Map(), shells: new Map(), fileTabs: new Map() };
+}
+
+/** The slot many routes leave on the map for a workspace they were asked about: no terminal. */
 function emptyEntry(): WorkspaceTerminals {
   return { architects: new Map(), builders: new Map(), shells: new Map(), fileTabs: new Map() };
 }
@@ -69,10 +80,10 @@ function builder(id: string): Builder {
 describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: both workspaces are live-registered (so the workspace lookup can
-    // map a project basename → path); registries are empty unless a test sets them.
+    // Default: both workspaces are running (so the workspace lookup can map a project
+    // basename → path); registries are empty unless a test sets them.
     mockGetWorkspaceTerminals.mockReturnValue(
-      new Map([[WS_A, emptyEntry()], [WS_B, emptyEntry()]]),
+      new Map([[WS_A, runningEntry()], [WS_B, runningEntry()]]),
     );
     mockGetBuilders.mockReturnValue([]);
     mockGetArchitects.mockReturnValue([]);
@@ -115,11 +126,21 @@ describe('Spec 1313 — resolveAgentInRegistry (offline-hold fallback)', () => {
   });
 
   it('NOT_FOUND when the project workspace is not active (the boundary of the workspace lookup)', () => {
-    // Only WS_A is live-registered; proj-b maps to no workspace.
-    mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS_A, emptyEntry()]]));
+    // Only WS_A is running; proj-b maps to no workspace.
+    mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS_A, runningEntry()]]));
 
     const result = resolveInRegistry('proj-b:spir-200', WS_A);
     expect(isResolveError(result) && result.code).toBe('NOT_FOUND');
+  });
+
+  it('NOT_FOUND when the project workspace has only an empty slot on the map (Issue #1978)', () => {
+    // A stopped workspace that a route was asked about: its builder is registered, and its
+    // mail is refused as for a workspace with no slot, not held for nobody to deliver.
+    mockGetWorkspaceTerminals.mockReturnValue(new Map([[WS_A, runningEntry()], [WS_B, emptyEntry()]]));
+    mockGetBuilders.mockImplementation((ws) => (ws === WS_B ? [builder('spir-200')] : []));
+
+    const result = resolveInRegistry('proj-b:spir-200', WS_A);
+    expect(result).toEqual({ code: 'NOT_FOUND', message: "Workspace 'proj-b' not found. No workspace with that name or directory name is registered." });
   });
 
   it('NOT_FOUND for project:builder when the agent is absent from the target registry', () => {
