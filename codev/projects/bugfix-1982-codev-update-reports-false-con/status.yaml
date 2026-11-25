@@ -1,7 +1,7 @@
 id: bugfix-1982
 title: codev-update-reports-false-con
 protocol: bugfix
-phase: investigate
+phase: fix
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-25T07:17:15.639Z'
-updated_at: '2026-11-25T07:17:15.642Z'
+updated_at: '2026-11-25T07:21:13.912Z'
