@@ -437,3 +437,9 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   touches porch code, the porch skill x4 and the hash file only. Hashes regenerate identically after the merge
   commit (194 versions); skill/governance/porch tests 161/161; build, tsc OK. No Windows run (no platform code;
   architect). No full run (architect).
+- Owner approved the pr gate (main-46), accepting the config-validation deviation; approve+merge held until main
+  settles. Merged main twice more: the Cockpit PR #1971 (999af67b4; 169 files, overlap only arch.md and
+  lessons-learned.md, auto-merged and read correctly; frozen-lockfile install for the new workspace-views
+  package) and PR #1980 (06462ce91; overlap only shipped-skill-hashes.ts, regenerated identically, 196
+  versions). Local set on 06462ce91: build, both tsc, governance/doc/skill 131/131, commands/check 784/784,
+  1951 agent-farm tests 31/31, residue OK. No full run (architect); one Windows run on the final head.
