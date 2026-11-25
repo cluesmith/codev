@@ -25,6 +25,7 @@ import {
   refusalToAddress,
   resolveAgentInRegistry,
   resolveTarget,
+  runningWorkspacePaths,
   type SenderContext,
 } from './tower-messages.js';
 
@@ -140,30 +141,37 @@ function agentEntry(
   return entry;
 }
 
-/** A workspace Tower knows, in the spelling it runs under when it is running. */
-interface ListedWorkspace {
-  path: string;
-  entry: WorkspaceTerminals | undefined;
-}
+/**
+ * A workspace Tower knows, in the spelling it runs under when it is running. `entry` is its
+ * slot on the terminal map, read only when it is running: a stopped workspace can have a
+ * slot too (Issue #1978).
+ */
+type ListedWorkspace = { path: string; running: true; entry: WorkspaceTerminals } | { path: string; running: false };
 
 /**
  * Every workspace Tower knows, once each, told apart by key as the naming module tells
  * them: the running ones first, then the registered ones that are not running, each group
  * in path order.
  */
-function listedWorkspaces(registeredPaths: string[], terminals: Map<string, WorkspaceTerminals>): ListedWorkspace[] {
+function listedWorkspaces(
+  registeredPaths: string[],
+  running: string[],
+  terminals: Map<string, WorkspaceTerminals>,
+): ListedWorkspace[] {
   const byKey = new Map<string, ListedWorkspace>();
-  for (const [path, entry] of terminals) byKey.set(workspaceKey(path), { path, entry });
+  for (const path of running) {
+    const entry = terminals.get(path);
+    // `running` is read off these slots, so a running workspace without one is a bug here.
+    if (entry === undefined) throw new Error(`running workspace ${path} has no slot on the terminal map`);
+    byKey.set(workspaceKey(path), { path, running: true, entry });
+  }
   for (const path of registeredPaths) {
     const key = workspaceKey(path);
-    if (!byKey.has(key)) byKey.set(key, { path, entry: undefined });
+    if (!byKey.has(key)) byKey.set(key, { path, running: false });
   }
   const inPathOrder = (a: ListedWorkspace, b: ListedWorkspace) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   const all = [...byKey.values()];
-  return [
-    ...all.filter((w) => w.entry !== undefined).sort(inPathOrder),
-    ...all.filter((w) => w.entry === undefined).sort(inPathOrder),
-  ];
+  return [...all.filter((w) => w.running).sort(inPathOrder), ...all.filter((w) => !w.running).sort(inPathOrder)];
 }
 
 /**
@@ -174,19 +182,17 @@ function listedWorkspaces(registeredPaths: string[], terminals: Map<string, Work
 export function addressBook(from: SenderContext = {}): AddressBookResponse {
   const caller: SenderContext = from.workspace ? { ...from, workspace: workspaceKey(from.workspace) } : from;
   const registered = getRegisteredWorkspaces();
-  const terminals = getWorkspaceTerminals();
-  const active = [...terminals.keys()];
+  const running = runningWorkspacePaths();
 
-  const workspaces = listedWorkspaces(registered.map((w) => w.workspacePath), terminals).map((listed): AddressBookWorkspace => {
-    const named = printableAddressName(listed.path, registered, active);
+  const workspaces = listedWorkspaces(registered.map((w) => w.workspacePath), running, getWorkspaceTerminals()).map((listed): AddressBookWorkspace => {
+    const named = printableAddressName(listed.path, registered, running);
     const isCallersOwn = caller.workspace !== undefined && isSameWorkspace(listed.path, caller.workspace);
-    const agents =
-      listed.entry === undefined
-        ? []
-        : seatsOf(listed.path, listed.entry).map((seat) => agentEntry(seat, listed.path, named.name, isCallersOwn, caller));
+    const agents = listed.running
+      ? seatsOf(listed.path, listed.entry).map((seat) => agentEntry(seat, listed.path, named.name, isCallersOwn, caller))
+      : [];
     const workspace: AddressBookWorkspace = {
       path: listed.path,
-      running: listed.entry !== undefined,
+      running: listed.running,
       addressName: named.name,
       agents,
     };

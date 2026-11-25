@@ -116,7 +116,8 @@ workspace on this Tower with its agents, each as an address ready to paste (see 
 below). `<workspace>` is the workspace's directory name, or the name it was given with
 `afx workspace name`. A named architect that is not registered fails, listing the workspace's
 architects and its front door; nothing is rerouted. Mail to a registered architect with no live
-terminal is held (`no-live-pty`), like any other.
+terminal is held (`no-live-pty`), like any other, while its workspace is running; an address that
+names a stopped workspace (one with no open terminal) is refused as not running.
 
 **Replying to another workspace.** A message from another workspace names its sender by full
 address, and its last line is the command that answers it. Run it as printed:

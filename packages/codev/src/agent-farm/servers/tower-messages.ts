@@ -17,7 +17,7 @@ import {
   stripLeadingZeros,
   CROSS_TOWER_UNAVAILABLE_MESSAGE,
 } from '../utils/agent-names.js';
-import { getWorkspaceTerminals } from './tower-terminals.js';
+import { getTerminalManager, getWorkspaceTerminals } from './tower-terminals.js';
 import type { WorkspaceTerminals } from './tower-types.js';
 import {
   lookupBuilderSpawningArchitect,
@@ -28,7 +28,12 @@ import {
 } from '../state.js';
 import { DEFAULT_ARCHITECT_NAME } from '../utils/architect-name.js';
 import { workspaceKey } from '../utils/workspace-path.js';
-import { findWorkspaceByAddressName, isSameWorkspace, printableAddressName } from '../utils/workspace-address.js';
+import {
+  findWorkspaceByAddressName,
+  isSameWorkspace,
+  printableAddressName,
+  runningWorkspaces,
+} from '../utils/workspace-address.js';
 import { isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import type { CrossWorkspaceOrigin, ReplyRoute } from '../utils/message-format.js';
 
@@ -180,6 +185,26 @@ function canonicalSender(sender: SenderContext): SenderContext {
   return sender.workspace ? { ...sender, workspace: workspaceKey(sender.workspace) } : sender;
 }
 
+/**
+ * The workspaces running on this Tower now ({@link runningWorkspaces}), in the spelling the
+ * terminal map keys them by. Tower's terminals are those on the map whose session is open:
+ * it exists and has not exited. The map keeps an exited builder's or shell's id until the
+ * workspace's next rebuild, so being on the map is not enough. A session whose process
+ * connection is down still counts while it reconnects: whether it takes input now is a fact
+ * about the agent, and the send route holds its mail `no-live-pty`.
+ */
+export function runningWorkspacePaths(): string[] {
+  const manager = getTerminalManager();
+  const isOpen = (terminalId: string) => manager.getSession(terminalId)?.status === 'running';
+  const withAnOpenTerminal: string[] = [];
+  for (const [workspacePath, entry] of getWorkspaceTerminals()) {
+    if ([entry.architects, entry.builders, entry.shells].some((terminals) => [...terminals.values()].some(isOpen))) {
+      withAnOpenTerminal.push(workspacePath);
+    }
+  }
+  return runningWorkspaces(withAnOpenTerminal);
+}
+
 /** The workspace an address points into, and whether it is the sender's own. */
 interface TargetWorkspace {
   workspacePath: string;
@@ -203,11 +228,7 @@ function locateWorkspace(address: AgentAddress, sender: SenderContext): TargetWo
   if (address.workspace !== undefined) {
     // The only place the name table is read: an address that names no workspace costs
     // no query here.
-    const found = findWorkspaceByAddressName(
-      address.workspace,
-      getRegisteredWorkspaces(),
-      getWorkspaceTerminals().keys(),
-    );
+    const found = findWorkspaceByAddressName(address.workspace, getRegisteredWorkspaces(), runningWorkspacePaths());
     if (!found.ok) return { code: found.code, message: found.message };
     return {
       workspacePath: found.workspacePath,
@@ -515,9 +536,11 @@ export interface RegistryResolveResult {
  *   between sessions would be refused when it should be held (Spec 1940).
  * - Any form with a workspace in front — the workspace comes from the same lookup
  *   the live resolver uses ({@link locateWorkspace}), and the agent is held against
- *   ITS registry. Boundary: that lookup reads the live workspace map, so the target
- *   workspace must be active (its agent's PTY may be dead); a fully-inactive
- *   workspace still NOT_FOUNDs, exactly as the live resolver does.
+ *   ITS registry. Boundary: that lookup finds only a running workspace
+ *   ({@link runningWorkspacePaths}), so the target workspace must be running (its
+ *   agent's PTY may be dead); a stopped workspace is refused as not running, exactly
+ *   as the live resolver refuses it, whatever entry the terminal map holds for it
+ *   (Issue #1978).
  *
  * A cleaned-up builder (`afx cleanup`) is deleted from global.db too, so it
  * correctly resolves to NOT_FOUND here — mail is only held for agents that still
@@ -690,7 +713,7 @@ export function crossWorkspaceOrigin(sender: MessageSender, recipient: MessageRe
   const agent = senderAgent(sender.id);
   if (agent === null) return null;
 
-  const named = printableAddressName(sender.workspace, getRegisteredWorkspaces(), getWorkspaceTerminals().keys());
+  const named = printableAddressName(sender.workspace, getRegisteredWorkspaces(), runningWorkspacePaths());
   if (named.name === null) return { sender: agent, reply: { how: 'no-address' } };
   const senderAddress: AgentAddress = { ...agent, workspace: named.name };
   // A name that fits the component rule can still have no text form: `architect:<id>`

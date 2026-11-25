@@ -10,7 +10,8 @@
  *
  * - `registered`: every workspace Tower has a row for, running or not, with its explicit
  *   name (`known_workspaces`).
- * - `active`: the paths of the workspaces that are running now (the live terminal map).
+ * - `active`: the paths of the workspaces that are running now, as {@link runningWorkspaces}
+ *   decides it.
  *
  * A running workspace with no row counts as registered and unnamed.
  */
@@ -35,6 +36,29 @@ export const WORKSPACE_NAME_COMMAND = 'afx workspace name <name>';
 /** A workspace's directory basename as an address would have to write it. */
 function basenameOf(workspacePath: string): string {
   return path.basename(workspacePath).toLowerCase();
+}
+
+/**
+ * The workspaces that are running (Issue #1978). This is the one definition of "running",
+ * used by every rule in this module, by Tower's address book and resolvers, and by
+ * `afx whoami`: a workspace is running while it has at least one terminal. Being registered,
+ * having been activated, or holding a slot in Tower's terminal map does not make it running.
+ * Many Tower routes create that slot for any workspace they are asked about, so a slot shows
+ * only that someone asked.
+ *
+ * `terminalWorkspaces` gives, for each terminal, the workspace it belongs to. Tower passes
+ * its open terminals. `afx whoami`, which runs without Tower, passes the `terminal_sessions`
+ * rows: Tower writes one when it starts a terminal and deletes it when the terminal ends.
+ * Each workspace is returned once, in the first spelling given for it, and two spellings of
+ * one directory are one workspace.
+ */
+export function runningWorkspaces(terminalWorkspaces: Iterable<string>): string[] {
+  const byKey = new Map<string, string>();
+  for (const workspacePath of terminalWorkspaces) {
+    const key = workspaceKey(workspacePath);
+    if (!byKey.has(key)) byKey.set(key, workspacePath);
+  }
+  return [...byKey.values()];
 }
 
 /** A workspace Tower knows: registered, running, or both. */
