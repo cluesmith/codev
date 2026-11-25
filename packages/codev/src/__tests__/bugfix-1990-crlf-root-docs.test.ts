@@ -146,6 +146,22 @@ describe('issue #1990 — root docs keep their CR LF line endings', () => {
       expect(read('CLAUDE.md')).toBe(edited);
     });
 
+    it('a CR LF doc an earlier update inserted the block into (LF block, LF break on each side) is healed', async () => {
+      const template = read('AGENTS.md');
+      const begin = template.indexOf(HOT_BLOCK_BEGIN);
+      const end = template.indexOf(HOT_BLOCK_END) + HOT_BLOCK_END.length;
+      // The insertion before #1990 into a CR LF doc from before Spec 987: the block, the blank
+      // line before it and the break after it in LF, the rest in CR LF.
+      const inserted = `${toCrlf(template.slice(0, begin - 1))}\n${template.slice(begin, end)}\n${toCrlf(template.slice(end + 1))}`;
+      expect(bareLineFeeds(inserted)).toBe(bareLineFeeds(template.slice(begin, end)) + 2);
+      write('AGENTS.md', inserted);
+
+      const result = await runUpdate();
+
+      expect(result.rootConflicts).toEqual([]);
+      expect(read('AGENTS.md')).toBe(toCrlf(template));
+    });
+
     it('a CR LF doc an earlier update left mixed (LF block) is healed to CR LF', async () => {
       const template = read('CLAUDE.md');
       const begin = template.indexOf(HOT_BLOCK_BEGIN);
