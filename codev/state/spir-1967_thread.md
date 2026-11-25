@@ -72,3 +72,17 @@
   counts as a message; the email rule's excluded code points written out in the contract (Decision
   7's list plus tab, LF, U+2028, U+2029); media-type-only check of R's answer; a run of
   `500 cloud-error` shown like not-verified (G15).
+
+## 2026-11-25 — plan
+
+- spec-approval approved by the owner (main-55, 23:41Z, relayed by the architect); ran `porch
+  approve` myself. The owner adopted C1–C14, G1–G15, K1–K6, the accepted-once ordering and OQ1
+  (merge when the stand-in criteria pass, feature inert; verify-approval waits for a human run
+  through the real cloud).
+- Plan: 11 phases. Key choices: one contract module (`peer/contract.ts`; shapes and constants in
+  codev-types); the stand-in relay never imports it (no mirrored misreading); no mailbox rebuild —
+  additive no-CHECK columns (v18 precedent) for arrived remote mail incl. `release_hold`, and
+  sender-held mail in its own `peer_outbox` table so the local drainer can't see it; test layers:
+  porch's check runs `*.test.ts` only (unit + in-process stand-in/pipeline on injected clocks),
+  two-Tower e2e / Playwright / Windows on demand. Harness is phase 2; vectors ship in phase 1;
+  migration tested on a backup-API copy of a real global.db in phase 3; Playwright in phase 10.

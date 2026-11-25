@@ -1,0 +1,970 @@
+# Plan: Tower-to-Tower messaging, stage 2 — the Tower half
+
+**Specification**: [codev/specs/1967-tower-to-tower-messaging-stage.md](../specs/1967-tower-to-tower-messaging-stage.md)
+(approved 2026-11-25, decision main-55, at `9978e13a0`). The design it builds is
+[codev/specs/1940-tower-to-tower-messaging-proto.md](../specs/1940-tower-to-tower-messaging-proto.md);
+"Decision N" below refers to that spec, "the contract" to the spec's Wire Contract section (revision
+3), and C/G/K numbers to its Departures.
+
+## Executive Summary
+
+The spec chose both open approaches, and the owner adopted them at the gate:
+
+- **Approach 1A.** The receiving entry point lives inside Tower's tunnel client, on the one path
+  `POST /__tower/peer`. The client verifies the statement with its own session's secret and hands
+  only a verified request to delivery code inside the process. The path never reaches the local
+  listener.
+- **Approach 2A.** The Tower half is proven against a stand-in relay that implements the cloud's
+  side of the contract, plus shared test vectors the cloud runs too.
+
+The plan builds that in eleven phases, each one commit on `builder/spir-1967`, with one PR at the
+end. Five choices shape the phases.
+
+**1. One module speaks the contract** (architect's item 3). All of the Tower's knowledge of the wire
+lives in `packages/codev/src/agent-farm/peer/contract.ts`:
+
+- header names and the protocol constants;
+- encoding and decoding the statement, the payload and the answer;
+- the MAC and the payload hash;
+- every field rule, including the excluded code points;
+- the mapping from an HTTP status to an outcome.
+
+Only the TypeScript shapes and the constants go in `codev-types` (`packages/types/src/peer-wire.ts`),
+as the server/client isolation rule requires. No other file builds a header, parses a statement or
+reads a status code, so a late correction from the cloud is a change to one file and its tests.
+
+**2. The stand-in relay is written independently of that module.** It imports the shapes and
+constants from `codev-types` and uses `node:crypto` directly. It never imports `contract.ts`. If it
+did, a misreading of the contract would be mirrored on both sides and every test would still pass.
+For the same reason, the test that checks the shared vectors computes the HMAC and hash with
+`node:crypto` and only then compares them with `contract.ts`.
+
+**3. Storage: no mailbox table rebuild.** The spec left three options. The plan takes the precedent
+migration v18 set:
+
+- **Columns on `mailbox`.** Remote mail that has *arrived* is a mailbox row like any other (mailbox
+  first, render gate, locks). It gains nullable columns that carry its remote provenance, and an
+  integer `release_hold` column for mail held for release. None has a `CHECK`; the values are
+  enforced in TypeScript.
+- **How held-for-release is stored.** Such a row is `status = 'held'`, `reason = NULL`,
+  `release_hold = 1`, and the API reports its reason as `held-for-release`. The existing `CHECK`s are
+  untouched.
+- **Mail waiting for a peer lives in its own table, `peer_outbox`.** It never enters `mailbox`, so
+  Spec 1313's drainer and escalation cannot see it (criterion 7 holds by construction).
+- **Other new tables:** accepted-once records (`peer_accepted`, kept for at least 30 days whatever the
+  mailbox retention), grants, the switch, the cached peer list with former names, and the record.
+- **Why not a rebuild.** A rebuild would copy every row of every upgraded install's mailbox,
+  including held mail. Additive columns and new tables cannot make a fresh install diverge from an
+  upgraded one.
+
+**4. Test layers, and what runs where** (architect's item 2). Porch's tests check runs
+`npm test -- --exclude='**/e2e/**'` in `packages/codev`, which excludes every `*.e2e.test.ts`. The
+plan uses that boundary:
+
+| Layer | Files | Runs | What it may do |
+|---|---|---|---|
+| **A. Unit and in-process** | `*.test.ts` | **Inside porch's tests check** (3 workers, 15 minutes) | No Tower process, no socket other than loopback, an injected clock for every time-dependent rule. Includes the stand-in relay talking to an in-process tunnel client and the sender and receiver pipelines over a temporary SQLite file |
+| **B. Two-Tower end to end** | `*.e2e.test.ts` | **On demand**, after `pnpm build`, with `vitest.e2e.config.ts` and at most 3 workers, at the end of each phase that adds one | Two real Tower processes on their own ports, databases and agent-farm directories, both connected to the stand-in over loopback |
+| **C. Browser** | `__tests__/e2e/*.test.ts` (Playwright) | **On demand**, in phase 10 and again in phase 11 | Tower's home page and the dashboard, rendered |
+| **D. Platform** | The Windows workflow | **On demand**, dispatched on the branch in phases 5 and 11 | The tunnel client and the CLI's argument handling on Windows |
+
+- I run every on-demand run myself, only at a one-minute load average of 20 or less, and record
+  the result in the phase's commit message and my thread. A failure is reported to the architect,
+  never rerun or skipped.
+- Flood, backlog, lifetime and back-off tests are layer A, on an injected clock, never real waits.
+  In layer B the Tower processes are started with a test-only back-off base
+  (`AF_TEST_PEER_BACKOFF_MS`), honoured only under `NODE_ENV=test` as `AF_TEST_DB` is, so a retry
+  there takes milliseconds. Layer B therefore never sleeps for the protocol's real intervals.
+- The scenario-to-layer table is below, under "Where each scenario is tested".
+
+**5. The harness is its own early phase** (architect's item 1), phase 2. Every later phase tests
+against the stand-in relay and the two-Tower launcher, and both exist before any Tower code speaks
+the contract. The shared vectors file ships in phase 1. I send its path and commit to the
+architect, who posts it to codev-cloud issue #22, as was done with the contract.
+
+**What no phase does** (architect's item 6):
+
+- No test, script or manual step sends through the real Codev Cloud.
+- None touches the live Tower on port 4100 or its sockets, or writes its `global.db`.
+- The one step that reads a real database is phase 3's migration check. It reads a *copy* of
+  `~/.agent-farm/global.db` made with SQLite's backup API, which only reads the source; that is not
+  testing against the live Tower, and the copy is never written back.
+- The CLI under test reaches a test Tower by the mocks the stage 1 harness already uses for the
+  port and the database path. The built `afx` binary, which always connects to port 4100, is never
+  run.
+
+**For the architect's own reading of the verification code** (architect's item 4 of 20:41Z):
+
+- `peer/contract.ts`: decoding the statement, the field rules, the MAC and the hash.
+- The `/__tower/peer` interception in `lib/tunnel-client.ts`: steps 1 to 8 in order, the session
+  secret, and the statement-id memory.
+- `peer/receiver.ts`: steps 9 to 16.
+
+Each is kept small and free of unrelated code so it can be read alone. Each phase that touches them
+says so in its commit message.
+
+**Dependencies outside this repository.**
+
+- Issue #1871 (Tower's canonical slug) affects only the name Tower shows while disconnected. While
+  connected, Tower takes its own name from `auth_ok.slug` and the listing's `self.slug`, as the
+  contract says.
+- When #1871 merges, the branch is rebased on `main` before the next phase starts. The migration
+  number is chosen at that point, as the next free one.
+- Codev Cloud's half (codev-cloud issue #22) is not needed by any phase. The real-cloud check waits
+  at `verify-approval` (Open Question 1, as the owner adopted it).
+
+## Phases (Machine Readable)
+
+```json
+{
+  "phases": [
+    {"id": "phase_1", "title": "Wire contract module and shared test vectors"},
+    {"id": "phase_2", "title": "Stand-in relay and two-Tower test harness"},
+    {"id": "phase_3", "title": "Peer storage and the mailbox migration"},
+    {"id": "phase_4", "title": "The remote-messaging switch and grants"},
+    {"id": "phase_5", "title": "Tunnel handshake, session secret and the verified entry point"},
+    {"id": "phase_6", "title": "Receiving: accepted once, delivery through the mailbox and gate, discovery answers"},
+    {"id": "phase_7", "title": "Peer listing and the cloud client"},
+    {"id": "phase_8", "title": "Sending: the outbox and the per-peer relay queue"},
+    {"id": "phase_9", "title": "Inbox, status and record surfaces"},
+    {"id": "phase_10", "title": "Dashboard: Peers panel and three-count indicator"},
+    {"id": "phase_11", "title": "Docs in both trees, the walkthrough end to end, and Windows"}
+  ]
+}
+```
+
+## Where each criterion is met
+
+| Criterion (spec, Success Criteria) | Phase | Layer |
+|---|---|---|
+| 1 Headline path; walkthrough and skipped-step table | 8 (path), 11 (walkthrough) | B |
+| 2 Switch off: refused before anything leaves | 4 (switch), 8 (send) | A, B |
+| 3 No owner in any address for my own Towers; `owner@` refused | 8 | A, B |
+| 4 No remote message until a grant; fresh and upgraded refuse everything | 3, 4, 6 | A, B |
+| 5 Outcomes told; refusal exits non-zero, leaves nothing on R | 6, 8 | A, B |
+| 6 Held at S, accepted exactly once, then expired | 8 | A (lifetime, backlog), B (offline, deploy, restart) |
+| 7 Sender-held mail is a distinct kind | 3 (by construction), 8, 9 | A, B |
+| 8 Order; one message relay call in flight per peer | 8 | A, B |
+| 9 Remote header and a reply command that works | 6 (frame), 8 (reply round trip) | A, B |
+| 10 Sender identity only from the verified statement | 5, 6 | A, B |
+| 11 Local key, `/t/`-style headers, replay and earlier session all refused | 5 | A, B |
+| 12 Peer without the protocol, cloud without relay: refused, not held | 7, 8 | A, B |
+| 13 `--raw`, `--interrupt`, `--no-enter`, `--delay` refused; control characters never reach a terminal | 6 (normalisation), 8 (options) | A, B |
+| 14 List my Towers; discovery under a grant | 6 (answer), 7 (list), 8 (`afx peer show`) | A, B |
+| 15 Revoking stops new mail and automatic delivery of accepted mail | 4, 6 | A, B |
+| 16 Flooding bounded at R (and S's cap) | 6, 8 | A |
+| 17 Records, without bodies | 6, 8, 9 | A, B |
+| Stand-in implements the contract exactly | 2 | A |
+| Shared vectors in place and posted to #22 | 1 | A |
+| Off by default, fresh and upgraded | 3, 4 | A |
+| TLS: secret only on `wss:`, calls only on `https:`, loopback excepted | 5, 7 | A |
+| Builder rule for remote addresses | 8 | A, B |
+| Builders addressable across Towers; discovery lists them | 6, 8 | A, B |
+| Frame invariant for arbitrary statement and payload fields (seeded generator) | 6 | A |
+| Mailbox first, render gate, per-agent then per-terminal locks | 6 | A, B |
+| Secret in memory only; no statements, MACs or bodies in logs | 5 (unit), 11 (whole walkthrough) | A, B |
+| Stage 1 carry-overs (the `afx://devvm/…` hint; explicitly named workspaces) | 8 | A, B |
+| Windows: `afx://` unquoted in Git Bash, PowerShell, cmd | 11 (and 5's run) | D |
+| Docs, skills and role files in both trees | 11 | — |
+| Gaps G10, G12, G15 (runs shown in `afx peer list`, panel, record) | 8 (state), 9 (CLI), 10 (panel) | A, C |
+
+## Phase Breakdown
+
+### Phase 1: Wire contract module and shared test vectors
+
+**Dependencies**: None
+
+#### Objective
+
+Encode the contract once, in the one module that speaks it, and publish the bytes both halves test
+against. After this phase the cloud can check its HMAC, hash and field rules against our vectors,
+and every later phase builds on a contract module that already passes them.
+
+#### Files to Create / Modify
+
+- `packages/types/src/peer-wire.ts` (new): TypeScript shapes only: the handshake's `peer` and `relay`
+  fields, the listing, the relay headers as a type, the message and query payloads, the statement,
+  the answer and its outcome and reason unions. Also the protocol-v1 constants of the contract's
+  table. It is exported from `packages/types/src/index.ts`.
+- `packages/codev/src/agent-farm/peer/contract.ts` (new). The one module:
+  - building and reading the four relay headers;
+  - encoding a payload: literal UTF-8, with the line-ending rule and removals of Decision 7 applied
+    before serialising;
+  - decoding the statement from base64url and verifying its MAC in constant time;
+  - the field rules of contract section 5 as one table of validators, with the excluded code points
+    for the email written out as data;
+  - the payload rules of section 4, the payload hash, and encoding and decoding the answer;
+  - the mapping from status to outcome and source of section 6, including answers without the body
+    and the "relay stated" distinction;
+  - the order of S's refusals as an ordered list of named checks, used by phase 8.
+- `packages/types/fixtures/peer-contract-vectors.json` (new), in the format of contract section 11,
+  with the worked case and the full set: a non-ASCII email; another secret; a payload altered after
+  the MAC; another receiving Tower; `issuedAt` just inside and just outside 5 minutes in both
+  directions; an unsupported `v`; each statement field just inside and just outside its rule; one
+  email per line of the excluded code-point list.
+- `packages/codev/src/agent-farm/__tests__/peer-contract.test.ts` (new).
+- `packages/codev/src/agent-farm/__tests__/peer-contract-vectors.test.ts` (new).
+
+#### Deliverables
+
+- [ ] The types, the constants and the contract module.
+- [ ] The vectors file. Each case's MAC and hash are cross-checked once by hand in Python
+  (`python3 -I`, standard library only, run from the scratch directory and not committed), and the
+  thread records that it was done.
+- [ ] The file's path and commit are sent to the architect for codev-cloud issue #22 (architect's
+  item 1).
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] The vectors test computes every case's HMAC-SHA-256 and SHA-256 with `node:crypto`, compares
+  them with the file, and then runs each case through `contract.ts`, getting the expected verdict.
+  The worked case of section 11 is in the file byte for byte.
+- [ ] No file other than `contract.ts` and `peer-wire.ts` contains a contract header name or a
+  status-to-outcome mapping (a grep in the test).
+- [ ] `codev-types` stays free of runtime dependencies, and the existing boundary tests pass.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+Layer A only:
+
+- every field rule just inside and just outside;
+- a duplicate key in the statement is refused;
+- a 48 KiB body of characters JSON escapes, and one of 4-byte emoji, both encode within 102 400
+  bytes;
+- a body with lone surrogates is refused;
+- each status, with and without the body, both before and after a relay has been stated, maps to the
+  outcome and source of the section 6 tables;
+- the precedence list contains S's checks in the contract's order.
+
+### Phase 2: Stand-in relay and two-Tower test harness
+
+**Dependencies**: Phase 1 (shapes, constants and vectors only; not `contract.ts`)
+
+#### Objective
+
+A cloud we control. It is a stand-in relay that implements the cloud's side of the contract
+exactly, independently of the Tower's contract module. With it comes a harness that runs two test
+Towers against it. Every later phase is tested with these.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/__tests__/helpers/stand-in-relay.ts` (new). It serves:
+  - the `/tunnel` WebSocket handshake, including `peer`, `relay` and a fresh 32-byte secret per
+    session, then HTTP/2 over the socket, as `mock-tunnel-server.ts` does today;
+  - `POST /api/peer/relay`, with the ten checks of contract section 4 in order, statements built from
+    its own records, and its own limits with the counting rules of section 7 on an injected clock;
+  - `GET /api/peer/towers` and `PUT /api/peer/state`, with their limits.
+
+  For tests it records every call and the number of message relay calls in flight per peer, and it
+  can originate a forwarded request itself (so the receiving side can be tested without a sending
+  Tower). It also injects faults on demand:
+  - a Tower offline, or a forward held past the relay timeout;
+  - a stream reset before the answer is complete;
+  - a deploy (every tunnel dropped, new secrets);
+  - an old cloud (no `relay`, `404` on the peer routes), and `relay: null`;
+  - bodyless `401`/`403`/`404`/`429`/`5xx` answers;
+  - `409`, `500 cloud-error`, a MAC made with a wrong secret, a statement replayed, a session that
+    states no version.
+- `packages/codev/src/agent-farm/__tests__/helpers/two-towers.ts` (new). It starts the stand-in and
+  two Towers with the existing `startTower`, each with its own port, `AF_TEST_DB` and agent-farm
+  directory, and a `cloud-config.json` written there that points at the stand-in's loopback URL. It
+  provides a CLI runner that switches the mocked Tower port and database path per call (the pattern
+  of `cross-workspace-addressing.e2e.test.ts`), and helpers for workspaces and inert terminals.
+- `packages/codev/src/agent-farm/__tests__/helpers/seeded-generator.ts` (new). A small seeded,
+  deterministic generator (a fixed-seed PRNG and string generators by code-point class) for the
+  property tests. No new dev dependency, as the architect ruled.
+- `packages/codev/src/agent-farm/__tests__/stand-in-relay.test.ts` (new, layer A).
+- `packages/codev/src/agent-farm/__tests__/two-towers-harness.e2e.test.ts` (new, layer B).
+
+#### Deliverables
+
+- [ ] The stand-in relay, the two-Tower harness and the seeded generator.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] The stand-in passes the shared vectors as the issuing side: given a case's secret, records and
+  payload, it builds the case's statement and MAC.
+- [ ] Its order of checks: for each adjacent pair of steps in section 4's table, a call that fails
+  both gets the earlier step's answer.
+- [ ] `unknown-tower` leaves its per-pair counters unchanged. A call with an invalid kind counts as
+  a message.
+- [ ] It never answers 200 itself, and it checks R's answer exactly as section 6 says (media type
+  without parameters, size, outcome header).
+- [ ] The harness starts two Towers that both connect to the stand-in over loopback with today's
+  handshake (Tower ignores the new fields until phase 5), and stops them leaving no process or
+  socket behind.
+- [ ] `stand-in-relay.ts` does not import `contract.ts` (a grep in the test).
+
+#### Test Plan
+
+- Layer A: the stand-in's conformance, driven by a bare HTTP/2 and WebSocket client in the test.
+- Layer B, run on demand at the end of the phase: the harness smoke test.
+
+### Phase 3: Peer storage and the mailbox migration
+
+**Dependencies**: Phase 1
+
+#### Objective
+
+Every table and column stage 2 needs, on fresh and upgraded installs alike, with existing held mail
+untouched (architect's item 4: this is the phase where the migration is tested on a copy of a
+current database with held rows).
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/db/schema.ts` and `db/migrations.ts`. One migration (the next free
+  number after rebasing on `main`), in the PRAGMA-gated additive shape of v16 to v20:
+  - `mailbox` gains nullable `remote_tower_id`, `remote_message_id`, `remote_sender` (the verified
+    Tower id and slug, and the stated sending address, as JSON validated in TypeScript) and
+    `remote_owner_email`, and `release_hold INTEGER NOT NULL DEFAULT 0`. No `CHECK` on any of them,
+    following v18's reason.
+  - New tables:
+    - `peer_settings`: the switch, off by default;
+    - `peer_grants`: peer Tower id, workspace key, one of the scopes (front door, one architect,
+      every architect, everything), and the mode (deliver or hold for release);
+    - `peer_towers` and `peer_tower_names`: the cached listing and every former slug, with when the
+      list was last refreshed;
+    - `peer_outbox`: message id, peer Tower id, the exact payload bytes, `sentAt`, the sending
+      agent, state, last outcome, attempt count, next attempt time, and the time it was resolved;
+    - `peer_accepted`: peer Tower id plus message id as the key, payload hash, mailbox row id, and
+      expiry;
+    - `peer_records`: one row per attempt, with the aggregate rows of C5 (sender, reason, minute,
+      count, first and last time).
+- `packages/codev/src/agent-farm/db/mailbox.ts`. Every query the local drainer, the escalation and
+  the held count use excludes `release_hold = 1`, and a mapping reports such a row's reason as
+  `held-for-release`.
+- `packages/codev/src/agent-farm/peer/store.ts` (new): typed access to the new tables. It is the
+  only file that writes them.
+- `packages/codev/src/agent-farm/__tests__/peer-storage-migration.test.ts` (new).
+
+#### Deliverables
+
+- [ ] The migration, the fresh-install schema and the store.
+- [ ] Off by default: a fresh database and an upgraded one both read the switch as off and hold no
+  grant.
+- [ ] **The migration on a copy of a current database (on demand).** A copy of my own
+  `~/.agent-farm/global.db`, taken with SQLite's backup API into the scratch directory, is migrated.
+  Its held rows (every reason present, with `detail` and `not_before`) are still held, unchanged
+  and drainable. The counts before and after go in the commit message and the thread. The copy is
+  deleted afterwards and its contents are never committed.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] An automated test builds a database with today's schema (the pre-migration schema kept as a
+  fixture of SQL text, not a binary), inserts held rows of every reason, with and without `detail`
+  and `not_before`, migrates it, and finds every row unchanged and still returned by the drainer's
+  query.
+- [ ] A fresh install and an upgraded one have identical schemas (`sqlite_master` and every table's
+  `PRAGMA table_info` compared).
+- [ ] Running the migration twice changes nothing.
+- [ ] A row with `release_hold = 1` is never returned to the local drainer, never escalated, and not
+  counted as waiting for a local agent.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+- Layer A: the tests above.
+- On demand: the copy check, recorded.
+
+### Phase 4: The remote-messaging switch and grants
+
+**Dependencies**: Phase 3
+
+#### Objective
+
+The receiving Tower's decisions about who may message whom, made by its owner, with default deny.
+After this phase a human can turn the switch on and add, list and revoke grants. Nothing can arrive
+yet, but the rules arrivals will be checked against are in place and tested.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/peer/grants.ts` (new). Matching a resolved recipient against the
+  grants:
+  - the front door is resolved when mail arrives;
+  - an architect grant follows the name;
+  - `--workspace` covers every architect in the workspace;
+  - `--all` covers everything.
+
+  It also covers grant creation's own checks (the workspace must be registered; a named architect
+  must exist) and the "matches nothing" state of `afx peer grants`.
+- `packages/codev/src/agent-farm/peer/switch.ts` (new).
+- `packages/codev/src/agent-farm/servers/peer-routes.ts` (new): the local Tower routes for the
+  commands. Wired from `servers/tower-routes.ts`, behind the local key like every other route.
+- `packages/codev/src/agent-farm/commands/peer.ts` (new): `afx peer on`, `off`, `grants`, `grant`,
+  `revoke`, and `limits` (this Tower's own; the cloud's are added in phase 7). Registered in
+  `agent-farm/cli.ts`.
+- **Human-only flag.** `afx peer on` and `afx peer grant` require `--a-human-explicitly-approved-this`,
+  the flag `porch approve` takes (Decision 9). Without it they refuse with the reason.
+- `packages/codev/src/lib/config.ts`: `peer.limits` next to `mailbox.retentionDays`, with the
+  approved spec's defaults (30 a minute accepted per peer, 50 undelivered per peer, 50 waiting at the
+  sender per peer).
+- `packages/sdk/src/tower-client.ts` and `packages/types/src/api.ts`: the client calls and request
+  and response types for the new local routes.
+- Tests: `__tests__/peer-grants.test.ts` and `__tests__/peer-commands.test.ts` (new).
+
+#### Deliverables
+
+- [ ] The switch, grants, the commands, the routes and the config.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] With no grant, the matcher refuses every recipient.
+- [ ] Each scope matches exactly what Decision 4 says it does: the front door follows the default
+  architect when `main` is removed; an architect grant stops matching when that architect is removed
+  and applies again when the name returns.
+- [ ] A grant for an unregistered workspace, or a missing architect, is refused when made.
+- [ ] `afx peer on` and `afx peer grant` without the flag refuse and change nothing. `off` and
+  `revoke` need no flag.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+- Layer A: the matcher over a table of grants and recipients; the commands driven in-process
+  against a route handler with a temporary database.
+
+### Phase 5: Tunnel handshake, session secret and the verified entry point
+
+**Dependencies**: Phases 1, 2, 4
+
+#### Objective
+
+The receiving half's security boundary. The Tower:
+
+- states the protocol in `auth`;
+- takes a session secret only over TLS (loopback excepted);
+- keeps the secret only in its tunnel session;
+- answers `POST /__tower/peer` itself, running steps 1 to 8 of contract section 5;
+- passes only a verified request on.
+
+This is the code the architect will read, so it is kept to the interception and the verification.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/lib/tunnel-client.ts`:
+  - **Handshake.** `auth` carries `peer: { protocols: [1], remoteMessaging }` from the switch.
+    `auth_ok` is read for `slug` (the Tower's own name while connected) and `relay`.
+  - **The secret.** It is kept in the per-session state, and only when the tunnel is `wss:` or the
+    cloud's host is a loopback address. Otherwise the cloud is treated as having no relay.
+  - **The entry point.** `POST /__tower/peer` is intercepted beside `/__tower/metadata`, and any path
+    under `/__tower/peer` is never proxied to the local listener. Steps 1 to 8 run in order through
+    `contract.ts`.
+  - **Statement-id memory.** It is scoped to the session and holds ids for 10 minutes.
+  - **Answers.** `not-verified`, or the `unsupported-version` and `clock-skew` refusals, with nothing
+    stored.
+  - **Handing on.** A verified request goes to a handler injected by the Tower, which phase 6
+    supplies; until then the handler answers `refused`, `remote-off`.
+  - **The local listener.** It gains no route for the path.
+  - **Removals.** The dead `POST /api/tower/metadata` push is removed (issue #1986, C14), and the
+    issue is closed by the PR.
+- `packages/codev/src/agent-farm/servers/tower-tunnel.ts`: passes the switch state in and the
+  handler; re-announces the switch on reconnect; exposes the session's slug and relay state to the
+  rest of Tower (never the secret).
+- `packages/codev/src/agent-farm/__tests__/helpers/mock-tunnel-server.ts`: unchanged, apart from
+  what existing tests need to keep passing.
+- Tests: `__tests__/peer-entry-point.test.ts` (new, layer A, an in-process tunnel client against the
+  stand-in) and `__tests__/peer-entry-point.e2e.test.ts` (new, layer B).
+
+#### Deliverables
+
+- [ ] The handshake fields, the TLS rule, the secret's home, the interception with steps 1 to 8, and
+  the statement-id memory.
+- [ ] The metadata push removed.
+- [ ] The Windows workflow is dispatched on the branch (the tunnel client is platform code) and
+  linked in the thread:
+  `gh workflow run windows.yml --ref builder/spir-1967 -f purpose='Spec 1967 tunnel peer entry point' -f suites=true`.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] Each of steps 1 to 8 fails alone and stores nothing:
+  - a statement presented again 9 minutes later is refused;
+  - one whose first presentation was refused for want of a grant cannot be presented again;
+  - one from an earlier session fails after a reconnect.
+- [ ] `POST /__tower/peer` to the local port, with the local key and the tunnel marker header,
+  reaches no handler (layer B).
+- [ ] `auth` carries the switch state. An `auth_ok` without `relay`, or with `relay` over `ws:` to a
+  non-loopback host, leaves the Tower with no secret and reporting no relay.
+- [ ] The secret never reaches a log: a test spies on the logger through a session, a forwarded
+  request and a reconnect, and searches every line for it.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+- Layer A: every check, with the stand-in originating forwards, including the `/t/`-style request
+  (arbitrary headers, no valid MAC) and the TLS cases.
+- Layer B, on demand: the local listener and the handshake on real Towers.
+- Layer D: the Windows run.
+
+### Phase 6: Receiving: accepted once, delivery through the mailbox and gate, discovery answers
+
+**Dependencies**: Phases 3, 4, 5
+
+#### Objective
+
+What the receiving Tower does with a verified request: steps 9 to 16 of contract section 5. It
+persists the message to the mailbox first and delivers it through the render gate under the
+per-agent then per-terminal locks. It answers discovery queries from the grants.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/peer/receiver.ts` (new). Steps 9 to 16:
+  - accepted once (current state, or `duplicate: true`, or `mismatch`);
+  - the switch; `sameOwner`; the payload's rules, with `sentAt` refused as `clock-skew` when ahead
+    and `expired` when old, and `too-large`;
+  - the recipient (shells `not-addressable`); the grant; R's limits, with `retryAfterSec` when the
+    per-peer minute limit tripped;
+  - then persist and make one gate attempt.
+
+  It answers `held`, `busy` within 5 seconds when the write cannot start, and stores a
+  hold-for-release grant's mail with `release_hold = 1`. It never writes a terminal itself.
+- `packages/codev/src/agent-farm/peer/discovery.ts` (new): the `answered` list, covering exactly
+  what the asker's grant covers, with `live`, trimmed to 65 536 bytes and marked `truncated`.
+- `packages/codev/src/agent-farm/peer/records.ts` (new): inbound records, with the aggregation rule
+  for floods, unverified requests recorded against the session, and no body anywhere.
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts`: when the drainer is about to deliver a
+  remote row, it checks the switch and the grant again. If either no longer allows it, the row moves
+  to held for release instead (criterion 15, and the approved spec's "switched off while held busy"
+  scenario). The local rows' path is unchanged.
+- `packages/codev/src/agent-farm/utils/message-format.ts`:
+  - the remote header and footer of Decision 7, built only from validated values;
+  - Decision 7's normalisation applied to remote bodies only. Local frames stay byte-identical, which
+    the tests assert.
+- `packages/codev/src/agent-farm/servers/tower-tunnel.ts`: supplies the receiver as the tunnel
+  client's handler.
+- R's clock surface (G12). While any relayed request in the last 10 minutes was refused as
+  `clock-skew`, the Tower carries that state for phases 9 and 10.
+- Tests:
+  - `__tests__/peer-receiver.test.ts` and `__tests__/peer-frame-invariant.test.ts` (new, layer A;
+    the property test runs on the seeded generator);
+  - `__tests__/peer-receive.e2e.test.ts` (new, layer B: real gate, real locks, inert and live
+    terminals).
+
+#### Deliverables
+
+- [ ] The receiver, discovery, inbound records, the drain-time recheck, the remote frame and
+  normalisation, and the clock surface.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] **Accepted once.** A second arrival answers the first message's current state, including
+  after a dismissal and after a Tower restart. A different payload under the same id is `mismatch`,
+  is recorded, and changes nothing. A retry after the switch or the grant changed still gets the
+  true state (the ordering the owner adopted).
+- [ ] **No grant.** The answer is `refused`, `no-grant`, and there is no mailbox row and no
+  accepted-once record.
+- [ ] **Release.** A hold-for-release grant's mail is held and never drained. Revoking a grant, or
+  turning the switch off, while mail is held `busy` moves it to held for release.
+- [ ] **The frame invariant.** It holds for arbitrary values of every statement and payload field
+  (seeded generator, a fixed number of cases per run, the seed printed on failure). A body that is
+  not valid UTF-8 is refused. Same-Tower frames are unchanged.
+- [ ] **Delivery.** A remote message takes the per-agent then per-terminal locks, in that order.
+  With the terminal lock held by another delivery, the answer is `held`, `busy` within 5 seconds,
+  and the message is delivered once the lock frees (layer B).
+- [ ] **Discovery** lists exactly what the grant covers, builders by id under `--all`, never a shell.
+  An oversized answer is trimmed and marked.
+- [ ] **R's limits.** The 31st message in a minute from one peer is `rate-limited` with
+  `retryAfterSec`, on an injected clock (layer A).
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+- Layer A: every step and outcome, the property test, the limits and the clock-skew surface, all on
+  an injected clock.
+- Layer B, on demand: delivery through the real gate and locks, held reasons, builders by id,
+  shells refused.
+
+### Phase 7: Peer listing and the cloud client
+
+**Dependencies**: Phases 2, 3, 4, 5
+
+#### Objective
+
+The sending Tower's view of the cloud. All three calls from a Tower to the cloud live in one place,
+over HTTPS only (loopback excepted). The peer list is cached with former names, so a send can be
+resolved and refused correctly even when the cloud is unreachable. A human can list their Towers.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/peer/cloud-client.ts` (new). The relay call, `GET /api/peer/towers`
+  and `PUT /api/peer/state`, each through `contract.ts`:
+  - the TLS rule;
+  - S's 20-second call timeout;
+  - the listing's call budget (on demand at most every 10 seconds, at most every 30 while holding
+    mail);
+  - the switch-state report's three retries at 5 seconds, 30 seconds and 2 minutes (K5), a newer
+    change replacing a pending one.
+- `packages/codev/src/agent-farm/peer/peer-list.ts` (new). The cached listing with every former slug
+  (C13), the Tower's current name from `self.slug` (G4), and the rule for whether the cloud has a
+  relay: the last `auth_ok`, the last listing, or a bodyless `404` from a cloud that never stated
+  one. A send does not need the Tower's own tunnel to be up (an approved-spec scenario).
+- `packages/codev/src/agent-farm/commands/peer.ts`:
+  - `afx peer list`: the online hint, the switch, what each Tower may message here, and the
+    not-verifying, clock and cloud-error marks;
+  - `afx peer limits` gains the cloud's limits from the listing.
+- `packages/codev/src/agent-farm/commands/peer.ts` and `peer/switch.ts`: `afx peer on`/`off` now
+  report the change to the cloud.
+- Tests: `__tests__/peer-cloud-client.test.ts` and `__tests__/peer-list.test.ts` (new, layer A,
+  against the stand-in).
+
+#### Deliverables
+
+- [ ] The cloud client, the cached peer list, `afx peer list`, the cloud's limits and the switch
+  report.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] Against an `http:` cloud that is not on loopback, no call is made and the cloud is reported as
+  having no relay.
+- [ ] An old cloud (no `relay`, a bodyless `404` on the peer routes) is reported as having no relay.
+  A cloud that has stated one and then answers a bodyless `404` is reported as unreachable.
+- [ ] With the cloud unreachable, a name in the cache resolves, and a name not in it fails, saying
+  when the list was last refreshed. A former name fails naming the current one.
+- [ ] After a rename in the stand-in, the next listing's `self.slug` becomes the Tower's own name.
+- [ ] A failed switch-state report is retried three times on an injected clock, then not until the
+  next connect.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+- Layer A: the client against the stand-in's normal and fault modes, on an injected clock.
+
+### Phase 8: Sending: the outbox and the per-peer relay queue
+
+**Dependencies**: Phases 1, 3, 4, 5, 6, 7
+
+#### Objective
+
+`afx send afx://<tower>/<workspace>:<agent> "…"` works. The sending Tower refuses what it must, in
+the contract's order. It persists everything else, then sends one message relay call at a time per
+peer, in order. It holds what cannot be delivered and resolves each row exactly as section 6's
+table says, so every message is accepted exactly once or ends visibly. After this phase the headline
+path runs between two test Towers.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/peer/outbox.ts` (new). The per-peer queue over `peer_outbox`:
+  - one message relay call in flight per peer, in acceptance order; queries never wait behind
+    messages;
+  - the back-off from 5 seconds to 2 minutes, brought forward by a listing that shows the peer back;
+  - rate-limited held mail from either source pauses that peer's queue for `retryAfterSec`, or the
+    next back-off interval without one (C4);
+  - "How S resolves its row" exactly;
+  - the 30-day lifetime marks a row expired;
+  - the runs of five `not-verified` (G10) and five `cloud-error` (G15), and the clock mark on a
+    `clock-skew` answer (G12), set and cleared as the contract says;
+  - it resumes from the durable rows on Tower start;
+  - all on an injected clock.
+- `packages/codev/src/agent-farm/peer/sender.ts` (new). S's checks in the contract's order (address
+  as text, switch, not connected, not registered, no relay, option, too large, unknown Tower,
+  builder rule, the 50-waiting cap), then persist and queue. It also carries `afx peer show` as a
+  discovery query, which is never held. It records every outbound attempt, with aggregation.
+- `packages/codev/src/agent-farm/servers/tower-messages.ts` and `servers/tower-routes.ts`: an
+  `afx://` address naming another Tower goes to the sender instead of `CROSS_TOWER_UNAVAILABLE`. One
+  naming this Tower's own slug resolves locally, without the cloud. `afx://owner@…` is still refused
+  as not yet available.
+- `packages/codev/src/agent-farm/commands/send.ts`:
+  - prints the new outcomes (held on this Tower, with where and why; refused, exiting non-zero);
+  - adds the stage 1 carry-over hint, "write `afx://devvm/codev:architect`" when the first of two
+    components before `architect` is one of my Towers;
+  - the explicitly named workspace carry-over resolves.
+- `agent-names.ts`, `commands/interrupt.ts`, `commands/reset.ts` and `servers/tower-cron.ts`. Their
+  refusals now say the command takes a local address. They stop saying cross-Tower messaging is not
+  available, which is no longer true. Cron targets, `afx interrupt` and `afx refresh` stay
+  local-only, as stage 1 left them.
+- `packages/sdk/src/tower-client.ts` and `packages/types/src/messaging.ts`: the new outcomes in the
+  send response.
+- `packages/codev/src/agent-farm/commands/peer.ts`: `afx peer show`.
+- Tests:
+  - `__tests__/peer-outbox.test.ts` and `__tests__/peer-sender.test.ts` (new, layer A);
+  - `__tests__/peer-pipeline.test.ts` (new, layer A): the sender, the stand-in and an in-process
+    receiver over two temporary databases, on an injected clock;
+  - `__tests__/peer-send.e2e.test.ts` (new, layer B).
+
+#### Deliverables
+
+- [ ] The outbox, the sender, the routing change, the CLI outcomes, `afx peer show`, and the
+  refusal-message updates.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] **Layer A, pipeline:**
+  - **The backlog.** 50 held messages drain in order with none refused, once against the stand-in's
+    per-pair limit and once against R's own limit with the stand-in's raised. A fresh send refused
+    for rate, from either source, exits non-zero.
+  - **The lifetime.** A row is marked expired at 30 days.
+  - **Back-off.** The back-off's shape is correct, and a listing that shows the peer back brings the
+    retry forward.
+  - **Row resolution.** Each answer class resolves the row as the table says.
+  - **Runs.** The not-verified, cloud-error and clock marks set and clear as the contract says.
+  - **Refusal order.** For each adjacent pair in S's list, a send meeting both conditions gets the
+    earlier refusal.
+- [ ] **Layer B, two Towers and the stand-in:**
+  - **The headline path, in both directions.** Each direction needs its own grant, and the reply
+    command printed in the footer, sent unchanged, reaches the sender.
+  - **Offline, then online.** The message is held at the sender, not touched by the local drainer
+    and not escalated, then delivered once.
+  - **Order.** Three messages to an offline peer arrive in order, and a fourth sent as the peer
+    returns arrives after them.
+  - **Concurrency.** Twenty concurrent sends by two agents arrive in acceptance order, and the
+    stand-in never sees two message calls to that peer in flight.
+  - **Failures in flight.** For a lost answer, a deploy, no answer and a stream reset, the message
+    arrives once.
+  - **Restart.** The sending Tower restarts with three messages waiting; they resume in order and are
+    each accepted once.
+  - **Refused on retry.** A message refused on retry because its grant was removed ends refused.
+  - **Mixed versions.** A peer that does not speak the protocol, and a cloud with no relay, are
+    refused and not held.
+  - **Remote-only refusals.** The four options are refused for a remote recipient. A builder naming
+    another Tower's non-own architect is refused, with no call made. A shell on another Tower is
+    refused.
+  - **Names.** `afx://<own slug>/…` resolves locally, and `afx://owner@…` is refused.
+  - **Waiting cap.** With 50 waiting for a peer, the next send is refused and stores nothing.
+  - **Tunnel down.** A sender whose own tunnel is down still sends.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+Layers A and B as listed, B on demand.
+
+### Phase 9: Inbox, status and record surfaces
+
+**Dependencies**: Phases 6, 8
+
+#### Objective
+
+A human can see and act on everything stage 2 holds, from the CLI, per Decision 9's stage 2 rows.
+
+#### Files to Create / Modify
+
+- `packages/codev/src/agent-farm/commands/inbox.ts`:
+  - `afx inbox` in three groups: waiting for a local agent, held for release, waiting for a peer;
+  - `afx inbox show <id>`: for remote mail, the sender's full address and the owner's email;
+  - `afx inbox release <id>` (new; human only, with the flag);
+  - `afx inbox dismiss <id>` for held-for-release mail and mail waiting for a peer.
+
+  A dismissed remote row answers a later duplicate with `refused`, `dismissed`.
+- `packages/codev/src/agent-farm/commands/peer.ts`: `afx peer log [--peer <tower-ref>]`, which reads
+  the record, shows aggregate rows as counted lines, and never shows a body.
+- `packages/codev/src/agent-farm/commands/status.ts`: one remote-messaging line: on or off, peers
+  online, held for release, waiting for a peer.
+- `packages/codev/src/agent-farm/commands/tower.ts`: `afx tower status` shows this Tower's name
+  (the slug while connected; the stored name otherwise) and the switch.
+- `packages/codev/src/agent-farm/servers/tower-routes.ts`: the held counts in the overview API
+  become three. The existing `heldCount` keeps its meaning (waiting for a local agent), so current
+  clients are unaffected, and two fields are added.
+- Tests: `__tests__/peer-inbox.test.ts` (new, layer A) and `__tests__/peer-surfaces.e2e.test.ts`
+  (new, layer B).
+
+#### Deliverables
+
+- [ ] The inbox groups and commands, `afx peer log`, the status lines and the three counts in the
+  API.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] Each kind of held mail appears in its own group and only there.
+- [ ] Release delivers through the gate. Dismissing a waiting-for-peer row stops it being sent.
+- [ ] `afx peer log` shows a flood as one counted line, and no body appears in its output.
+- [ ] `afx status` and `afx tower status` show the stated lines.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+- Layer A: the commands against a temporary database.
+- Layer B, on demand: on two Towers after a set of sends that leaves one message of each kind.
+
+### Phase 10: Dashboard: Peers panel and three-count indicator
+
+**Dependencies**: Phases 7, 9
+
+#### Objective
+
+The human's read-only view of the feature (architect's item 5: the Playwright check is part of this
+phase). The Peers panel goes on Tower's home page, and the dashboard's held-mail indicator shows
+three counts, with mail held for release putting it in its attention state.
+
+#### Files to Create / Modify
+
+- `packages/codev/templates/tower.html` (Tower's home page): a read-only Peers panel showing:
+  - each of my other Towers with the online hint and what it may message here;
+  - the switch;
+  - a peer that is not verifying, a clock out of range, or a cloud error.
+
+  The stage 3 parts (the invitation link, other owners' Towers) are not built.
+- `packages/codev/src/agent-farm/servers/peer-routes.ts`: the read-only route the panel uses.
+- `apps/web/src/components/HeldCountBadge.tsx` and `apps/web/src/lib/heldMail.ts`: three counts;
+  held for release is the attention state.
+- `apps/web/__tests__/HeldCountBadge.test.tsx`: updated.
+- `packages/codev/src/agent-farm/__tests__/e2e/peers-panel.test.ts` (new, Playwright), and
+  `__tests__/e2e/spec-1313-held-count-indicator.test.ts` extended for the three counts.
+
+#### Deliverables
+
+- [ ] The panel and the indicator.
+- [ ] The Playwright run, on a test Tower whose database is seeded with peers and held mail of
+  each kind, with screenshots attached to the thread.
+- [ ] Tests for this phase.
+
+#### Acceptance Criteria
+
+- [ ] Rendered in a browser: the panel shows the peer list, the switch, a not-verifying peer, a peer
+  with its clock out of range, and a cloud-error peer.
+- [ ] The indicator shows three counts and enters its attention state for held-for-release mail
+  only.
+- [ ] With one peer and with several; with nothing held and with each kind.
+- [ ] Build, porch's tests check and the web app's tests pass.
+
+#### Test Plan
+
+- Layer A: component tests.
+- Layer C, on demand: Playwright, per `codev/resources/testing-guide.md`.
+
+### Phase 11: Docs in both trees, the walkthrough end to end, and Windows
+
+**Dependencies**: Phases 1 to 10
+
+#### Objective
+
+Agents and people are taught stage 2, and the approved spec's stage 2 walkthrough runs as written
+between two test Towers and the stand-in. The whole branch passes its final checks.
+
+#### Files to Create / Modify
+
+Docs, found by grepping both trees for the addressing forms, `afx peer`, `afx inbox` and the stage
+1 refusal text, not from memory:
+
+- `CLAUDE.md` and `AGENTS.md` (byte-identical): the addressing table's `afx://<tower>/…` row.
+- `codev/templates/` and `codev-skeleton/templates/`, the `CLAUDE.md` and `AGENTS.md` pairs.
+- The `afx` skill: `.claude/skills/afx/SKILL.md`, `.codex/skills/afx/SKILL.md` and both copies under
+  `codev-skeleton/`. Hashes are regenerated with
+  `pnpm --filter @cluesmith/codev generate-skill-hashes`.
+- `codev/resources/commands/agent-farm.md` and `codev-skeleton/resources/commands/agent-farm.md`:
+  `afx peer …`, the inbox changes, and the new send outcomes.
+- `codev/roles/architect.md`, `codev/roles/builder.md` and both under `codev-skeleton/roles/`:
+  - what a `REMOTE, your Tower` header means;
+  - that only the Tower part of a remote address is verified (Decision 7);
+  - that `afx peer on`, `afx peer grant` and `afx inbox release` are human-only acts (with the
+    architect-override carve-out the role files use for such rules).
+- `codev/resources/arch.md`: the cross-Tower relay, the contract module, and the peer tables. The
+  hot tier is not grown.
+
+Tests and checks:
+
+- `packages/codev/src/agent-farm/__tests__/peer-walkthrough.e2e.test.ts` (new, layer B).
+
+#### Deliverables
+
+- [ ] The docs above.
+- [ ] **The walkthrough**, step by step, with each row of its skipped-step table, on two test Towers
+  and the stand-in, through the CLI's own commands.
+- [ ] **Secrets and bodies**, after the walkthrough:
+  - neither Tower's `global.db` contains the session secret, any statement or any MAC (the mailbox
+    holds bodies there by design);
+  - neither Tower's logs, `cloud-config.json` nor records contain the secret, a statement, a MAC or
+    any body text.
+- [ ] **Windows**: the workflow, with the suites on, checking that an `afx://` address typed unquoted
+  in Git Bash, PowerShell and cmd arrives unchanged; linked in the PR:
+  `gh workflow run windows.yml --ref builder/spir-1967 -f purpose='Spec 1967 stage 2 remote addressing' -f suites=true`.
+- [ ] The full layer B and C suites run once more on the finished branch (on demand, load 20 or
+  less), with the results in the review.
+- [ ] A scenario-to-test table in the review: every scenario in the spec and every inherited stage 2
+  scenario beside the test that covers it, and the four that wait for the real cloud marked as such.
+
+#### Acceptance Criteria
+
+- [ ] `diff CLAUDE.md AGENTS.md` is empty, and so is each template pair's.
+- [ ] The skill-hash check passes.
+- [ ] The walkthrough and the secrets check pass. The Windows run is green, or its failure is
+  reported to the architect.
+- [ ] Build and porch's tests check pass.
+
+#### Test Plan
+
+Layers B, C and D, all on demand.
+
+## Where each scenario is tested
+
+Every scenario in the spec's Test Scenarios, and the inherited stage 2 scenarios, by layer.
+**A** runs inside porch's tests check; **B**, **C** and **D** are on demand.
+
+| Scenario | Phase | Layer |
+|---|---|---|
+| Contract vectors | 1 | A |
+| R's checks, one at a time; replay at 9 minutes; replay after a no-grant refusal | 5 | A |
+| The local listener | 5 | B |
+| Handshake; switch-state report and its three retries | 5, 7 | A |
+| Mixed versions | 7, 8 | A, B |
+| No answer; a stream that dies after the forward | 8 | A, B |
+| A deploy | 8 | B (and A) |
+| Caps (102 400, escapes, emoji, a truncated discovery answer) | 1, 6 | A |
+| Rate-limited backlog, from both sources | 8 | A (injected clock) |
+| A restart of the sending Tower | 8 | B |
+| How S resolves its row | 8 | A |
+| S's refusal order | 8 | A |
+| Statement and payload field rules | 1, 5 | A |
+| Answers without the body; who decided | 1, 7 | A |
+| A wrong clock (G12) | 6 (R), 8 (S), 9, 10 | A, C |
+| Record aggregation (C5) | 6, 8, 9 | A |
+| Clock (C10, C11) | 5, 6 | A |
+| Unregistered sender (C12) | 8 | A |
+| Cached peer list (C13) | 7 | A |
+| Own name | 7, 8 | A, B |
+| Stage 1 carry-overs | 8 | A, B |
+| TLS | 5, 7 | A |
+| Builders across Towers; shells | 6, 8 | A, B |
+| Field validation, with the property test | 1, 6 | A |
+| R's deadline | 6 | B |
+| A run of `not-verified`; a run of `cloud-error` | 8 | A |
+| The stand-in's order of checks | 2 | A |
+| The Peers panel and held-mail indicator | 10 | C |
+| Secrets and bodies | 5 (logger), 11 (whole walkthrough) | A, B |
+| Locks | 6 | A, B |
+| Inherited: headline path both ways; no grant; offline then online; order; twenty concurrent | 8 | B |
+| Inherited: 50 waiting; lifetime; refused on retry; mismatch; lost answer after restart and dismissal | 6, 8 | A, B |
+| Inherited: forged, replayed, altered, misaddressed, stale, earlier-session requests | 5 | A, B |
+| Inherited: just-reconnected session reported held, then accepted; a sender with its tunnel down | 8 | B |
+| Inherited: hostile bodies satisfy Decision 7's invariant; invalid UTF-8 refused | 6 | A |
+| Inherited: the four options refused | 8 | A, B |
+| Inherited: a peer renamed in the cloud | 7, 8 | A, B |
+| Inherited: grant removed, or switch off, while mail is held `busy` | 6 | A, B |
+| Inherited: discovery limited to the grant; `afx peer show` offline refused | 6, 8 | A, B |
+| Inherited: the walkthrough and its skipped-step table | 11 | B |
+| Inherited: `afx://` unquoted on Windows shells | 11 | D |
+| Waits for the real cloud: same name on another account; `/t/` refusal at the cloud; the cloud's per-peer limit; behind NAT | — | at `verify-approval` |
+
+**Budget for porch's check.** Layer A adds no Tower process and no real wait. The pipeline test
+(phase 8) is the largest: two temporary databases, the stand-in and an in-process receiver on an
+injected clock. Each phase records the suite's wall time in its commit message. If layer A's
+additions ever exceed one minute in total on this machine, I report it to the architect before the
+next phase rather than moving tests silently.
+
+## Risks and Mitigation
+
+| Risk | Probability | Impact | Mitigation |
+|------|-------------|--------|------------|
+| The cloud corrects the contract after Tower code speaks it | Medium | Medium | One module speaks it (choice 1); the stand-in and the vectors change with it; the correction is a local change and a vectors update posted to #22 |
+| The stand-in and the Tower share a misreading of the contract | Medium | High | The stand-in never imports `contract.ts`; the vectors test computes with `node:crypto` first; the cloud runs the same vectors |
+| The mailbox migration damages held mail on upgrade | Low | High | Additive only, no rebuild; tested on a fixture of today's schema with held rows and on a backup copy of a real database (phase 3) |
+| A migration-number collision with another branch (e.g. issue #1871) | Medium | Low | The number is chosen after rebasing on `main`, immediately before phase 3 is committed, and checked again before the PR |
+| Porch's 15-minute tests check is exceeded | Low | Medium | Only layer A runs there, with no Tower processes and no real waits; each phase records the suite time; any growth over a minute is raised first |
+| The tunnel client grows tangled, hiding the verification code | Medium | High | The interception and steps 1 to 8 are one function calling `contract.ts`; delivery is an injected handler; the architect reads these files at phases 5 and 6 |
+| The secret leaks through a log or an error message | Low | High | It lives only in the session object; logger spy tests in phase 5; the whole-walkthrough check in phase 11 |
+| Issue #1871 has not merged by phase 11 | Medium | Low | Tower's name while connected comes from `auth_ok.slug`; only the disconnected display depends on #1871; phase 11 waits for it, as the spec's Open Question 4 says, rather than reading the typed name |
+| Two Tower processes in one test are flaky on a loaded machine | Medium | Medium | Layer B runs only on demand at load 20 or less, at most 3 workers; a failure is reported, not rerun |
+| The Windows run finds a shell that mangles `afx://` | Low | Medium | Found in phase 5's run, before the docs teach the form; reported to the architect |
+
+## Documentation Updates
+
+- Phase 11 updates the files listed there in both trees: the addressing table, the `afx` skill, the
+  command reference, the role files and `arch.md`.
+- The review routes any new lesson by tier at review time. The hot files are not grown.
+- Issue #1986 is closed by the PR (the dead metadata push removed in phase 5).
