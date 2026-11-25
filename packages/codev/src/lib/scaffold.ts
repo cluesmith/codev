@@ -8,7 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isEmptySkillDir } from './skill-refresh.js';
-import { sameOutsideHotBlock } from './managed-block.js';
+import { withEmptyHotBlock } from './managed-block.js';
 
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
@@ -263,6 +263,8 @@ interface CopyRootFilesResult {
   conflicts: string[];
   /** Root files left alone because the path to write is a symlink or otherwise irregular. */
   notRegular: string[];
+  /** Pending `.codev-new` copies removed (or, under `dryRun`, to remove): nothing left to merge. */
+  resolved: string[];
 }
 
 /** Something other than a regular file sits at `p` (a symlink, dangling or not; a directory). */
@@ -274,23 +276,29 @@ function isIrregularPath(p: string): boolean {
   }
 }
 
+const PROJECT_NAME_PLACEHOLDER = '{{PROJECT_NAME}}';
+
 /**
- * A root doc the adopter never edited: a regular file that matches the template
- * everywhere outside the managed block.
+ * A root doc the adopter never edited: a regular file that matches the template outside
+ * the managed block, whatever project name it was written with. A checkout's directory
+ * need not carry the name `init` saw, and the name is all the template varies by.
  */
 function matchesTemplate(destPath: string, template: string): boolean {
-  return fs.statSync(destPath).isFile() && sameOutsideHotBlock(fs.readFileSync(destPath, 'utf-8'), template);
+  if (!fs.statSync(destPath).isFile()) return false;
+  const pattern = withEmptyHotBlock(template)
+    .split(PROJECT_NAME_PLACEHOLDER)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^\\n]*');
+  return new RegExp(`^${pattern}$`).test(withEmptyHotBlock(fs.readFileSync(destPath, 'utf-8')));
 }
 
 /**
- * Delete a pending `.codev-new` that holds exactly the template beside an up-to-date doc:
- * nothing is left to merge. A copy with other content is kept.
+ * A pending `.codev-new` that holds exactly the template beside an up-to-date doc: nothing
+ * is left to merge. A copy with other content is kept.
  */
-function removeResolvedCodevNew(pendingPath: string, template: string): void {
+function isResolvedCodevNew(pendingPath: string, content: string): boolean {
   const pending = fs.lstatSync(pendingPath, { throwIfNoEntry: false });
-  if (pending?.isFile() && fs.readFileSync(pendingPath, 'utf-8') === template) {
-    fs.rmSync(pendingPath);
-  }
+  return pending?.isFile() === true && fs.readFileSync(pendingPath, 'utf-8') === content;
 }
 
 /**
@@ -308,6 +316,7 @@ export function copyRootFiles(
   const copied: string[] = [];
   const conflicts: string[] = [];
   const notRegular: string[] = [];
+  const resolved: string[] = [];
 
   const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
   for (const file of rootFiles) {
@@ -318,8 +327,8 @@ export function copyRootFiles(
       continue;
     }
 
-    const content = fs.readFileSync(srcPath, 'utf-8')
-      .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    const template = fs.readFileSync(srcPath, 'utf-8');
+    const content = template.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
 
     // Never write through a symlink, which may point outside the project: not the
     // `.codev-new` copy, and not a dangling link where a missing file would be created. A
@@ -333,9 +342,12 @@ export function copyRootFiles(
     }
 
     if (fs.existsSync(destPath)) {
-      if (handleConflicts && matchesTemplate(destPath, content)) {
+      if (handleConflicts && matchesTemplate(destPath, template)) {
         // Up to date: the managed block is refreshed by syncHotContextBlock (#1982).
-        if (!dryRun) removeResolvedCodevNew(destPath + '.codev-new', content);
+        if (isResolvedCodevNew(destPath + '.codev-new', content)) {
+          if (!dryRun) fs.rmSync(destPath + '.codev-new');
+          resolved.push(file + '.codev-new');
+        }
       } else if (handleConflicts) {
         // Create .codev-new for merge
         if (!dryRun) fs.writeFileSync(destPath + '.codev-new', content);
@@ -348,7 +360,7 @@ export function copyRootFiles(
     }
   }
 
-  return { copied, conflicts, notRegular };
+  return { copied, conflicts, notRegular, resolved };
 }
 
 interface CreateProjectsDirOptions {

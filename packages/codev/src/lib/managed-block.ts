@@ -118,14 +118,13 @@ export function upsertHotContextBlock(docContent: string, block: string): string
 }
 
 /**
- * Whether two root docs agree everywhere outside the managed block (#1982). The block is
+ * A root doc as the block refresh leaves it, with the block emptied (#1982). The block is
  * regenerated from the hot files on every update, so what sits inside it, or whether it
- * is there at all, is never the adopter's edit: both docs are compared as the block
- * refresh leaves them.
+ * is there at all, is never the adopter's edit: two docs in this form differ only where
+ * they differ outside the block.
  */
-export function sameOutsideHotBlock(a: string, b: string): boolean {
-  const anyBlock = `${HOT_BLOCK_BEGIN}\n${HOT_BLOCK_END}`;
-  return upsertHotContextBlock(a, anyBlock) === upsertHotContextBlock(b, anyBlock);
+export function withEmptyHotBlock(doc: string): string {
+  return upsertHotContextBlock(doc, `${HOT_BLOCK_BEGIN}\n${HOT_BLOCK_END}`);
 }
 
 export interface SyncHotContextOptions {

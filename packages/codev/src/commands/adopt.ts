@@ -183,6 +183,9 @@ export async function adopt(options: AdoptOptions = {}, overrides: Partial<Adopt
     console.log(chalk.yellow('  !'), file, chalk.dim('(conflict - .codev-new created)'));
     skippedCount++;
   }
+  for (const file of rootResult.resolved) {
+    console.log(chalk.dim('  -'), file, chalk.dim('(removed, nothing left to merge)'));
+  }
 
   // Materialize the hot-tier files (Spec 987), skip-existing so a curated copy is preserved.
   // The interactive managed block is injected on the next `codev update` (which calls

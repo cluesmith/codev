@@ -308,6 +308,9 @@ export async function update(options: UpdateOptions = {}, overrides: Partial<Upd
           log(chalk.dim('    New version saved as:'), `${file}.codev-new`);
         }
       }
+      for (const file of rootResult.resolved) {
+        log(chalk.dim(`  - (${previewVerb}removed, nothing left to merge)`), file);
+      }
     }
 
     // Materialize the hot-tier files for existing adopters (Spec 987), skip-existing so a
