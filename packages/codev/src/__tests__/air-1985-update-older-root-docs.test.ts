@@ -168,7 +168,8 @@ describe('issue #1985 — codev update on root docs from an older release', () =
     expect(result.updated).toEqual(['AGENTS.md']);
     // Only the managed block may change (a pre-block doc gets one); everything else is kept.
     expect(withEmptyHotBlock(read('CLAUDE.md'))).toBe(withEmptyHotBlock(edited));
-    expect(read('CLAUDE.md.codev-new')).toBe(packageTemplate('CLAUDE.md', 'fresh'));
+    // In the doc's line ending, LF here, whatever the checkout's templates use (#1990).
+    expect(read('CLAUDE.md.codev-new')).toBe(packageTemplate('CLAUDE.md', 'fresh').replace(/\r\n/g, '\n'));
     expect(read('AGENTS.md')).toBe(fresh['AGENTS.md']);
   });
 

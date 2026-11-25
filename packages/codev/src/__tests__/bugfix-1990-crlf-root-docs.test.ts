@@ -11,9 +11,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { init } from '../commands/init.js';
 import { update, type UpdateResult } from '../commands/update.js';
-import { HOT_BLOCK_BEGIN, HOT_BLOCK_END, ROOT_DOCS } from '../lib/managed-block.js';
+import { HOT_BLOCK_BEGIN, HOT_BLOCK_END, ROOT_DOCS, withEmptyHotBlock } from '../lib/managed-block.js';
 
 const templates = vi.hoisted(() => ({ dir: '' }));
 
@@ -49,6 +50,7 @@ vi.mock('chalk', () => {
   };
 });
 
+const here = path.dirname(fileURLToPath(import.meta.url));
 const toLf = (s: string): string => s.replace(/\r\n/g, '\n');
 const toCrlf = (s: string): string => s.replace(/\r?\n/g, '\r\n');
 const bareLineFeeds = (s: string): number => (s.match(/(?<!\r)\n/g) ?? []).length;
@@ -136,14 +138,45 @@ describe('issue #1990 — root docs keep their CR LF line endings', () => {
       expect(read('AGENTS.md')).toBe(toCrlf(template));
     });
 
-    it('a CR LF doc edited outside the block: one conflict, and the doc is kept byte for byte', async () => {
-      const edited = toCrlf(`${read('CLAUDE.md')}\n## Our house rules\n\nMY_RULE\n`);
+    it('a CR LF doc edited outside the block: one conflict, the doc kept byte for byte, .codev-new in CR LF', async () => {
+      const template = read('CLAUDE.md');
+      const edited = toCrlf(`${template}\n## Our house rules\n\nMY_RULE\n`);
       write('CLAUDE.md', edited);
 
       const result = await runUpdate();
 
       expect(result.rootConflicts.map((c) => c.file)).toEqual(['CLAUDE.md']);
       expect(read('CLAUDE.md')).toBe(edited);
+      // The template in the doc's line ending, so a plain diff shows only the edit.
+      expect(read('CLAUDE.md.codev-new')).toBe(toCrlf(template));
+    });
+
+    it('a CR LF .codev-new is settled, and removed, once the doc is merged', async () => {
+      const template = read('CLAUDE.md');
+      write('CLAUDE.md', toCrlf(`${template}\nMY_RULE\n`));
+      await runUpdate();
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(true);
+      // The adopter takes the new version.
+      write('CLAUDE.md', read('CLAUDE.md.codev-new'));
+
+      const result = await runUpdate();
+
+      expect(result.rootConflicts).toEqual([]);
+      expect(fs.existsSync(path.join(projectDir, 'CLAUDE.md.codev-new'))).toBe(false);
+    });
+
+    it('#1985: a CR LF .codev-new holding an older shipped version is removed beside an up-to-date doc', async () => {
+      const fixture = path.join(here, 'fixtures', 'root-doc-templates', 'v3.3.4.AGENTS.md.template');
+      const older = toCrlf(toLf(fs.readFileSync(fixture, 'utf-8')).split('{{PROJECT_NAME}}').join('fresh'));
+      // Not the current template outside the block: only the shipped-version hashes settle it.
+      expect(withEmptyHotBlock(toLf(older))).not.toBe(withEmptyHotBlock(read('AGENTS.md')));
+      for (const doc of ROOT_DOCS) write(doc, toCrlf(read(doc)));
+      write('AGENTS.md.codev-new', older);
+
+      const result = await runUpdate();
+
+      expect(result.rootConflicts).toEqual([]);
+      expect(fs.existsSync(path.join(projectDir, 'AGENTS.md.codev-new'))).toBe(false);
     });
 
     it('a CR LF doc an earlier update inserted the block into (LF block, LF break on each side) is healed', async () => {
@@ -201,6 +234,16 @@ describe('issue #1990 — root docs keep their CR LF line endings', () => {
     it('an edit outside the block: .codev-new is the template exactly as init wrote the doc', async () => {
       const template = read('CLAUDE.md');
       write('CLAUDE.md', `${template}## Our house rules\r\n\r\nMY_RULE\r\n`);
+
+      const result = await runUpdate();
+
+      expect(result.rootConflicts.map((c) => c.file)).toEqual(['CLAUDE.md']);
+      expect(read('CLAUDE.md.codev-new')).toBe(template);
+    });
+
+    it('an LF doc edited outside the block gets an LF .codev-new from the CR LF template', async () => {
+      const template = toLf(read('CLAUDE.md'));
+      write('CLAUDE.md', `${template}\nMY_RULE\n`);
 
       const result = await runUpdate();
 
