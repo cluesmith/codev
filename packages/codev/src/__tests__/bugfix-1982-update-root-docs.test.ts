@@ -45,6 +45,9 @@ vi.mock('chalk', () => {
 
 const ROOT_DOCS = ['CLAUDE.md', 'AGENTS.md'];
 
+/** The line ending a doc uses: CR LF on a Windows checkout of the templates. */
+const eolOf = (doc: string): string => (doc.includes('\r\n') ? '\r\n' : '\n');
+
 function codevNewFiles(dir: string): string[] {
   const found: string[] = [];
   const walk = (current: string): void => {
@@ -109,7 +112,8 @@ describe('issue #1982 — codev update on root docs', () => {
 
   it('an edit outside the managed block is one conflict, and the edit is kept', async () => {
     const template = read('CLAUDE.md');
-    const edited = `${template}\n## Our house rules\n\nMY_RULE\n`;
+    // In the doc's own line ending: a Windows checkout's templates are CR LF (#1990).
+    const edited = `${template}\n## Our house rules\n\nMY_RULE\n`.replace(/\r?\n/g, eolOf(template));
     write('CLAUDE.md', edited);
 
     const { result } = await runUpdate();
@@ -137,8 +141,9 @@ describe('issue #1982 — codev update on root docs', () => {
     const template = read('AGENTS.md');
     const begin = template.indexOf(HOT_BLOCK_BEGIN);
     const end = template.indexOf(HOT_BLOCK_END) + HOT_BLOCK_END.length;
-    // The block and the blank line after it, as in a doc written before Spec 987.
-    write('AGENTS.md', template.slice(0, begin) + template.slice(end + 2));
+    // The block and the blank line after it, as in a doc written before Spec 987, in either
+    // line ending (#1990).
+    write('AGENTS.md', template.slice(0, begin) + template.slice(end).replace(/^(\r?\n){2}/, ''));
 
     const { result, report } = await runUpdate();
 
@@ -178,14 +183,16 @@ describe('issue #1982 — codev update on root docs', () => {
     expect(ROOT_DOCS.map(read)).toEqual(before);
   });
 
-  it('a CRLF checkout of an unedited doc is up to date', async () => {
-    const crlf = read('CLAUDE.md').replace(/\n/g, '\r\n');
+  it('a CRLF checkout of an unedited doc is up to date, and stays CRLF', async () => {
+    // Only bare LFs turn into CR LF: on a Windows checkout the doc is CR LF already (#1990).
+    const crlf = read('CLAUDE.md').replace(/\r?\n/g, '\r\n');
     write('CLAUDE.md', crlf);
 
     const { result } = await runUpdate();
 
     expect(result.rootConflicts).toEqual([]);
     expect(codevNewFiles(projectDir)).toEqual([]);
+    expect(read('CLAUDE.md')).toBe(crlf);
   });
 
   it('an edited skill is still kept, with its new version as .codev-new beside it', async () => {
