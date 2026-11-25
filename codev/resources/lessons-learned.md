@@ -392,6 +392,13 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
   Self-test each fix: that the tripwire *stops* the run, not only that it *fires*.
 
+- [From #1963] **Re-run every verify script on the final head, not only the phase's own.** A late
+  phase made each window open arranged into three editor groups by default. Two older helpers
+  still assumed one group: one read the left group's active tab, the other pressed Enter after a
+  fixed delay. The scripts using them had not run since their own phases, so both failures
+  surfaced only when every script ran on the final head. A default changed in one phase is an
+  input to every earlier script.
+
 - [From #1915] A test's cleanup that kills every pid it recorded can kill an unrelated process: Windows reuses pids quickly, and the recorded process is often long dead by `afterAll`. Kill a recorded pid only if the live process with that pid was created no later than the recording (`__tests__/helpers/tracked-pids.ts`). This matters more than it looks because vitest 4 ignores `poolOptions.forks.singleFork`, so test files run in parallel workers: one file's cleanup ran inside another file's assertion window and is the likely killer of a CIM-created Tower in tower-lifecycle.windows Phase 4(b).
 
 - [From #1595] Harness hook semantics are claims to measure in a real session, not to read from docs. Two spikes and full unit coverage still missed that Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the turn's background task runs (it flipped a working agent to idle), and that an approved permission fires no hook at all (#1851). Both surfaced only in Phase 8's scripted real-session run with permissions in `default` mode: the operator's `auto` mode never raises a prompt, so a verification run must set the mode it means to test.
@@ -595,6 +602,24 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
     last group and closes none.
   - A hidden retained webview still reports `document.visibilityState === 'visible'`, so relay the
     panel's visibility from the host.
+
+- [From #1963] **A webview that loads its files by URL depends on the host's webview service
+  worker; one that carries them inline does not.** Codev IDE 1.138 pins an old webview host page
+  whose service worker cannot deliver a webview's resources (cluesmith/codev-ide#67): every
+  webview's HTML arrived and its scripts never did. Inlining the bundle (`<script nonce>`, a
+  `<style>`, `localResourceRoots: []`) takes that path out. Two traps when doing so:
+  - Escape `</script`, `<!--` and `</style` in the inlined text, and check with a parser that each
+    escaped position is in a string, a regex literal, an untagged template or a comment. In code
+    the rewrite is a syntax error; in a tagged template it changes what the tag reads from `.raw`.
+  - A nonce in `style-src` switches `'unsafe-inline'` off, so a nonce-only style policy refuses
+    style attributes that sanitized Markdown keeps (aligned table columns). React `style` props
+    still apply, because CSSOM writes are not governed by the policy.
+  - A webview's default styles come from the host page, so a different host page means different
+    defaults. 1.138's older page gave `code` a white foreground in High Contrast Light without the
+    dark background it pairs with, and its defaults are unlayered (1.128 and later use
+    `@layer vscode-default`). Diff the host pages' default-styles blocks and state, in the
+    webview's own stylesheet, every differing default for an element it renders; then compare
+    computed styles under each page's defaults.
 
 - [From #1938] React 19 compares `dangerouslySetInnerHTML` by object identity, not by its
   `__html` string: an inline `{ __html: html }` re-sets the element's HTML on every render, wiping

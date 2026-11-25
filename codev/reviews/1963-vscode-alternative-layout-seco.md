@@ -12,20 +12,27 @@ three increments:
   VS Code as editor-area webviews. All of their I/O goes through the extension host.
 - ***Arrange Cockpit***, which lays out the `main` architect | (Work over Decisions).
 
-Every increment was verified rendered in an isolated harness: its own Tower, VS Code 1.147.0
-serve-web and headless Chromium. Those serve-web runs never touched the owner's Tower or IDE. The
-dashboard's Work and Decisions render identically, apart from two intended fixes in the shared
-views.
+Every increment was verified rendered in an isolated harness: its own Tower, fixture workspaces and
+headless Chromium. On the final code:
+- every verify script passed on VS Code 1.147.0 serve-web (115/115);
+- the scripts that render the panels ran inside the harness's network sandbox on two more servers:
+  Codev IDE 1.138.0's server (53/56) and VS Code Server 1.128.0, the engine floor (50/50).
 
-**VS Code 1.138.0 (the owner's Codev IDE server) and 1.128 (the engine floor) are unverified.**
-The one attempt, in the harness's ide-server mode, reached the owner's Tower. It was stopped, and
-no further run waits on anything but the owner's go-ahead (see *The tripwire incident* under
-Challenges, and Owner Decisions 5).
+In Phase 8 the dashboard's Work and Decisions rendered identically, apart from two intended fixes in
+the shared views.
+
+**On Codev IDE 1.138.0, three webviews outside this PR stay blank.** That IDE pins a webview host
+page whose service worker cannot deliver a webview's files (cluesmith/codev-ide#67). That also
+blanks the webviews already on `main`: VS Code's own Markdown preview, the contextual panel and
+the Codev Markdown preview. Work and Decisions carry their code inline (owner ruling ide-3) and
+render there; the button and the arrangement pass too. The first 1.138.0 attempt, before
+the sandbox existed, reached the owner's Tower and was stopped (*The tripwire incident*, under
+Challenges).
 
 ## Owner Decisions
 
 These are the owner's to make at the `pr` gate. Each is described where it is cited. The owner
-ruled on 1-4 on 2026-11-24 (recorded on PR #1971); 5 is open.
+ruled on all five on 2026-11-24 (recorded on PR #1971).
 1. **The dormant window** (Spec Compliance, Deviations). **Ruled: accepted as built**, and the spec
    now states the dormant behaviour. A dormant window is the marketplace
    extension in plain VS Code, in a folder with no Codev project. It shows *Not connected to Tower*
@@ -41,18 +48,21 @@ ruled on 1-4 on 2026-11-24 (recorded on PR #1971); 5 is open.
    work_panel).
 3. **The old evidence blobs in this branch's history.** **Ruled: scrub them.** The owner approved
    rewriting this branch's and the evidence branch's history to remove the verification binaries,
-   with the architect's procedure. The PR body records when it was done.
-   - The rendered evidence now lives on the never-merged `evidence/spir-1963` branch (Deviations,
+   with the architect's procedure. **Done on 2026-11-24**, as the PR body records.
+   - The rendered evidence lives on the never-merged `evidence/spir-1963` branch (Deviations,
      review phase).
-   - The PR branch's history still holds the earlier screenshots and snapshots, including the ten
-     with the machine's shell prompt.
-   - A `--merge` brings that history into main.
-   - Whether to scrub it before merge is the owner's call. Nothing has been prepared.
+   - This branch's history no longer holds the screenshots and snapshots, including the ten with
+     the machine's shell prompt, so a `--merge` brings none into main.
+   - A backup bundle of both old tips is kept locally until the PR merges, then deleted.
 4. **The two Light Modern texts at 4.3:1**: above the 3:1 floor, below 4.5:1, and named in the PR.
    **Ruled: accepted as built.**
 5. **Whether the ide-server runs (1.138.0 and 1.128) may happen.** The tripwire incident below
-   happened in that mode while the owner was away, so a retry is his call (the architect's ruling).
-   The harness fixes are in, with their self-tests. Until he rules, both versions are unverified.
+   happened in that mode while the owner was away, so a retry was the owner's call (the architect's
+   ruling). **Ruled (ide-2): one fenced run on each**, with the harness fixes and their self-tests in.
+   The 1.138.0 run found that the Codev IDE blanks every webview that loads its files by URL
+   (cluesmith/codev-ide#67), so the owner then **ruled (ide-3) the workaround**: Work and Decisions
+   carry their code inline, on every version (Deviations, PR review phase). The results are under
+   *Spec Compliance* and in `verification.md`.
 
 ## Spec Compliance
 
@@ -129,10 +139,22 @@ ruled on 1-4 on 2026-11-24 (recorded on PR #1971); 5 is open.
 - [x] **`contributes-*` tests cover the additions; existing ones pass unmodified apart from
   additions** (Phases 4, 5, 7–9). `worktree-window-1809.test.ts` and `cockpit-wiring.test.ts`
   follow the generalised wiring, as the criterion allows.
-- [x] **Verified by rendering, with screenshots in the PR** (Phases 5, 7, 8, 9).
+- [x] **Verified by rendering, with screenshots in the PR** (Phases 5, 7, 8, 9, and the PR review
+  phase on the final code).
   - The evidence is on the never-merged branch `evidence/spir-1963`.
   - `codev/projects/1963-vscode-alternative-layout-seco/verification.md` indexes every check with
-    its pass count and SHA permalinks: 127/127.
+    its pass count and SHA permalinks:
+    - 1.147.0 serve-web: 115/115;
+    - fenced 1.138.0: 53/56, the three failures being the IDE's blank webviews (Summary);
+    - fenced 1.128.0: 50/50.
+  - The index before it listed 127/127, but those counts were per phase: each script was counted
+    from its own phase's run.
+    - Not run since the phase that built them, until the end: `decisions`, `work` and `dashboard`
+      (Phase 8), and `profile-seed` and `profile-existing` (Phase 9).
+    - `render`, `reveal`, `windows` and `requests` were counted from increment 1. They ran again in
+      the review phase's evidence run, but the index kept their increment-1 files.
+
+    Every script was re-run at the end (*The final runs*, Deviations).
   - The PR embeds the button, the hierarchy, both panels and the split, by permalink.
 - [x] **Lint, type-check and the full suites pass** (every phase).
   - apps/vscode: 133 files, 1818 tests, 1 Windows-only skip.
@@ -142,6 +164,9 @@ ruled on 1-4 on 2026-11-24 (recorded on PR #1971); 5 is open.
   - Lint shows only the 2 existing `curly` warnings.
   - After the merge from main (3.3.8): apps/vscode has 133 files, with 1820 tests passing and 1
     Windows-only skip; workspace-views passes 197.
+  - On the final code (ruling ide-3, the host defaults, and the two later merges from main):
+    apps/vscode 134 files, 1981 passed, 1 skipped; workspace-views 197; sdk 431; apps/web 38
+    files, 462 passed, 1 skipped.
   - The `vscode-test` Electron suite (`src/test/`) was not run.
     - It is a pre-existing suite, and this PR does not touch it.
     - No workflow runs it on main.
@@ -256,10 +281,9 @@ literals needed the new field.
     `requests` 5/5, `actions` 28/28, `reconnect` 4/4.
   - Then `verify arrange` 19/19 on its own `start`.
 
-  This evidence is in `verification-phase9/`, and in `verification-increment1/` for `actions`
-  and `reconnect`, on the evidence branch. As the architect directed, `verify arrange` runs again
-  on the final head after the last commit, with the one Windows dispatch, and the gate message
-  reports both. That run's evidence goes only to the evidence branch.
+  That evidence was published in `verification-phase9/`, and in `verification-increment1/` for
+  `actions` and `reconnect`. The final-head runs (PR review phase, below) have since replaced it on
+  the evidence branch.
 - **Evidence out of the tree** (architect ruling, PR review iteration 1).
   - The architect measured the branch:
     - +66,052 lines in 299 files; without `codev/projects`, +26,674 in 147.
@@ -270,7 +294,102 @@ literals needed the new field.
     lives on the orphan branch `evidence/spir-1963`, which is never merged.
   - The PR branch keeps `verification.md`, an index of every check with SHA permalinks, and the
     spike's text files.
-  - The old blobs stay in this branch's history. Scrubbing them before merge is the owner's call.
+  - The owner ruled to scrub the old blobs from this branch's history, and that was done on
+    2026-11-24 (Owner Decisions 3).
+
+**PR review phase: the IDE runs, and owner ruling ide-3 (the workaround):**
+- **Merged `origin/main` twice:** `b164e4898` (named architects, #1957; the suite worker cap,
+  #1965) and `92a5ae48d` (porch failed-check logs, #1964, at `88bc5e9d1`).
+- **Inline bundles, on every version.** The 1.138.0 run showed that the Codev IDE blanks every
+  webview that loads its files by URL (cluesmith/codev-ide#67; Challenges). The owner ruled that
+  Work and Decisions carry their code inside the page, with one code path, no IDE detection and no
+  fallback (`1342db405`, `6cf6b5b57`, `4ab7ed1d4`).
+  - `single-panel.ts` reads `dist/webview/<bundle>.js` and `.css` once per kind. If either cannot be
+    read, opening fails loudly and names the file; a restored panel is disposed.
+  - `localResourceRoots: []`: the panel loads nothing from the extension.
+  - The policy is `default-src 'none'; script-src 'nonce-…'; style-src 'unsafe-inline'; img-src
+    blob: http: https:`, with no `connect-src` and no `cspSource`. Before, scripts and styles came
+    from `cspSource`.
+  - The ruling asked for a nonce-only style policy. I measured that it refuses the style attributes
+    in a decision item's Markdown (aligned table columns), which DOMPurify keeps and the dashboard
+    renders, and told the architect. They set `style-src 'unsafe-inline'`, with no nonce, since a
+    nonce would switch `'unsafe-inline'` off, and no source. `script-src` stays the nonce only.
+  - The inlined text is escaped: `</script` and `<!--` in the script become `\x3C`, `</style` in the
+    style becomes `\3C `. Codex found the limit: the rewrite is right only in a string, a regex
+    literal, an untagged template or a comment. A test-only module (`escape-contexts.ts`, using
+    TypeScript's parser, already a dev dependency) classifies every rewritten position in both
+    real bundles and fails on any other. Today Work's production bundle has 5 and Decisions' 6, all
+    in strings and regexes.
+  - The bundle tests run on the development build and on the production build as shipped, boot
+    each in its escaped form, and assert that it loads nothing by URL. The production build drops
+    its source map; the development build keeps it inline.
+  - A CHANGELOG line, and comments citing codev-ide#67 in `panel-template.ts` and
+    `single-panel.ts`.
+  - Out of the ruling's scope and unchanged: the contextual panel, the Codev Markdown preview and
+    the backlog search panel. They stay blank on 1.138 until the IDE is fixed.
+- **The panels state VS Code's webview defaults themselves** (`7cdc24716`, the architect's ruling
+  after the first fenced 1.138 `decisions` run). On 1.138 the Decisions file path was white on a
+  white page in High Contrast Light. The old host page that 1.138 serves (codev-ide#67) gives
+  `code` the theme's preformatted foreground, which is white there, without its dark blue
+  background; its defaults are also unlayered, where 1.128's and 1.147's sit in
+  `@layer vscode-default`. As the architect asked, I diffed the three pages' default-styles blocks
+  rule by rule and covered every differing rule the panels render, not only `code`.
+  - **Handled**, each stated in `vscode-theme.css` with 1.147's value:
+    - `body`: `overscroll-behavior-x`, in the panels' body rule;
+    - `video` sizing, since an item's Markdown may hold one;
+    - `code`: font, colour, background, padding and radius (the file path, the notices,
+      Markdown);
+    - `a code`, which the old page gives the link colour;
+    - `pre code`;
+    - `p > a`: the link-underline setting;
+    - `kbd`, and the old page's `.vscode-light kbd`.
+
+    `a code` and `:root kbd` tie the old page's competing selectors and come after them.
+  - **Did not apply:** none. Every differing rule targets an element the panels can render. The
+    rules with the same values on all three pages need nothing.
+  - **Measured** in headless Chromium, with the real production stylesheets under each page's
+    defaults, in light and dark, over every element type the panels render. Before the change, the
+    old page differed from 1.147 in 34 computed properties on Decisions. After it, there were 0 on
+    the old page and 0 on 1.128, and 1.147 renders exactly as before. 1.128's one change is the
+    underline on code inside a Markdown link, which its own defaults left off.
+  - One theme test per rule, plus the specificity and the option word's own colours.
+  - The architect scoped the re-run to the scripts that render a panel (*The final runs*, below).
+- **Harness helpers fixed for the final runs** (the harness is not a vsix input):
+  - the `webviews` diagnostic script (`8cad56b2d`);
+  - `ensureTrusted` closes 1.128's modal Workspace Trust editor (`10f4d9cce`);
+  - `activeEditorTab` reads the active group's active tab. Since Phase 9 a window opens arranged
+    into three groups, and the first active tab in the page was the left group's (`ce4e75afe`);
+  - `reveal` opens its file with `quickOpenFile`, which waits for the result, instead of pressing
+    Enter after a fixed 300 ms (`35334efbf`);
+  - `work`'s Tower-down check waits for Decisions' cards after the reload. Decisions comes on
+    screen only when the window arranges again after its first connection attempt, and on 1.138
+    the check had counted 0 cards before that (`d31df3a84`).
+- **The final runs** (`verification.md` lists every check, pinned to the evidence commit):
+  - **1.147.0 serve-web, 115/115.** The nine scripts that render no panel ran on `35334efbf`, and
+    the four that do on `d31df3a84`.
+  - **Fenced 1.138.0, 53/56.** The three failures are the webviews outside the ruling that the IDE
+    leaves blank: VS Code's own Markdown preview, the contextual panel and the Codev Markdown
+    preview.
+  - **Fenced 1.128.0, 50/50.**
+  - **Two heads.** After `7cdc24716`, the architect scoped the re-run to the scripts that render a
+    panel; the nine that render none stand from `35334efbf`. Between the two heads the vsix inputs
+    differ only in the panels' stylesheet and its test (`verification.md` gives the
+    `git diff --stat`).
+  - **Stops on the way:**
+    - At 22:37Z serve-web's own update check errored ("Could not check for update", in the
+      server log), and the page showed that error instead of the workbench, so the first 1.147
+      `decisions` attempt failed 3 of 16. The architect ruled to keep the seven scripts already
+      passed, resume at `decisions`, and allow one re-run for that exact error from then on. No
+      later script met it.
+    - Fenced 1.138.0 `decisions` on `35334efbf`, 15/16: the contrast finding above.
+    - Fenced 1.138.0 `work` on `7cdc24716`, 14/15: the harness race fixed in `d31df3a84`. All
+      eleven panel runs then ran again on that head.
+  - **Fence:**
+    - every IDE-server start passed its sandbox canary;
+    - every session's tripwire section reads only "no connection on :4100";
+    - the servers reported `50cad256` (1.138.0) and `fc3def67` (1.128.0) before and after each
+      session;
+    - no browser request reached the owner's Tower port.
 
 ## Consultation Feedback
 
@@ -682,7 +801,40 @@ review is the first to see it.*
       server whose bundle does not show it;
     - ide-server mode runs the server inside a `sandbox-exec` profile that denies outbound TCP to
       `:4100`, so the connect itself fails. A canary proves the profile applies at every launch.
-  - 1.138.0 and 1.128 stay unverified until the owner allows a retry.
+  - The owner then allowed one fenced run on each version (ruling ide-2). Every start since has had
+    the sandbox, its canary and the tripwire, and none has fired.
+
+- **Codev IDE 1.138 blanks webviews (cluesmith/codev-ide#67).** The first fenced 1.138.0 run
+  (`arrange`, 21:21Z) passed every layout behaviour and failed the 5 checks that need the Work and
+  Decisions panels to render: both stayed blank.
+  - **Cause, read without launching anything:** the IDE's `product.json` pins
+    `webviewContentExternalBaseUrlTemplate` to an older build's webview host page (`ef65ac1b`),
+    not `{{quality}}/{{commit}}`. The 1.138 workbench sends webview resources as transferred
+    streams; that page's service worker posts them back in a way that throws `DataCloneError`
+    (a `ReadableStream` that was not transferred). So a panel's HTML arrives, but every file it
+    loads by URL hangs.
+  - A `verify webviews` diagnostic confirmed it: on 1.147.0 VS Code's own Markdown preview, the
+    contextual panel, the Codev Markdown preview and Work all render; on 1.138.0 all four were blank,
+    with 28 page errors, every one that `DataCloneError`. The same blank panels appear in the
+    incident run, before the sandbox and before the merges from main. It is a defect in the IDE's packaging,
+    not in this PR, and it also blanks the webviews already on `main`.
+  - Before the workaround, the plain statement was: on Codev IDE 1.138 the button, tree and
+    arrangement pass and the Work and Decisions panels are blank because of that IDE defect, which
+    also blanks the webviews already on main. After it (ruling ide-3, Deviations), Work and
+    Decisions render on 1.138; the contextual panel, the Codev Markdown preview and VS Code's own
+    preview stay blank there until the IDE is fixed.
+  - The same page also styles differently once a panel does render: the first fenced 1.138
+    `decisions` run after the workaround failed its theme check, because `code` was white on white
+    in High Contrast Light. 1.147 had passed it. The fix was to state the page's
+    differing defaults in the panels' own stylesheet (Deviations).
+- **Helpers that assumed an unarranged window.** Phase 9 made `codev.cockpit.autoArrange` default
+  to true, so every window the harness opens is split into three groups. Two helpers written
+  before then still assumed one group: `activeEditorTab` read the left group's tab, so `decisions`
+  failed 8 of its checks on 1.128, and `reveal` pressed Enter before the file search returned. Both
+  failed only when every script was re-run on the final head. `decisions` had not run since
+  Phase 8 on any version: my gap. A third assumed the arrangement was immediate: after a reload,
+  `work`'s Tower-down check expected Decisions on screen, but the automatic arrange waits for the
+  first connection attempt, and on the slower 1.138 server the check counted first.
 
 ### What Would Be Done Differently
 
@@ -692,6 +844,8 @@ review is the first to see it.*
   saw faint text.
 - Push rendered evidence to a separate evidence branch from the first harness run, rather than
   into the PR's tree.
+- Re-run every verify script on the final head as a matter of course, not only the phase's own.
+  `decisions` went from Phase 8 to the end unrun, and its helper had broken in Phase 9.
 - Build the harness's guard against the owner's Tower as prevention plus stop, not detection, before
   any run. And confirm, from the server's own code, where a server reads its settings before the
   first run of a new mode. The tripwire was proven to *fire*. Nothing proved that firing *stopped*
@@ -719,6 +873,8 @@ review is the first to see it.*
     contacts Tower, single-instance retained panels, restored-tab handling, path containment);
   - the *Arrange Cockpit* layout (the spike's facts, column-order placement, preview-tab keep, the
     namesake guard, the quiet automatic read).
+- In the PR review phase, the same entry gained the inline bundle (ruling ide-3, codev-ide#67):
+  the policy, `localResourceRoots: []` and the escape check.
 - No hot-tier change. Each fact is subsystem detail for the VS Code extension. `arch-critical.md` is
   at its 10-fact cap, and nothing here is cross-cutting enough to displace an entry.
 
@@ -757,6 +913,12 @@ review is the first to see it.*
   service needs prevention, such as a sandbox that refuses the connect. Prove both with self-tests.
   Before trusting a config path, read where the program actually loads it: a VS Code server
   ignores `--user-data-dir`.
+- Routed: **cold**, *Testing*: re-run every verify script on the final head, not only the phase's
+  own. A late default (auto-arrange) broke two older helpers, and only the final-head run showed it.
+- Routed: **cold**, *UI/UX*: a webview that loads its files by URL depends on the host's webview
+  service worker (codev-ide#67); an inline bundle does not, but needs its escape checked with a
+  parser, and a nonce in `style-src` refuses sanitized Markdown's style attributes. Its default
+  styles also come from the host page: diff the pages' defaults and state the differing ones.
 - No hot-tier change. `lessons-critical.md` is at its 10-lesson cap, and these are subsystem or
   harness lessons. "Verify the real user path" already covers the cross-cutting part.
 
@@ -787,7 +949,11 @@ tracked in issue #1973 (pre-existing Windows test flakes) and were left running.
     non-live owner;
   - a worktree-config fetch that fails while connected holds `null` until the next drop signal.
 - **Untested ranges:**
-  - The layout behaviour rests on VS Code 1.147.0, while the engine floor is 1.128. Nothing between
-    them was run: the 1.138.0 and 1.128 runs await the owner (Owner Decisions 5).
+  - The scripts that render the panels ran on 1.147.0, 1.138.0 and 1.128.0; `arrange` among them
+    checks the button. The nine that render none ran on 1.147.0 only: `render` (the hierarchy's
+    cases), `reveal`, `windows`, `requests`, `actions`, `reconnect`, `dashboard`, `profile-seed`
+    and `profile-existing`. No version between 1.128 and 1.147 was run apart from 1.138.0.
+  - On 1.138.0, VS Code's own Markdown preview, the contextual panel and the Codev Markdown preview
+    stay blank until cluesmith/codev-ide#67 is fixed.
   - The waited-out *closing* namesake stays unit-tested: it is a race inside the extension host,
     which the UI cannot time.

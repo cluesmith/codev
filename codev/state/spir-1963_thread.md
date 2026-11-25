@@ -1301,3 +1301,78 @@ run.
       workers. Dev source maps are now inline.
     - Both bundles hold `<!--` (DOMPurify and markdown-it regexes), so the escaping is exercised
       for real: `\x3C`, valid in strings and regexes, `u` flag included.
+  - **Panel style policy, reconsidered (`6cf6b5b57`).** I flagged that the old policy had not been
+    nonce-only; the architect ruled (22:09Z) that `style-src` become `'unsafe-inline'` alone: no
+    nonce, since a nonce in `style-src` disables
+    `'unsafe-inline'` and refuses sanitized Markdown's style attributes; and no `cspSource`, since
+    the panels load nothing by URL. `script-src` stays nonce-only. The bundle tests now run on the
+    production build.
+  - **The escape, tested with a parser (`4ab7ed1d4`).** A test parses each production bundle with
+    TypeScript's scanner and fails if a `</script`, `<!--` or `</style` rewrite lands anywhere but a
+    string, regex, untagged template or comment.
+  - **`reveal` (`35334efbf`):** it pressed Enter 300 ms after typing into the file search; it now
+    opens README with `quickOpenFile`, which waits for the result.
+- **Step d, every verify script on the final head (architect 22:09Z), on `35334efbf`:**
+  - **1.147 serve-web, shared session and dashboard:** render 6/6, reveal 2/2, windows 4/4,
+    requests 5/5, actions 28/28, reconnect 4/4 (22:21–22:35Z, load 15.1 to 6.0); dashboard 6/6
+    (load 6.0 to 4.4).
+  - **Stopped at 1.147 `decisions`, 3/16 (22:37Z).** serve-web's own update check had errored
+    ("Could not check for update") in the server log during that session, and the workbench went
+    with it. Reported; the architect ruled (22:45Z) to resume from `decisions` on the same head,
+    with a standing rule: a failure caused by that exact error may be re-run once without asking,
+    and noted. Any other failure stops.
+  - **Resumed, all passed:** decisions 16/16, work 15/15, arrange 19/19, profile-seed 2/2,
+    profile-existing 2/2, webviews 6/6 (22:46–22:55Z, load 7.7 to 9.9).
+  - **Fenced 1.138.0:** webviews 3/6 (only the three known blanks: VS Code's own Markdown
+    preview, the contextual panel, the Codev Markdown preview; Work rendered), arrange 19/19,
+    work 15/15, then **decisions 15/16, stopped.** Scenario 18's contrast check measured 1 for the
+    file path in High Contrast Light: white on white.
+  - **Cause (read-only diagnosis).** 1.138 serves insider ef65ac1b's webview host page
+    (codev-ide#67). Its default styles give `code` the theme's preformatted foreground (white in
+    High Contrast Light) without the dark blue background 1.128 and 1.147 pair with it, and they
+    are unlayered, where 1.128's and 1.147's sit in `@layer vscode-default`. Reported with
+    options; the architect chose (A), fix in place, and widened it: diff the old page's defaults
+    against 1.147's and 1.128's and cover every differing rule the panels render.
+- **(A), `7cdc24716`.** The diff of the three pages' default-styles blocks, rule by rule:
+  - every differing rule targets an element the panels can render, so each is stated in
+    `vscode-theme.css` with 1.147's value: the body's `overscroll-behavior-x`, `video` sizing,
+    `code` (font, colour, background, padding, radius), `a code`, `pre code`, `p > a`, and `kbd`
+    with the old page's `.vscode-light kbd`. Did not apply: none.
+  - `a code` and `:root kbd` tie the old page's (0,0,2) and (0,1,1) selectors and come after them.
+  - Measured in headless Chromium with the production stylesheets under each page's defaults, light
+    and dark, every element type the panels render: before, the old page differed from 1.147 in 34
+    computed properties on Decisions; after, 0 on the old page and 0 on 1.128, and 1.147 is
+    unchanged. 1.128's one change: code inside a Markdown link is now underlined, as on 1.147.
+  - One theme test per rule, plus specificity and the option word's colours. Unit: 134 files,
+    1981 passed, 1 skipped.
+  - The vsix inputs between `35334efbf` and `7cdc24716`: only `vscode-theme.css` and
+    `workspace-views-theme.test.ts`. The architect scoped the re-run to the panel scripts; the nine
+    that render no panel stand from `35334efbf`.
+- **Re-run on `7cdc24716`, stopped at fenced 1.138 `work`, 14/15 (23:35Z).**
+  - Before the stop: 1.147 decisions 16/16, work 15/15, arrange 19/19, webviews 6/6; 1.138
+    webviews 3/6 (the known blanks only), arrange 19/19.
+  - Scenario 19 (Tower unreachable) read "decision cards: 0 before, 2 while down, 2 after". A
+    harness race: after the reload Decisions is restored in a background tab, and the automatic
+    arrange brings it on screen only once the first connection attempt ends; the check counted
+    cards as soon as the frame existed. The product kept and recovered both cards.
+  - **`d31df3a84`** (harness only): the check waits, bounded, for Decisions' cards, re-finding the
+    frame on each try. All 11 panel runs restarted on it (23:37Z, load 3.7), so every panel run is
+    on one head; the vsix built at `7cdc24716` still holds.
+- **Re-run on `d31df3a84`: all passed (23:37Z–00:05Z).**
+  - 1.147 serve-web: decisions 16/16, work 15/15, arrange 19/19, webviews 6/6 (load 3.7 to 9.1).
+  - Fenced 1.138.0: webviews 3/6 (the three known blanks only; Work rendered), arrange 19/19,
+    work 15/15 (scenario 19 now reads 2 cards before, while down and after), decisions 16/16 (High
+    Contrast Light: nothing under 4.5) (load 9.1 to 7.9; 12.8 at its highest).
+  - Fenced 1.128.0: arrange 19/19, work 15/15, decisions 16/16 (load 7.9 to 10.0; 15.9 at its
+    highest).
+  - No update-check re-run was needed. Fence: every start passed its canary; every session's
+    tripwire section reads only "no connection on :4100"; the servers reported `50cad256` and
+    `fc3def67` before and after each session; no browser request reached the owner's port.
+  - **Totals:** 1.147.0 115/115 (the nine standing scripts on `35334efbf`, the four panel scripts
+    on `d31df3a84`), 1.138.0 53/56, 1.128.0 50/50.
+- **Evidence `8b7def1ed`**, pushed to `evidence/spir-1963` as a fast-forward of `51e2bbf17`: 34
+  folders, 200 screenshots, each file picked by its run's JSON; the per-phase folders removed;
+  `layout-spike/` kept. The prompt check OCR'd 206 images (200 unique): 0 prompts.
+  `verification.md` regenerated against it: 227 permalinks, none broken.
+- **Unit, on `d31df3a84`:** apps/vscode 134 files, 1981 passed, 1 skipped; workspace-views 197;
+  sdk 431; apps/web 38 files, 462 passed, 1 skipped.
