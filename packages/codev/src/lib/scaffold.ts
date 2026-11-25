@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isEmptySkillDir } from './skill-refresh.js';
+import { withEmptyHotBlock } from './managed-block.js';
 
 interface CreateUserDirsOptions {
   skipExisting?: boolean;
@@ -145,6 +146,11 @@ export function copyResourceTemplates(
   return { copied, skipped };
 }
 
+interface CopyTierDefaultsOptions extends CopyResourceTemplatesOptions {
+  /** Report what would be copied, writing nothing (#1982). */
+  dryRun?: boolean;
+}
+
 /** The capped hot-tier files materialized into a project's codev/resources/ (Spec 987). */
 export const HOT_TIER_FILES = ['arch-critical.md', 'lessons-critical.md'] as const;
 
@@ -162,14 +168,14 @@ export const HOT_TIER_FILES = ['arch-critical.md', 'lessons-critical.md'] as con
 export function copyHotTierDefaults(
   targetDir: string,
   skeletonDir: string,
-  options: CopyResourceTemplatesOptions = {}
+  options: CopyTierDefaultsOptions = {}
 ): CopyResourceTemplatesResult {
-  const { skipExisting = false } = options;
+  const { skipExisting = false, dryRun = false } = options;
   const resourcesDir = path.join(targetDir, 'codev', 'resources');
   const copied: string[] = [];
   const skipped: string[] = [];
 
-  if (!fs.existsSync(resourcesDir)) {
+  if (!dryRun && !fs.existsSync(resourcesDir)) {
     fs.mkdirSync(resourcesDir, { recursive: true });
   }
 
@@ -182,7 +188,7 @@ export function copyHotTierDefaults(
       continue;
     }
     if (fs.existsSync(srcPath)) {
-      fs.copyFileSync(srcPath, destPath);
+      if (!dryRun) fs.copyFileSync(srcPath, destPath);
       copied.push(file);
     }
   }
@@ -218,14 +224,14 @@ export const COLD_TIER_FILES = [
 export function copyColdTierDefaults(
   targetDir: string,
   skeletonDir: string,
-  options: CopyResourceTemplatesOptions = {}
+  options: CopyTierDefaultsOptions = {}
 ): CopyResourceTemplatesResult {
-  const { skipExisting = false } = options;
+  const { skipExisting = false, dryRun = false } = options;
   const resourcesDir = path.join(targetDir, 'codev', 'resources');
   const copied: string[] = [];
   const skipped: string[] = [];
 
-  if (!fs.existsSync(resourcesDir)) {
+  if (!dryRun && !fs.existsSync(resourcesDir)) {
     fs.mkdirSync(resourcesDir, { recursive: true });
   }
 
@@ -238,7 +244,7 @@ export function copyColdTierDefaults(
       continue;
     }
     if (fs.existsSync(srcPath)) {
-      fs.copyFileSync(srcPath, destPath);
+      if (!dryRun) fs.copyFileSync(srcPath, destPath);
       copied.push(dest);
     }
   }
@@ -257,6 +263,8 @@ interface CopyRootFilesResult {
   conflicts: string[];
   /** Root files left alone because the path to write is a symlink or otherwise irregular. */
   notRegular: string[];
+  /** Pending `.codev-new` copies removed (or, under `dryRun`, to remove): nothing left to merge. */
+  resolved: string[];
 }
 
 /** Something other than a regular file sits at `p` (a symlink, dangling or not; a directory). */
@@ -268,8 +276,28 @@ function isIrregularPath(p: string): boolean {
   }
 }
 
+const PROJECT_NAME_PLACEHOLDER = '{{PROJECT_NAME}}';
+
 /**
- * Copy root files (CLAUDE.md, AGENTS.md) with project name substitution
+ * A root doc the adopter never edited: a regular file that matches the template outside
+ * the managed block, whatever project name it was written with and in either line ending.
+ * A checkout's directory need not carry the name `init` saw (the name is all the template
+ * varies by), and a Windows checkout may turn LF into CRLF, as skills already allow for.
+ */
+function matchesTemplate(filePath: string, template: string): boolean {
+  if (!fs.statSync(filePath).isFile()) return false;
+  const pattern = withEmptyHotBlock(template.replace(/\r\n/g, '\n'))
+    .split(PROJECT_NAME_PLACEHOLDER)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^\\n]*');
+  const doc = fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
+  return new RegExp(`^${pattern}$`).test(withEmptyHotBlock(doc));
+}
+
+/**
+ * Copy root files (CLAUDE.md, AGENTS.md) with project name substitution. With
+ * `handleConflicts`, an existing doc that differs from the template outside the managed
+ * block keeps its content and gets the template beside it as `.codev-new`.
  */
 export function copyRootFiles(
   targetDir: string,
@@ -281,6 +309,7 @@ export function copyRootFiles(
   const copied: string[] = [];
   const conflicts: string[] = [];
   const notRegular: string[] = [];
+  const resolved: string[] = [];
 
   const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
   for (const file of rootFiles) {
@@ -291,8 +320,8 @@ export function copyRootFiles(
       continue;
     }
 
-    const content = fs.readFileSync(srcPath, 'utf-8')
-      .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    const template = fs.readFileSync(srcPath, 'utf-8');
+    const content = template.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
 
     // Never write through a symlink, which may point outside the project: not the
     // `.codev-new` copy, and not a dangling link where a missing file would be created. A
@@ -306,7 +335,15 @@ export function copyRootFiles(
     }
 
     if (fs.existsSync(destPath)) {
-      if (handleConflicts) {
+      if (handleConflicts && matchesTemplate(destPath, template)) {
+        // Up to date: the managed block is refreshed by syncHotContextBlock (#1982). A pending
+        // copy that is the template too leaves nothing to merge (a symlinked one was skipped above).
+        const pendingPath = destPath + '.codev-new';
+        if (fs.existsSync(pendingPath) && matchesTemplate(pendingPath, template)) {
+          if (!dryRun) fs.rmSync(pendingPath);
+          resolved.push(file + '.codev-new');
+        }
+      } else if (handleConflicts) {
         // Create .codev-new for merge
         if (!dryRun) fs.writeFileSync(destPath + '.codev-new', content);
         conflicts.push(file);
@@ -318,7 +355,7 @@ export function copyRootFiles(
     }
   }
 
-  return { copied, conflicts, notRegular };
+  return { copied, conflicts, notRegular, resolved };
 }
 
 interface CreateProjectsDirOptions {
