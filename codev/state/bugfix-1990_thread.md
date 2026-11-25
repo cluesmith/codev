@@ -53,3 +53,29 @@ git blobs (installed template 0 CR LF / 168 LF, as published).
   exactly the 4 Windows failures with the old code, and is green with the fix.
 - Findings posted on the issue: issuecomment-7176007177.
 - Windows: branch run 45710698393 (suites + `update-` filter), probe-after-fix 45710704421.
+
+## 2026-11-25 — PR #1991, CMAP round 1
+
+- First Windows runs at `87b9202b6`: branch run 45710698393 all green (1982 13/13, 1985 22/22,
+  codev unit 458 files 0 failed, incl. the new file 7/7); probe 45710704421: all four projects
+  correct after the fix (CR LF unedited 168/0 untouched, block missing 152/0 → 168/0, edited
+  kept byte for byte). Probe branch deleted, then recreated for the final head (see below).
+- codex: REQUEST_CHANGES: no code defects. (a) reword the `chore(porch): …` commits: rebutted,
+  those are porch's own state commits, the same on every project on `main`; (b) Windows unit
+  job pending: since green.
+- claude: APPROVE, with a real finding: a CR LF doc from before Spec 987 that a pre-fix update
+  gave its block by INSERTION also got the blank line before the block and the break after it
+  in LF, outside the markers (`# T\r\n\n<block>\n\r\nbody`), so the outside rule read it as
+  mixed and it would never heal. Confirmed against the old code. Fixed by counting the line
+  break on each side of the markers as part of the block (excluded from detection, written in
+  the doc's ending). Rejected the suggested majority vote: it contradicts the architect's
+  "genuinely mixed → template's ending" and would still leave two stray LFs.
+- Final head `1526cd9f3`: branch run 45712624268, probe 45712627797 (5th scenario:
+  insert-damaged docs). CMAP re-run on it.
+- Final head green on Windows: branch run 45712624268 (1982 13/13, 1985 22/22, codev unit 458
+  files 0 failed, incl. bugfix-1990 8/8, managed-block 16/16); probe 45712627797: the
+  insert-damaged doc (152/16) healed to 168/0 by the installed package; other rows as before.
+  13 tests fail on main's managed-block.ts. Probe branch deleted for good.
+- CMAP round 2: claude APPROVE; codex REQUEST_CHANGES only on porch's `chore(porch):` commits
+  (rebutted). Open for the architect: `.codev-new` is still the template's line ending (LF) for
+  a CR LF doc — pre-existing, a design call, not changed here.
