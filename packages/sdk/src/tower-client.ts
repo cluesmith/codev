@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -246,6 +246,62 @@ export interface TowerTerminal {
 }
 
 // ── Client Options ─────────────────────────────────────────────
+
+/**
+ * The answer of a decisions route (Spec 1819), or why there was none. Never thrown:
+ * - `verdict`: Tower answered with a decisions body, a document or a refusal with its `code` and
+ *   `message`, whatever the HTTP status;
+ * - `unreachable`: no answer at all (Tower down, a timeout, a reset);
+ * - `unreadable`: an answer that is not a decisions body, such as a 401's plain text.
+ */
+export type DecisionsRouteResult<T> =
+  | { kind: 'verdict'; status: number; verdict: T }
+  | { kind: 'unreachable'; error: string }
+  | { kind: 'unreadable'; status: number };
+
+/** A decisions route's refusal: its machine `code` and the message the owner reads. */
+export interface DecisionsRefusal {
+  ok: false;
+  code: DecisionsRefusalCode;
+  message: string;
+}
+
+/**
+ * The answer of the decisions image route (#1938): the image's bytes and type, Tower's refusal,
+ * or why there was none (as in {@link DecisionsRouteResult}). Never thrown.
+ */
+export type DecisionImageRouteResult =
+  | { kind: 'image'; bytes: Uint8Array; contentType: string }
+  | { kind: 'verdict'; status: number; verdict: DecisionsRefusal }
+  | { kind: 'unreachable'; error: string }
+  | { kind: 'unreadable'; status: number };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** A decisions refusal body, or null. */
+function asDecisionsRefusal(body: unknown): DecisionsRefusal | null {
+  if (isRecord(body) && body.ok === false && typeof body.code === 'string' && typeof body.message === 'string') {
+    return { ok: false, code: body.code as DecisionsRefusalCode, message: body.message };
+  }
+  return null;
+}
+
+/**
+ * A decisions document or refusal body, checked as far as the dashboard checks it (the document's
+ * `version` and `items`), or null.
+ */
+function asDecisionsVerdict(body: unknown): DecisionsReadResponse | null {
+  if (isRecord(body) && body.ok === true) {
+    const doc = body['document'];
+    if (isRecord(doc) && typeof doc.version === 'string' && Array.isArray(doc.items)) {
+      return { ok: true, document: doc as unknown as DecisionsDocument };
+    }
+    return null;
+  }
+  return asDecisionsRefusal(body);
+}
 
 export interface TowerClientOptions {
   port?: number;
@@ -1141,6 +1197,94 @@ export class TowerClient {
       if (message.includes('timeout')) return { status: 0, body: null, error: 'Request timeout' };
       return { status: 0, body: null, error: message };
     }
+  }
+
+  /**
+   * Like `requestPreservingBody`, for a route that answers with bytes (an image). That helper
+   * reads the body as text, which would destroy binary bytes and drop the `Content-Type`. Same key
+   * header, base URL and timeout as every other request. A 2xx comes back as its bytes and type; any
+   * other status as its JSON-parsed body (null when it is not JSON), so a refusal keeps its code and
+   * message. Never throws: a transport failure comes back as `status: 0`.
+   */
+  private async requestBinary(
+    path: string,
+  ): Promise<{ status: number; bytes: Uint8Array; contentType: string } | { status: number; body: unknown; error?: string }> {
+    try {
+      const authKey = this.getAuthKey();
+      const headers: Record<string, string> = {};
+      if (authKey) {
+        headers['codev-tower-key'] = authKey;
+      }
+      const response = await this.fetchFn(`${this.baseUrl}${path}`, {
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        return { status: response.status, bytes, contentType: response.headers.get('Content-Type') ?? '' };
+      }
+      const text = await response.text();
+      let body: unknown = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = null; // an unparseable body is reported by the caller as an unusable answer
+      }
+      return { status: response.status, body };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (isConnectionRefused(err)) return { status: 0, body: null, error: 'Tower not running' };
+      if (message.includes('timeout')) return { status: 0, body: null, error: 'Request timeout' };
+      return { status: 0, body: null, error: message };
+    }
+  }
+
+  /** One decisions document route's answer, as a {@link DecisionsRouteResult}. */
+  private async requestDecisions(path: string, options: RequestInit = {}): Promise<DecisionsRouteResult<DecisionsReadResponse>> {
+    const outcome = await this.requestPreservingBody(path, options);
+    if (outcome.status === 0) return { kind: 'unreachable', error: outcome.error ?? 'Tower unreachable' };
+    const verdict = asDecisionsVerdict(outcome.body);
+    if (!verdict) return { kind: 'unreadable', status: outcome.status };
+    return { kind: 'verdict', status: outcome.status, verdict };
+  }
+
+  /**
+   * GET /workspace/<enc>/api/decisions: the workspace's decisions document, or Tower's refusal
+   * (`not-found` when there is no decisions file) with its code and message (Spec 1819).
+   */
+  async getDecisions(workspacePath: string): Promise<DecisionsRouteResult<DecisionsReadResponse>> {
+    return this.requestDecisions(`/workspace/${encodeWorkspacePath(workspacePath)}/api/decisions`);
+  }
+
+  /**
+   * POST /workspace/<enc>/api/decisions/rule: write the owner's ruling into the decisions file.
+   * Success carries the document re-parsed from the bytes written; a refusal keeps its code and
+   * message (Spec 1819). Tower then tells the hub architect (#1828).
+   */
+  async ruleDecision(workspacePath: string, request: DecisionsRuleRequest): Promise<DecisionsRouteResult<DecisionsRuleResponse>> {
+    return this.requestDecisions(`/workspace/${encodeWorkspacePath(workspacePath)}/api/decisions/rule`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /**
+   * GET /workspace/<enc>/api/decisions/image?path=: one image a decisions item references (#1938),
+   * as bytes and type. `imagePath` is as written in the item: relative to the decisions file, or
+   * `/`-rooted at the workspace. Tower contains it to the workspace; a refusal keeps its code and
+   * message. A 2xx answer that is not an image is `unreadable`.
+   */
+  async getDecisionImage(workspacePath: string, imagePath: string): Promise<DecisionImageRouteResult> {
+    const encoded = encodeWorkspacePath(workspacePath);
+    const outcome = await this.requestBinary(`/workspace/${encoded}/api/decisions/image?path=${encodeURIComponent(imagePath)}`);
+    if ('bytes' in outcome) {
+      if (!outcome.contentType.toLowerCase().startsWith('image/')) return { kind: 'unreadable', status: outcome.status };
+      return { kind: 'image', bytes: outcome.bytes, contentType: outcome.contentType };
+    }
+    if (outcome.status === 0) return { kind: 'unreachable', error: outcome.error ?? 'Tower unreachable' };
+    const refusal = asDecisionsRefusal(outcome.body);
+    if (!refusal) return { kind: 'unreadable', status: outcome.status };
+    return { kind: 'verdict', status: outcome.status, verdict: refusal };
   }
 
   /**

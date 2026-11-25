@@ -13,12 +13,18 @@ import { BUILDER_STATE_GLYPH, worstBuilderState, type GroupRollup } from './buil
  * builder rows with this class and the command handlers narrow via
  * `instanceof BuilderTreeItem` to read `.builderId` safely.
  *
- * Used by views/builders.ts.
+ * `scope` names the tree builder that made the row (`ArchitectTreeBuilder`):
+ * `''` for the Agents view, a workspace-qualified prefix in the Cockpit. The
+ * builder prefixes the row's id with it, and handlers read it to tell which
+ * view and workspace a row belongs to.
+ *
+ * Used by views/architect-tree.ts.
  */
 export class BuilderTreeItem extends vscode.TreeItem {
   constructor(
     public readonly builderId: string,
     label: string,
+    public readonly scope: string = '',
   ) {
     super(label);
   }
@@ -43,6 +49,9 @@ export class BuilderTreeItem extends vscode.TreeItem {
  * hold builders at different gates — the yellow color is the group-level "needs
  * attention" signal. The triple is spelled out in the tooltip. Set here in the
  * subclass, not the shared base, because the Backlog view rolls up differently.
+ *
+ * `scope` prefixes the id (`<scope>builder-group:<name>`), so two workspaces'
+ * `main` headers never collide; `''` keeps the Agents view's ids unchanged.
  */
 export class BuilderGroupTreeItem extends AreaGroupTreeItem {
   constructor(
@@ -50,8 +59,10 @@ export class BuilderGroupTreeItem extends AreaGroupTreeItem {
     count: number,
     collapsibleState: vscode.TreeItemCollapsibleState,
     rollup: GroupRollup,
+    public readonly scope: string = '',
   ) {
     super(groupName, 'builder', count, collapsibleState);
+    this.id = `${scope}${this.id}`;
     // An empty rollup means a childless group — only the architect axis produces
     // one (a registered architect with no builders, Issue 1174). Short-circuit
     // the worst-of tri-state, which would read all-zero as green `active`, and
@@ -85,12 +96,12 @@ export class BuilderGroupTreeItem extends AreaGroupTreeItem {
  * expansion off the stable `id`, so a user who expands it stays expanded until
  * they collapse. The rollup glyph is the same neutral idle glyph a childless
  * architect carries — idle architects have no builders, so there is no
- * attention state to roll up.
+ * attention state to roll up. `scope` prefixes the id, as on the other rows.
  */
 export class IdleArchitectsGroupTreeItem extends vscode.TreeItem {
-  constructor(count: number) {
+  constructor(count: number, public readonly scope: string = '') {
     super(`Idle Architects (${count})`, vscode.TreeItemCollapsibleState.Collapsed);
-    this.id = 'idle-architects-group';
+    this.id = `${scope}idle-architects-group`;
     this.contextValue = 'group-idle-architects';
     this.iconPath = new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('disabledForeground'));
     this.tooltip = `${count} idle architects · no builders attached`;

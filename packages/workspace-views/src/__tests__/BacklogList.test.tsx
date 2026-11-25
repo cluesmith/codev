@@ -1,0 +1,75 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
+import { BacklogList } from '../components/BacklogList.js';
+import type { OverviewBacklogItem } from '@cluesmith/codev-types';
+
+afterEach(() => {
+  cleanup();
+});
+
+function makeItem(overrides: Partial<OverviewBacklogItem> = {}): OverviewBacklogItem {
+  return {
+    id: '1',
+    title: 'Test issue',
+    url: 'https://github.com/org/repo/issues/1',
+    type: 'project',
+    priority: 'medium',
+    area: '',
+    hasSpec: false,
+    hasPlan: false,
+    hasReview: false,
+    hasBuilder: false,
+    createdAt: new Date().toISOString(),
+    author: 'waleedkadous',
+    ...overrides,
+  };
+}
+
+describe('BacklogList assignee rendering', () => {
+  it('renders "a: none" when there are no assignees', () => {
+    const items = [makeItem({ id: '1', title: 'Unassigned' })];
+    render(<BacklogList items={items} />);
+
+    expect(screen.getByText('r: @waleedkadous')).toBeInTheDocument();
+    expect(screen.getByText('a: none')).toBeInTheDocument();
+  });
+
+  it('renders a single assignee as "a: @login"', () => {
+    const items = [
+      makeItem({ id: '2', title: 'One assignee', assignees: ['amr'] }),
+    ];
+    render(<BacklogList items={items} />);
+
+    expect(screen.getByText('a: @amr')).toBeInTheDocument();
+  });
+
+  it('renders multiple assignees comma-separated', () => {
+    const items = [
+      makeItem({ id: '3', title: 'Many assignees', assignees: ['amr', 'bob'] }),
+    ];
+    render(<BacklogList items={items} />);
+
+    expect(screen.getByText('a: @amr, @bob')).toBeInTheDocument();
+  });
+
+  it('treats empty assignees array as no assignees', () => {
+    const items = [makeItem({ id: '4', title: 'Empty list', assignees: [] })];
+    render(<BacklogList items={items} />);
+
+    expect(screen.getByText('a: none')).toBeInTheDocument();
+  });
+});
+
+describe('BacklogList tracker-key items (#1740)', () => {
+  it('renders an item without createdAt with no NaN age, and its key without #', () => {
+    const { container } = render(<BacklogList items={[makeItem({ id: 'ENG-12', title: 'Jira item', createdAt: undefined })]} />);
+    expect(container.textContent).not.toContain('NaN');
+    expect(container.querySelector('.backlog-row-age')?.textContent).toBe('');
+    expect(screen.getByText('ENG-12')).toBeInTheDocument();
+  });
+
+  it('keeps # on numeric ids', () => {
+    render(<BacklogList items={[makeItem({ id: '42', title: 'GitHub item' })]} />);
+    expect(screen.getByText('#42')).toBeInTheDocument();
+  });
+});

@@ -102,7 +102,7 @@ function quiet(): OverviewData {
   return { builders: [], backlog: [], pendingPRs: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' } as unknown as OverviewData;
 }
 function entry(ws: TowerWorkspace, overview: OverviewData | null): FleetEntry {
-  return { workspace: ws, attention: deriveAttention(overview) };
+  return { workspace: ws, attention: deriveAttention(overview), overview };
 }
 
 describe('buildWorkspacePicks', () => {

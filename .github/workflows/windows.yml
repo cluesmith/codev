@@ -242,6 +242,12 @@ jobs:
         working-directory: packages/core
         run: pnpm test
 
+      # Spec 1963: the VS Code webview path containment (realpath + path.relative) on real Windows
+      # paths: drive-letter case, separators and a directory junction leading outside the workspace.
+      - name: Run vscode webview path-containment tests
+        working-directory: apps/vscode
+        run: pnpm exec vitest run src/__tests__/workspace-views-security.test.ts
+
       - name: Copy skeleton for unit tests
         working-directory: packages/codev
         run: pnpm copy-skeleton

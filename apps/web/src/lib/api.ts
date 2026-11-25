@@ -133,23 +133,10 @@ export async function fetchTeam(): Promise<TeamApiResponse> {
   return res.json();
 }
 
-/**
- * Spec 1819: the outcome of reading the workspace's decisions file. Never thrown —
- * a refusal or a transport failure is something the Decisions tab shows.
- */
-export type DecisionsFetchResult =
-  | { kind: 'document'; document: DecisionsDocument }
-  | { kind: 'not-found'; message: string }
-  | { kind: 'error'; message: string };
-
-/**
- * Spec 1819: the outcome of submitting a ruling. Never thrown — the card shows a
- * refusal or a transport failure and keeps the owner's draft.
- */
-export type DecisionRulingResult =
-  | { kind: 'document'; document: DecisionsDocument }
-  | { kind: 'refused'; code: DecisionsRefusalCode; message: string }
-  | { kind: 'error'; message: string };
+// Spec 1819 / #1938: the decisions results the dashboard's host returns. They are the shared
+// Decisions view's host contract (Spec 1963), so they are defined with it.
+export type { DecisionsFetchResult, DecisionRulingResult, DecisionImageResult } from '@cluesmith/codev-workspace-views';
+import type { DecisionsFetchResult, DecisionRulingResult, DecisionImageResult } from '@cluesmith/codev-workspace-views';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -190,11 +177,6 @@ export async function fetchDecisions(): Promise<DecisionsFetchResult> {
     ? { kind: 'not-found', message: result.message }
     : { kind: 'error', message: result.message };
 }
-
-/** #1938: an image an item references, or why it was not loaded. Never thrown. */
-export type DecisionImageResult =
-  | { kind: 'image'; blob: Blob }
-  | { kind: 'not-loaded'; message: string };
 
 /**
  * #1938: fetch an image from the workspace with the key, which an `<img>` request cannot carry.

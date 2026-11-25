@@ -69,6 +69,12 @@ jobs:
         working-directory: packages/artifact-canvas
         run: pnpm test
 
+      # Spec 1963: the shared Work and Decisions views. Source-exported (no build step); its
+      # tests include the import-boundary guard, and check-types covers the tests as well.
+      - name: Type-check and test workspace-views package
+        working-directory: packages/workspace-views
+        run: pnpm check-types && pnpm test
+
       - name: Copy skeleton for unit tests
         working-directory: packages/codev
         run: pnpm copy-skeleton
@@ -105,6 +111,14 @@ jobs:
       - name: Run vscode unit tests
         working-directory: apps/vscode
         run: pnpm test:unit
+
+      # Spec 1963: the Cockpit's rendered-verification harness runs by hand only (it needs a
+      # browser, VS Code and its own Tower); CI at least keeps every script of it parsing.
+      - name: Syntax-check the cockpit harness
+        working-directory: apps/vscode/scripts/cockpit-harness
+        run: |
+          for f in *.mjs *.cjs stubs/*.mjs; do node --check "$f" || exit 1; done
+          for f in stubs/afx stubs/codev stubs/porch; do sh -n "$f" || exit 1; done
 
       # Streamdeck check-types resolves the sdk's dist .d.ts — the "Build sdk
       # package" step above must stay ahead of these.

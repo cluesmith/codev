@@ -12,8 +12,9 @@
  */
 
 import * as path from 'node:path';
-import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
+import type { MailboxEscalationPayload, OverviewData } from '@cluesmith/codev-types';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
+import { deriveAttention, isIdleWaiting } from '@cluesmith/codev-sdk/builder-helpers';
 
 /**
  * Status-bar segment for held mail, e.g. ` · $(mail) 2 held`. Returns the empty
@@ -138,6 +139,30 @@ export function composeActivityBadge(
         : '';
   const tooltip = [builderTip, heldTooltipClause(held), architectTooltipClause(waitingArchitects)].filter(Boolean).join(' · ');
   return { value: total, tooltip };
+}
+
+/**
+ * This window's workspace "needs me" badge, the one every view that renders its agents carries
+ * (the Agents view and the Cockpit, Spec 1963): blocked + idle-waiting builders, held mail and
+ * waiting architects (`composeActivityBadge`). `undefined`, clearing the badge, when not connected,
+ * with no overview yet, and always in a builder-worktree window, whose overview is the PARENT's
+ * builders: the parent's own window carries them (#1809).
+ */
+export function workspaceActivityBadge(
+  data: OverviewData | null,
+  window: { connected: boolean; builderWorktreeWindow: boolean },
+  now: number = Date.now(),
+): BadgeValue | undefined {
+  if (window.builderWorktreeWindow || !window.connected || !data) {
+    return undefined;
+  }
+  const blockedCount = data.builders.filter(b => b.blocked).length;
+  const idleCount = data.builders.filter(b => isIdleWaiting(b, now)).length;
+  // Spec 1595: architects at a prompt or with their agent dead fold in by name.
+  const waitingArchitects = deriveAttention(data, now).architects.map(a => a.architect);
+  // Spec 1313 Phase 8: the workspace held-mail count folds in, so the activity-bar
+  // icon reflects it even when the sidebar is collapsed.
+  return composeActivityBadge(blockedCount, idleCount, data.heldCount, waitingArchitects);
 }
 
 /**

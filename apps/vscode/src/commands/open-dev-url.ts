@@ -24,9 +24,10 @@ import { loadWorktreeConfig } from '../load-worktree-config.js';
 
 export async function openDevUrl(
   connectionManager: ConnectionManager,
-  urlArg?: string,
+  urlArg?: unknown,
 ): Promise<void> {
-  // Direct invocation: a row click passes its URL; just open it.
+  // Direct invocation: a row click passes its URL; just open it. Anything else (the palette passes
+  // nothing; a Cockpit workspace row's menu passes the row) resolves from the config below.
   if (typeof urlArg === 'string' && urlArg.trim()) {
     await vscode.env.openExternal(vscode.Uri.parse(urlArg));
     return;

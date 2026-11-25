@@ -14,7 +14,7 @@ import type { ChangeEntry, ChangeStatus, ResourcePlan } from '../commands/view-d
  * file-type icon show, and `BuilderFileDecorationProvider` adds the
  * SCM-style colored status-letter badge, mirroring VSCode's Git decorator.
  *
- * Used by views/builders.ts.
+ * Used by views/architect-tree.ts.
  */
 
 /**
@@ -82,6 +82,8 @@ export class BuilderFileTreeItem extends vscode.TreeItem {
     public readonly baseRef: string,
     public readonly change: ChangeEntry,
     public readonly plan: ResourcePlan,
+    /** The tree builder that made the row (see `BuilderTreeItem.scope`); prefixes the id. */
+    public readonly scope: string = '',
   ) {
     const rel = plan.resourcePath;
     super(path.basename(rel));
@@ -92,8 +94,9 @@ export class BuilderFileTreeItem extends vscode.TreeItem {
     // prefix keeps two builders that changed the same relative path distinct
     // (same reason `resourceUri` carries the worktree path, above). Distinct
     // from folder ids (`<builderId>::folder::<...>`) and builder-row ids
-    // (`<builderId>#<version>`).
-    this.id = `${builderId}::${rel}`;
+    // (`<builderId>#<version>`). The scope prefix (empty in the Agents view)
+    // keeps the same builder's row distinct across workspaces in the Cockpit.
+    this.id = `${scope}${builderId}::${rel}`;
 
     const dir = path.dirname(rel);
     const dirLabel = dir === '.' ? '' : dir;

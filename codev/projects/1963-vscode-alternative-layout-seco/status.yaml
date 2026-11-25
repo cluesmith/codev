@@ -1,0 +1,157 @@
+id: '1963'
+title: vscode-alternative-layout-seco
+protocol: spir
+phase: review
+plan_phases:
+  - id: verification_harness
+    title: Isolated verification harness
+    status: complete
+  - id: fleet_overviews
+    title: Fleet cache keeps every active workspace's overview
+    status: complete
+  - id: architect_tree_builder
+    title: Reusable, workspace-scoped architect-axis row builder
+    status: complete
+  - id: cockpit_hierarchy
+    title: Cockpit button and the Tower → workspaces → architects → builders tree
+    status: complete
+  - id: cockpit_actions
+    title: Placement-table actions on the hierarchy, parity mapping, increment-1 verification
+    status: complete
+  - id: workspace_views_package
+    title: Shared Work/Decisions package; dashboard moved onto it unchanged
+    status: complete
+  - id: decisions_panel
+    title: Decisions panel in VS Code, its host bridge, and the hierarchy's Decisions entry
+    status: complete
+  - id: work_panel
+    title: Work panel in VS Code, increment-2 verification
+    status: complete
+  - id: arrange_cockpit
+    title: 'Arrange Cockpit: split, triggers, autoArrange, first-arrange notice, increment-3 verification'
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-11-24T01:28:14.248Z'
+    approved_at: '2026-11-24T05:59:40.990Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-11-24T06:16:46.617Z'
+    approved_at: '2026-11-24T06:55:42.976Z'
+  pr:
+    status: approved
+    requested_at: '2026-11-24T16:45:15.775Z'
+    approved_at: '2026-11-25T00:24:22.801Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: true
+history:
+  - iteration: 1
+    plan_phase: verification_harness
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-verification_harness-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-verification_harness-iter1-claude.txt
+  - iteration: 1
+    plan_phase: cockpit_hierarchy
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-cockpit_hierarchy-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-cockpit_hierarchy-iter1-claude.txt
+  - iteration: 1
+    plan_phase: workspace_views_package
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-workspace_views_package-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-workspace_views_package-iter1-claude.txt
+  - iteration: 1
+    plan_phase: decisions_panel
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-decisions_panel-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-decisions_panel-iter1-claude.txt
+  - iteration: 1
+    plan_phase: work_panel
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-work_panel-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-work_panel-iter1-claude.txt
+  - iteration: 1
+    plan_phase: arrange_cockpit
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-arrange_cockpit-iter1-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1963/codev/projects/1963-vscode-alternative-layout-seco/1963-arrange_cockpit-iter1-claude.txt
+started_at: '2026-11-24T01:12:47.024Z'
+updated_at: '2026-11-25T00:24:22.802Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-11-24T06:55:50.288Z'
+    acknowledged_at: '2026-11-24T06:56:42.376Z'
+  - boundary: plan-phase:fleet_overviews
+    at: '2026-11-24T07:40:44.236Z'
+    acknowledged_at: '2026-11-24T07:41:39.051Z'
+  - boundary: plan-phase:architect_tree_builder
+    at: '2026-11-24T07:47:00.222Z'
+    acknowledged_at: '2026-11-24T07:47:49.148Z'
+  - boundary: plan-phase:cockpit_hierarchy
+    at: '2026-11-24T08:05:13.344Z'
+    acknowledged_at: '2026-11-24T08:05:18.924Z'
+  - boundary: plan-phase:cockpit_actions
+    at: '2026-11-24T08:58:42.816Z'
+    acknowledged_at: '2026-11-24T08:58:57.074Z'
+  - boundary: plan-phase:workspace_views_package
+    at: '2026-11-24T11:06:37.798Z'
+    acknowledged_at: '2026-11-24T11:07:42.974Z'
+  - boundary: plan-phase:decisions_panel
+    at: '2026-11-24T11:48:47.217Z'
+    acknowledged_at: '2026-11-24T11:49:53.635Z'
+  - boundary: plan-phase:work_panel
+    at: '2026-11-24T12:58:17.405Z'
+    acknowledged_at: '2026-11-24T13:06:56.199Z'
+  - boundary: plan-phase:arrange_cockpit
+    at: '2026-11-24T14:16:29.097Z'
+    acknowledged_at: '2026-11-24T14:16:36.335Z'
+  - boundary: enter:review
+    at: '2026-11-24T15:31:20.357Z'
+    acknowledged_at: '2026-11-24T15:32:26.729Z'
+pr_ready_for_human: false

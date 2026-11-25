@@ -1,0 +1,352 @@
+/*
+ * The Work and Decisions panels' theme in VS Code (Spec 1963): every `--codev-wv-*` token of the
+ * shared views' stylesheet (packages/workspace-views/src/styles.css) mapped to VS Code's theme
+ * variables, so the panels read correctly in light, dark and high-contrast themes and follow a
+ * theme change live. `workspace-views-theme.test.ts` holds this file to that stylesheet: a token
+ * left unmapped would keep the dashboard's dark default in every theme.
+ */
+
+:root {
+  /* Chrome */
+  --codev-wv-bg: var(--vscode-editor-background);
+  --codev-wv-bg-secondary: var(--vscode-editorWidget-background);
+  --codev-wv-bg-tertiary: var(--vscode-textCodeBlock-background);
+  --codev-wv-bg-hover: var(--vscode-list-hoverBackground);
+  --codev-wv-fg: var(--vscode-foreground);
+  --codev-wv-fg-secondary: var(--vscode-descriptionForeground);
+  /* Muted text is still read (section labels, counts, hints): VS Code's readable muted grey, not
+     its disabled-control colour, which a light theme draws at half alpha (2.1:1, found rendered). */
+  --codev-wv-fg-muted: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+  --codev-wv-border: var(--vscode-panel-border, var(--vscode-contrastBorder));
+  /*
+   * The accent is text and borders on the page (item ids, links, selected options) as well as the
+   * fill of the primary buttons. VS Code's button background cannot be it: high-contrast themes
+   * make that black, which hides accent text on a black page. The link colour is made to read on
+   * the editor background in every theme, and contrast is symmetric, so the editor background
+   * reads on an accent-filled button just as well.
+   */
+  --codev-wv-accent: var(--vscode-textLink-foreground);
+  --codev-wv-accent-hover: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+  --codev-wv-on-accent: var(--vscode-editor-background);
+  --codev-wv-accent-tint: color-mix(in srgb, var(--codev-wv-accent) 8%, transparent);
+  --codev-wv-accent-tint-hover: color-mix(in srgb, var(--codev-wv-accent) 18%, transparent);
+  --codev-wv-accent-tint-border: color-mix(in srgb, var(--codev-wv-accent) 20%, transparent);
+  --codev-wv-link: var(--vscode-textLink-foreground);
+  --codev-wv-font-family: var(--vscode-font-family);
+  --codev-wv-font-mono: var(--vscode-editor-font-family);
+  /*
+   * Type scale. The dashboard sizes for a browser page (16px rows); in VS Code the panels sit beside
+   * the workbench, whose UI text is --vscode-font-size (13px by default, the tree's size). Row and
+   * body text take that size, and the smaller steps keep their distance below it, so the scale
+   * follows the user's setting and small labels never shrink past legibility.
+   */
+  --codev-wv-font-size-xxl: calc(var(--vscode-font-size) + 4px);
+  --codev-wv-font-size-xl: var(--vscode-font-size);
+  --codev-wv-font-size-lg: var(--vscode-font-size);
+  --codev-wv-font-size-md: calc(var(--vscode-font-size) - 1px);
+  --codev-wv-font-size-sm: calc(var(--vscode-font-size) - 1px);
+  --codev-wv-font-size-xs: calc(var(--vscode-font-size) - 2px);
+  --codev-wv-font-size-xxs: calc(var(--vscode-font-size) - 3px);
+
+  /*
+   * Status. Waiting and error are text as well as marks (a refusal, "Image not loaded"), so they
+   * take VS Code's list colours, which are made to be read as text. Light themes' chart yellow and
+   * error foreground measured 2.9:1 and 2.8:1 rendered. High-contrast themes leave the list
+   * colours unset, so the fallbacks apply there.
+   */
+  --codev-wv-status-active: var(--vscode-charts-green);
+  --codev-wv-status-waiting: var(--vscode-list-warningForeground, var(--vscode-charts-yellow));
+  --codev-wv-status-error: var(--vscode-list-errorForeground, var(--vscode-errorForeground));
+  /* Implementing (a dev-approval row) is orange between the error red and the waiting yellow, the
+     dashboard's red → orange → yellow gate progression. It is mixed from those two text colours, so
+     it reads as text where they do: Light Modern's chart orange measured 2.9:1 on white, rendered. */
+  --codev-wv-status-implementing: color-mix(in srgb, var(--codev-wv-status-error) 50%, var(--codev-wv-status-waiting));
+  --codev-wv-status-waiting-tint: color-mix(in srgb, var(--codev-wv-status-waiting) 10%, transparent);
+  --codev-wv-status-error-tint: color-mix(in srgb, var(--codev-wv-status-error) 10%, transparent);
+  --codev-wv-tag-bug-bg: color-mix(in srgb, var(--codev-wv-status-error) 15%, transparent);
+  --codev-wv-tag-project: var(--vscode-charts-purple);
+  --codev-wv-tag-project-bg: color-mix(in srgb, var(--vscode-charts-purple) 12%, transparent);
+  --codev-wv-tag-spike: var(--vscode-charts-blue);
+  --codev-wv-tag-spike-bg: color-mix(in srgb, var(--vscode-charts-blue) 12%, transparent);
+}
+
+/* The panel fills the editor; the view scrolls inside it. VS Code's webview body has side padding. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  /* A webview default the older host page lacks (see the end of this file). */
+  overscroll-behavior-x: none;
+}
+
+/* Keyboard focus follows VS Code's focus colour. */
+button:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+/* The full-size image, shown over the view (a webview cannot open a browser tab). */
+.wv-fullsize {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editor-background);
+}
+
+.wv-fullsize-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-contrastBorder));
+}
+
+.wv-fullsize-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.wv-fullsize-close {
+  padding: 4px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wv-fullsize-close:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.wv-fullsize-body {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 12px;
+}
+
+/* Full size: the image's own size, scrolled when larger than the panel. */
+.wv-fullsize-body img {
+  max-width: none;
+  max-height: none;
+}
+
+/*
+ * Narrow panels. The dashboard's Work view fills a browser page; in VS Code it is often a
+ * half-width editor group, beside Decisions. There the builders table's fixed columns overran the
+ * panel, cutting off each row's Open button, and a backlog row's reviewer and assignee labels ran
+ * over its spec / plan links (found rendered at about 470 px). These rules are VS Code's own, so
+ * the dashboard keeps its layout: as the panel narrows, the secondary columns and labels go first,
+ * then each builder row takes two lines, and the issue, title, state and Open always fit.
+ */
+.work-view {
+  container: work-view / inline-size;
+}
+
+@container work-view (max-width: 760px) {
+  .builder-table thead th:nth-child(5),
+  .builder-col-elapsed,
+  .backlog-row-author,
+  .backlog-row-assignees {
+    display: none;
+  }
+}
+
+/*
+ * Under 600 px (Work in a half-width group) a builder row is two lines: the issue, the title and
+ * Open on the first, the state under the title. On one line the state or the title had to give:
+ * the state wrapped to three lines, or the title shrank to four characters (both found rendered at
+ * about 470 px), and the title is what is read. The row becomes a grid, so the card (its fill,
+ * border and status stripe) moves from the cells to the row. The column headings no longer head
+ * columns: they are hidden from view, kept for screen readers.
+ */
+@container work-view (max-width: 600px) {
+  .builder-col-progress {
+    display: none;
+  }
+
+  .builder-table,
+  .builder-table tbody {
+    display: block;
+  }
+
+  .builder-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .builder-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "id title actions"
+      ". state actions";
+    align-items: center;
+    margin-bottom: 4px;
+    background: var(--codev-wv-bg-secondary);
+    border: 1px solid var(--codev-wv-border);
+    border-radius: 8px;
+  }
+
+  .builder-row:hover {
+    border-color: var(--codev-wv-accent);
+  }
+
+  /* After the hover rule, so the status stripe keeps its colour under the pointer. */
+  .builder-row.builder-row--blocked {
+    border-left: 3px solid var(--codev-wv-status-waiting);
+  }
+
+  .builder-row.builder-row--dead {
+    border-left: 3px solid var(--codev-wv-status-error);
+  }
+
+  .builder-row td,
+  .builder-row td:first-child,
+  .builder-row td:last-child {
+    background: none;
+    border: none;
+    border-radius: 0;
+  }
+
+  .builder-row .builder-col-id {
+    grid-area: id;
+    padding-bottom: 0;
+  }
+
+  .builder-row .builder-col-title {
+    grid-area: title;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    padding-bottom: 0;
+  }
+
+  .builder-row .builder-col-state {
+    grid-area: state;
+    width: auto;
+    white-space: normal;
+    padding-top: 2px;
+  }
+
+  .builder-row .builder-col-actions {
+    grid-area: actions;
+    width: auto;
+  }
+}
+
+/* Whatever is left in a backlog or recently-closed row clips at its edge, never overlaps the links after it. */
+.backlog-row-main,
+.recently-closed-row-main {
+  overflow: hidden;
+}
+
+/* A progress bar's track. The dashboard draws it in the tertiary background, which Light Modern
+   maps to the row's own colour: only the fill showed, a dash rather than a bar (found rendered).
+   A faint mix of the text colour shows on every theme's row. */
+.progress-bar {
+  background: color-mix(in srgb, var(--codev-wv-fg) 18%, transparent);
+}
+
+/* Both panels' headings at one size: side by side, the dashboard's 16px "Decisions" sat under a
+   19px "Work". */
+.decisions-title {
+  font-size: var(--codev-wv-font-size-xxl);
+}
+
+/* No decisions file is an empty state, not a problem: the dashboard draws it as an amber notice,
+   which reads as a warning beside the workbench. Here it is plain description text. */
+.decisions-notice--no-file {
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/*
+ * VS Code's webview defaults, stated here (cluesmith/codev-ide issue #67). The host page puts its
+ * default styles in front of the panel's own; in VS Code 1.147 they sit in `@layer vscode-default`
+ * and are the rules below. Codev IDE 1.138 serves an older host page, whose defaults are unlayered
+ * and differ: for one, it colours `code` with the theme's preformatted foreground but not its
+ * background, and High Contrast Light pairs a white foreground with a dark blue background, so code
+ * text there was white on white. So every default that differs on that page, for an element these
+ * panels render, is stated here with 1.147's value, and the panels look the same on every host
+ * (1.128's own defaults differ from 1.147's only in `a code` and `pre code`). The panels' own rules
+ * are more specific and still win where they set a property.
+ *
+ * Differing defaults, and where they apply:
+ * - body: overscroll-behavior-x (the old page leaves it unset), stated in the body rule above.
+ * - video: max-width/max-height (the old page sizes only img). An item's Markdown may hold one.
+ * - code: the old page sets only the colour. The file path, the notices and Markdown use it.
+ * - a code: the old page gives it the link colour, at the same specificity as the rule here.
+ * - pre code: absent on the old page. Markdown code blocks.
+ * - p > a: the link-underline setting, absent on the old page. Markdown links.
+ * - kbd: the old page's fixed greys, and its `.vscode-light kbd` (one class and one element, which
+ *   `:root kbd` matches and, coming later, overrides). An item's Markdown may hold one.
+ * The rest of the defaults (html, the body's other properties, img, a, a:hover, the focus outline,
+ * blockquote, scrollbars, find highlights) have the same values on all three pages. They are
+ * unlayered on the old page, but no panel rule loses to one of them there: under each page's
+ * defaults, every element the panels render measured the same computed style.
+ */
+video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+code {
+  font-family: var(--monaco-monospace-font);
+  color: var(--vscode-textPreformat-foreground);
+  background-color: var(--vscode-textPreformat-background);
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+
+a code {
+  color: var(--vscode-textPreformat-foreground);
+  text-decoration: underline;
+}
+
+pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+p > a {
+  text-decoration: var(--text-link-decoration);
+}
+
+:root kbd {
+  background-color: var(--vscode-keybindingLabel-background);
+  color: var(--vscode-keybindingLabel-foreground);
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--vscode-keybindingLabel-border);
+  border-bottom-color: var(--vscode-keybindingLabel-bottomBorder);
+  box-shadow: inset 0 -1px 0 var(--vscode-widget-shadow);
+}
