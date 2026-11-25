@@ -280,25 +280,18 @@ const PROJECT_NAME_PLACEHOLDER = '{{PROJECT_NAME}}';
 
 /**
  * A root doc the adopter never edited: a regular file that matches the template outside
- * the managed block, whatever project name it was written with. A checkout's directory
- * need not carry the name `init` saw, and the name is all the template varies by.
+ * the managed block, whatever project name it was written with and in either line ending.
+ * A checkout's directory need not carry the name `init` saw (the name is all the template
+ * varies by), and a Windows checkout may turn LF into CRLF, as skills already allow for.
  */
-function matchesTemplate(destPath: string, template: string): boolean {
-  if (!fs.statSync(destPath).isFile()) return false;
-  const pattern = withEmptyHotBlock(template)
+function matchesTemplate(filePath: string, template: string): boolean {
+  if (!fs.statSync(filePath).isFile()) return false;
+  const pattern = withEmptyHotBlock(template.replace(/\r\n/g, '\n'))
     .split(PROJECT_NAME_PLACEHOLDER)
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
     .join('[^\\n]*');
-  return new RegExp(`^${pattern}$`).test(withEmptyHotBlock(fs.readFileSync(destPath, 'utf-8')));
-}
-
-/**
- * A pending `.codev-new` that holds exactly the template beside an up-to-date doc: nothing
- * is left to merge. A copy with other content is kept.
- */
-function isResolvedCodevNew(pendingPath: string, content: string): boolean {
-  const pending = fs.lstatSync(pendingPath, { throwIfNoEntry: false });
-  return pending?.isFile() === true && fs.readFileSync(pendingPath, 'utf-8') === content;
+  const doc = fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
+  return new RegExp(`^${pattern}$`).test(withEmptyHotBlock(doc));
 }
 
 /**
@@ -343,9 +336,11 @@ export function copyRootFiles(
 
     if (fs.existsSync(destPath)) {
       if (handleConflicts && matchesTemplate(destPath, template)) {
-        // Up to date: the managed block is refreshed by syncHotContextBlock (#1982).
-        if (isResolvedCodevNew(destPath + '.codev-new', content)) {
-          if (!dryRun) fs.rmSync(destPath + '.codev-new');
+        // Up to date: the managed block is refreshed by syncHotContextBlock (#1982). A pending
+        // copy that is the template too leaves nothing to merge (a symlinked one was skipped above).
+        const pendingPath = destPath + '.codev-new';
+        if (fs.existsSync(pendingPath) && matchesTemplate(pendingPath, template)) {
+          if (!dryRun) fs.rmSync(pendingPath);
           resolved.push(file + '.codev-new');
         }
       } else if (handleConflicts) {
