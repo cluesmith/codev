@@ -26,3 +26,13 @@
   rate-limited refusals would strand a 50-message backlog at 30/min per pair (C4: held mail retries);
   D5/D6 disagree on discovery without a grant for own Towers; front-door-only was cut in stage 1;
   future `sentAt` would extend the lifetime; metadata push is dead (#1986) — stage 2 removes it.
+- Review round 1 (codex, claude): both REQUEST_CHANGES; all points taken. Codex: records must be
+  what each party can see (R records unverified requests against the session); full answer bodies
+  for both sources; criterion 8 serialises message calls only. Claude: TLS required for the secret
+  (an `http:` server_url becomes `ws:` today — loopback-only exception for the stand-in); address
+  union incl. `kind:"id"` builders; sizes/timeouts pinned as protocol-v1 constants (R can't learn
+  them from a listing it never fetched); `requestId` and statement fields validated before reaching
+  a frame; builder rule on remote addresses now has criteria/tests; 503 retry is unconditional
+  back-off; R answers `held busy` rather than block past 5 s; a run of 5 not-verified surfaces the
+  peer as "not verifying"; Decision 9's remaining stage-2 surface (Peers panel, inbox show, status
+  lines, 3-count indicator) explicitly in scope.
