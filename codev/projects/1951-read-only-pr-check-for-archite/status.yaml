@@ -1,7 +1,7 @@
 id: '1951'
 title: read-only-pr-check-for-archite
 protocol: spir
-phase: review
+phase: verify
 plan_phases:
   - id: forge_read_concepts
     title: Forge read concepts for PR mechanics
@@ -41,7 +41,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     plan_phase: readonly_core
@@ -140,7 +140,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-25T01:05:10.490Z'
+updated_at: '2026-11-25T01:05:20.060Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
