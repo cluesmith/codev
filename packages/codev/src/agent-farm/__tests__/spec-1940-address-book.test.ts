@@ -11,10 +11,14 @@
  *   codev-cloud  main, review, tunnel      builder-spir-7 (spawned by review), shell-7
  *                tunnel is registered and has no terminal
  *   scratch      registered, not running
+ *
+ * Issue #1978: a workspace is running while it holds an open terminal, not while it merely
+ * has a slot on the terminal map, which many routes create for any workspace they are asked
+ * about.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { AddressBookAgent, AddressBookWorkspace } from '@cluesmith/codev-types';
+import type { AddressBookAgent, AddressBookWorkspace, AgentAddress } from '@cluesmith/codev-types';
 import type { WorkspaceTerminals } from '../servers/tower-types.js';
 import type { Builder } from '../types.js';
 
@@ -28,7 +32,7 @@ const {
   mockGetRegisteredWorkspaces,
 } = vi.hoisted(() => ({
   mockGetWorkspaceTerminals: vi.fn<() => Map<string, WorkspaceTerminals>>(),
-  mockGetSession: vi.fn<(id: string) => { writable: boolean } | undefined>(),
+  mockGetSession: vi.fn<(id: string) => { writable: boolean; status: 'running' | 'exited' } | undefined>(),
   mockGetBuilders: vi.fn<(ws?: string) => Builder[]>(),
   mockGetArchitects: vi.fn<(ws: string) => Array<{ name: string }>>(),
   mockGetArchitectByName: vi.fn<(ws: string, name: string) => { name: string } | null>(),
@@ -122,7 +126,9 @@ beforeEach(() => {
     [CLOUD, entry(['main', 'review'], ['builder-spir-7'], ['shell-7'])],
   ]);
   mockGetWorkspaceTerminals.mockImplementation(() => terminals);
-  mockGetSession.mockImplementation((id) => (exited.has(id) ? undefined : { writable: !disconnected.has(id) }));
+  mockGetSession.mockImplementation((id) =>
+    exited.has(id) ? undefined : { writable: !disconnected.has(id), status: 'running' },
+  );
   mockGetArchitects.mockImplementation((ws) => (architects[ws] ?? []).map((name) => ({ name })));
   mockGetArchitectByName.mockImplementation((ws, name) => ((architects[ws] ?? []).includes(name) ? { name } : null));
   mockGetBuilders.mockImplementation((ws) => Object.keys(spawnedBy[ws ?? ''] ?? {}).map((id) => ({ id }) as unknown as Builder));
@@ -235,6 +241,65 @@ describe('Spec 1940 phase 5 — the address book', () => {
       const agents = addressBook(caller).workspaces.flatMap((w) => w.agents);
       expect(agents.filter((a) => !a.sendable)).toEqual([]);
     }
+  });
+
+  describe('a stopped workspace with an empty slot on the terminal map (Issue #1978)', () => {
+    // What a dashboard poll or `/health` leaves behind for a workspace that is not running:
+    // a slot with no terminal in it. Its architect is still registered, as a stop leaves it.
+    beforeEach(() => {
+      architects[SCRATCH] = ['main'];
+      terminals.set(SCRATCH, entry([]));
+    });
+
+    it('is listed as not running, after the running ones, with no agents', () => {
+      expect(addressBook(ARCHITECT).workspaces.map((w) => [w.path, w.running])).toEqual([
+        [CODEV, true],
+        [CLOUD, true],
+        [SCRATCH, false],
+      ]);
+      expect(workspaceAt(SCRATCH).agents).toEqual([]);
+    });
+
+    it('a send to its registered architect is refused as not running, the same answer as with no slot', () => {
+      const address = (text: string) => parseTarget(text) as AgentAddress;
+      const withSlot = resolveTarget(address('scratch:architect:main'), ARCHITECT);
+      expect(withSlot).toEqual({ code: 'NOT_FOUND', message: `Workspace 'scratch' (${SCRATCH}) is not running.` });
+      // The registry answers the same: mail is refused, not held for an architect nobody is running.
+      expect(resolveAgentInRegistry(address('scratch:architect:main'), ARCHITECT)).toEqual(withSlot);
+      expect(sendAs(ARCHITECT, 'scratch:architect')).toEqual({ refused: 'NOT_FOUND' });
+
+      terminals.delete(SCRATCH);
+      expect(resolveTarget(address('scratch:architect:main'), ARCHITECT)).toEqual(withSlot);
+      expect(resolveAgentInRegistry(address('scratch:architect:main'), ARCHITECT)).toEqual(withSlot);
+    });
+
+    it('takes no part in ambiguity: a running workspace with its directory name keeps the name', () => {
+      const OLD = '/home/user/old/codev-cloud';
+      architects[OLD] = ['main'];
+      stopped.push(OLD);
+      terminals.set(OLD, entry([]));
+      expect(workspaceAt(CLOUD).addressName).toBe('codev-cloud');
+      expect(workspaceAt(OLD)).toMatchObject({ running: false, agents: [] });
+      expect(sendAs(ARCHITECT, 'codev-cloud:architect:main')).toEqual({ workspacePath: CLOUD, reached: 'main' });
+    });
+
+    it('a workspace whose every terminal has exited is not running either', () => {
+      architects[SCRATCH] = ['solo'];
+      terminals.set(SCRATCH, entry(['solo'], [], ['shell-9']));
+      exited.add('term-shell-9');
+      mockGetSession.mockImplementation((id) =>
+        id === 'term-solo' ? { writable: false, status: 'exited' } : exited.has(id) ? undefined : { writable: true, status: 'running' },
+      );
+      expect(workspaceAt(SCRATCH)).toMatchObject({ running: false, agents: [] });
+    });
+
+    it('a workspace whose only terminal is reconnecting is still running, and its mail is held', () => {
+      architects[SCRATCH] = ['solo'];
+      terminals.set(SCRATCH, entry(['solo']));
+      disconnected.add('term-solo');
+      expect(workspaceAt(SCRATCH).running).toBe(true);
+      expect(linesOf(SCRATCH)).toEqual(['scratch:architect:solo | no terminal | sendable']);
+    });
   });
 
   describe('a live terminal', () => {

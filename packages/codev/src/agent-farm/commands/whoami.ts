@@ -35,7 +35,7 @@ import type { AgentAddress } from '@cluesmith/codev-types';
 import { getRegisteredWorkspaces, lookupBuilderSpawningArchitect } from '../state.js';
 import { getGlobalDbPath } from '../db/index.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
-import { printableAddressName } from '../utils/workspace-address.js';
+import { printableAddressName, runningWorkspaces } from '../utils/workspace-address.js';
 import { TOWER_RESTART_COMMAND } from '../utils/older-tower.js';
 
 export interface WhoamiOptions {
@@ -109,17 +109,15 @@ function workspaceDisplayName(workspaceRoot: string | null, db: Database.Databas
 }
 
 /**
- * The workspaces that have a terminal, as global.db records them: Tower writes a
- * `terminal_sessions` row when it starts a terminal and deletes a workspace's rows when
- * the workspace stops. This is whoami's stand-in for Tower's own list of running
- * workspaces, which only Tower holds; the caller's own workspace is counted as running,
- * since the caller is in it.
+ * The running workspaces, by the one definition Tower uses ({@link runningWorkspaces}), fed
+ * from global.db because whoami does not need Tower: Tower writes a `terminal_sessions` row
+ * when it starts a terminal and deletes it when the terminal ends or its workspace stops.
+ * Whether the caller's own workspace is running does not change its own name, so it is not
+ * added.
  */
-function workspacesWithTerminals(db: Database.Database, ownWorkspace: string): string[] {
-  const rows = db.prepare('SELECT DISTINCT workspace_path FROM terminal_sessions').all() as Array<{
-    workspace_path: string;
-  }>;
-  return [...rows.map((row) => row.workspace_path), ownWorkspace];
+function runningWorkspacesInDb(db: Database.Database): string[] {
+  const rows = db.prepare('SELECT workspace_path FROM terminal_sessions').all() as Array<{ workspace_path: string }>;
+  return runningWorkspaces(rows.map((row) => row.workspace_path));
 }
 
 /**
@@ -156,7 +154,7 @@ function ownAddress(agent: AgentAddress, workspaceRoot: string | null, db: Datab
           `restarting Tower migrates it: ${TOWER_RESTART_COMMAND}`,
       };
     }
-    named = printableAddressName(root, getRegisteredWorkspaces(db), workspacesWithTerminals(db, root));
+    named = printableAddressName(root, getRegisteredWorkspaces(db), runningWorkspacesInDb(db));
   } catch (err) {
     // Any other failure is reported as itself: advice for a cause it is not would mislead.
     const cause = err instanceof Error ? err.message : String(err);

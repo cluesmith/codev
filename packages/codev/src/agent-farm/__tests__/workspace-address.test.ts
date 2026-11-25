@@ -11,6 +11,7 @@ import {
   findWorkspaceByAddressName,
   isSameWorkspace,
   printableAddressName,
+  runningWorkspaces,
   validateProposedName,
   workspaceAddressName,
   WORKSPACE_NAME_COMMAND,
@@ -467,6 +468,21 @@ describe('printableAddressName', () => {
       expect(validateProposedName(name, A, rows([A, null]), [A])).toEqual({ ok: true, name });
       expect(printableAddressName(A, rows([A, name]), [A])).toEqual({ name, explicit: true });
     }
+  });
+});
+
+describe('runningWorkspaces (Issue #1978)', () => {
+  it('is every workspace that has a terminal, once each, in the first spelling given', () => {
+    expect(runningWorkspaces([A, CLOUD, A, A])).toEqual([A, CLOUD]);
+  });
+
+  it('is nothing when there are no terminals: being known or having a slot does not count', () => {
+    expect(runningWorkspaces([])).toEqual([]);
+  });
+
+  it('counts two spellings of one directory as one workspace (Windows keys)', () => {
+    forceHostPlatform('win32');
+    expect(runningWorkspaces(['C:/nx-1978/codev', 'c:/nx-1978/codev'])).toEqual(['C:/nx-1978/codev']);
   });
 });
 
