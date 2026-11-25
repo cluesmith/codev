@@ -1376,3 +1376,31 @@ run.
   `verification.md` regenerated against it: 227 permalinks, none broken.
 - **Unit, on `d31df3a84`:** apps/vscode 134 files, 1981 passed, 1 skipped; workspace-views 197;
   sdk 431; apps/web 38 files, 462 passed, 1 skipped.
+- **Step e, completed.** Final head `a5295bc8b`: all 8 GitHub checks passed; Windows run
+  45516686696 succeeded (unit, CLI, install verification, both probes). PR body updated: the
+  1.138/1.128 results and the codev-ide#67 account replace "unverified", shots from the final
+  evidence, the Decisions-poll row in the requests table.
+- **`pr` gate approved (owner's rulings ide-2 and ide-3, relayed 00:23:50Z).** The conditions were
+  fenced tests passing and GitHub green on the head being merged; the architect verified them on
+  `a5295bc8b`.
+  - `porch approve` committed and pushed its own gate record, `014a166cd` (status.yaml only), so
+    the PR head moved past `a5295bc8b`, the only head I had been told to merge. I stopped and
+    reported. The architect ruled that the instruction had not allowed for porch's record: merge
+    `014a166cd` once its 8 checks pass and main is unmoved. They did, and it was.
+  - `gh pr merge --merge --match-head-commit 014a166cd` was refused by main's branch protection: 1
+    approving review required, and the PR's author is the account that would review it. I
+    stopped again. The architect authorised `--admin` for the review requirement only, as the
+    repo's standing practice once the owner has approved; I checked their precedent first (#1957,
+    #1965, #1964, #1954, #1939, all merged that way with no review).
+  - **Merged at 00:32:51Z: `84553614f`**, a merge commit with parents `88bc5e9d1` (main) and
+    `014a166cd`. Issue #1963 closed (completed) at 00:32:53Z.
+- **Verify.** `porch done --merged` first failed ("No PR history found"): I had never recorded the
+  PR. Recorded it with `--pr 1971 --branch builder/spir-1963`, then the merge, then `porch done`,
+  which requested `verify-approval`. Checking the change in the target environment meant the
+  owner's own Codev IDE, which the harness rules keep me away from, so that check was the owner's.
+  - The architect installed main (with the Cockpit) on this machine at the owner's word, and Tower
+    and the IDE server restarted on codev 3.3.8.
+  - **`verify-approval` approved (owner, hub decision ide-4, 00:46Z)**, after the owner tried the
+    installed build in their own Codev IDE. Porch: protocol complete.
+- **Records PR:** porch's post-merge records and this entry, following PR #1979's precedent. No
+  cleanup; the worktree and the backup bundle stay until the architect says.

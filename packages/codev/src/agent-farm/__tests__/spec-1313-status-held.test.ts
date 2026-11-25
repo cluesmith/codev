@@ -33,6 +33,7 @@ vi.mock('../state.js', () => ({
 vi.mock('../lib/tower-client.js', () => ({
   getTowerClient: () => ({
     isRunning: (...a: any[]) => mockIsRunning(...a),
+    probeHealth: async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' }),
     getHealth: (...a: any[]) => mockGetHealth(...a),
     getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
     getOverview: (...a: any[]) => mockGetOverview(...a),

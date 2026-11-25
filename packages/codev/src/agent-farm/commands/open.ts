@@ -16,10 +16,14 @@ interface OpenOptions {
 }
 
 /**
- * Try to create a file tab via the Tower API
- * Returns the file tab ID if successful, null if Tower not available
+ * Try to create a file tab via the Tower API. On failure, `refused` says whether nothing was
+ * listening (Tower not running); any other failure has already been reported (#1901).
  */
-async function tryTowerApi(client: TowerClient, workspacePath: string, filePath: string): Promise<string | null> {
+async function tryTowerApi(
+  client: TowerClient,
+  workspacePath: string,
+  filePath: string,
+): Promise<{ ok: true; tabId: string } | { ok: false; refused: boolean }> {
   const encodedPath = encodeWorkspacePath(workspacePath);
 
   const result = await client.request<{ id: string; existing?: boolean }>(
@@ -36,16 +40,18 @@ async function tryTowerApi(client: TowerClient, workspacePath: string, filePath:
     if (result.data.existing) {
       logger.info('(File was already open)');
     }
-    return result.data.id;
+    return { ok: true, tabId: result.data.id };
   }
 
-  if (result.error) {
-    logger.error(`Tower API error (HTTP ${result.status}): ${result.error}`);
-    logger.kv('Workspace', workspacePath);
-    logger.kv('File', filePath);
+  if (result.connectionRefused) {
+    return { ok: false, refused: true };
   }
 
-  return null;
+  logger.error(`Tower API error (HTTP ${result.status}): ${result.error ?? 'no file tab in the response'}`);
+  logger.kv('Workspace', workspacePath);
+  logger.kv('File', filePath);
+
+  return { ok: false, refused: false };
 }
 
 /**
@@ -89,17 +95,18 @@ export async function open(options: OpenOptions): Promise<void> {
 
   // Try to use Tower API
   const client = new TowerClient();
-  const tabId = await tryTowerApi(client, workspacePath, filePath);
+  const opened = await tryTowerApi(client, workspacePath, filePath);
 
-  if (tabId) {
+  if (opened.ok) {
     // Tab created server-side — dashboard picks it up via state polling.
     // No need to open a browser; the user already has the dashboard open.
     return;
   }
 
-  // Tower not available - tell user to start it
-  logger.error('Tower is not running.');
-  logger.info('Start it with: afx tower start');
-  logger.info('Then try again: afx open ' + options.file);
+  if (opened.refused) {
+    logger.error('Tower is not running.');
+    logger.info('Start it with: afx tower start');
+    logger.info('Then try again: afx open ' + options.file);
+  }
   process.exit(1);
 }

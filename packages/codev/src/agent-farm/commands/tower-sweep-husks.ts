@@ -5,6 +5,7 @@
 
 import { logger } from '../utils/logger.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { confirm } from '../../lib/cli-prompts.js';
 import type { HuskCandidate } from '../lib/tower-client.js';
 
@@ -39,9 +40,9 @@ function printCandidates(candidates: HuskCandidate[]): void {
 
 export async function towerSweepHusks(options: TowerSweepHusksOptions = {}): Promise<void> {
   const client = getTowerClient();
-  const towerRunning = await client.isRunning();
-  if (!towerRunning) {
-    logger.error('Tower is not running. Start it with `afx tower start`.');
+  const tower = await checkTower(client);
+  if (tower.state !== 'running') {
+    logger.error(tower.message);
     process.exitCode = 1;
     return;
   }
