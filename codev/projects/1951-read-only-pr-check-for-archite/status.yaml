@@ -1,7 +1,7 @@
 id: '1951'
 title: read-only-pr-check-for-archite
 protocol: spir
-phase: verify
+phase: verified
 plan_phases:
   - id: forge_read_concepts
     title: Forge read concepts for PR mechanics
@@ -39,9 +39,11 @@ gates:
     requested_at: '2026-11-24T20:59:54.752Z'
     approved_at: '2026-11-25T01:05:10.489Z'
   verify-approval:
-    status: pending
+    status: approved
+    requested_at: '2026-11-25T01:15:24.615Z'
+    approved_at: '2026-11-25T07:17:21.849Z'
 iteration: 1
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: readonly_core
@@ -140,7 +142,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-25T01:05:20.060Z'
+updated_at: '2026-11-25T07:17:24.039Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -173,3 +175,10 @@ force_advanced:
   rebuttal_file: 1951-check_worktree-iter3-rebuttals.md
   at: '2026-11-24T18:44:00.290Z'
 pr_ready_for_human: false
+pr_history:
+  - phase: verify
+    pr_number: 1958
+    branch: builder/spir-1951
+    created_at: '2026-11-25T01:17:04.430Z'
+    merged: true
+    merged_at: '2026-11-25T01:17:06.690Z'

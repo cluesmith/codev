@@ -443,3 +443,19 @@ All points accepted (rebuttal: codev/projects/1951-…/1951-plan-iter1-rebuttals
   package) and PR #1980 (06462ce91; overlap only shipped-skill-hashes.ts, regenerated identically, 196
   versions). Local set on 06462ce91: build, both tsc, governance/doc/skill 131/131, commands/check 784/784,
   1951 agent-farm tests 31/31, residue OK. No full run (architect); one Windows run on the final head.
+- 2026-11-25 01:15 UTC: PR #1958 merged as 6cb29ec8e (merge commit, two parents; --admin for the review
+  requirement only), after porch approve pr on the owner's main-46, porch done → verify, GitHub 8/8 on porch's
+  commits and check pr CLEAR. Issue #1951 closed via "Closes". porch done --merged first refused ("No PR history
+  found": I never ran porch done --pr at PR creation); recorded both afterwards on the architect's word.
+- Verify (owner main-49 installed codev from 6cb29ec8e). The architect ran check pr / deploy / worktree with the
+  installed binary, including from inside this worktree: no ref and no FETCH_HEAD byte changed. Adopter checks,
+  in a scratch directory: an old-adopter project written by a real 3.3.8 `codev init` before the install
+  (provenance recorded), then with the new build: A fresh init ships the new codev skill; B `codev update`
+  replaces the 3.3.8 skills (known shipped hashes); C an edited skill is kept with SKILL.md.codev-new beside it;
+  D roles and command docs resolve from the package skeleton; E all three commands refuse cleanly (rc 2) with
+  no origin. Found, not 1951: codev update reports false CLAUDE.md/AGENTS.md conflicts on unedited projects and
+  dry-run claims to create docs that exist → issue #1982 (architect filed; a BUGFIX builder takes it).
+- Owner main-50 "approve, fix": verify-approval approved, PROTOCOL COMPLETE (d474f8ef4). The 7 untracked
+  iteration-context files stay untracked: porch writes them only to feed consult (next.ts, built from the
+  reviews and rebuttals), never commits or checks them, and they carry the review text the .txt gitignore keeps
+  out of git.
