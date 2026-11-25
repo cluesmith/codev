@@ -57,3 +57,18 @@ reports on the same project (done, three scenarios).
   give "Already up to date!" in both modes and no `.codev-new`; edits outside the block and
   to a skill are kept as conflicts; an in-block edit is a block refresh; missing
   governance files print identical per-file lines in dry and real runs.
+
+## 2026-11-24 — pr (PR #1984)
+
+CMAP round 1: codex REQUEST_CHANGES (only porch's own `chore(porch)` commit subjects;
+rebutted: 78 of the last 200 main commits are porch's, merged unchanged); claude APPROVE
+with notes. Folded in: `{{PROJECT_NAME}}` matched as any name (a clone under another
+directory name was a false conflict); the leftover-`.codev-new` removal is logged in both
+modes and in adopt. Round 2: codex same objection plus a stale name in the PR body (fixed);
+claude COMMENT. Folded in: CRLF normalisation (skills already do it), and a leftover is
+judged with the same match as the doc so a renamed checkout's leftover is resolved.
+Not taken: an unreadable root doc fails loudly (fail-fast), not treated as a conflict.
+
+Full suite green after each round; installed build (scratch prefix) re-verified on the final
+code: issue's commands up to date in both modes; edits kept as conflicts; in-block edit is a
+block refresh; renamed checkout plus a CRLF doc is up to date.
