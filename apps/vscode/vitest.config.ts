@@ -11,8 +11,13 @@ import { defineConfig } from 'vitest/config';
  * which is the vscode-test integration suite).
  */
 export default defineConfig({
+  // The webview TSX (Spec 1963) uses the automatic runtime, as `tsconfig.webview.json` and esbuild's
+  // bundle do. Vite reads the nearest tsconfig.json, the host's, which sets no `jsx`.
+  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'node',
-    include: ['src/__tests__/**/*.test.ts'],
+    // The webview tests (Spec 1963) are TSX, type-checked with the webview config, so they live
+    // beside the webview sources that the host tsconfig excludes.
+    include: ['src/__tests__/**/*.test.ts', 'src/workspace-views/webview/__tests__/**/*.test.{ts,tsx}'],
   },
 });

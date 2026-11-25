@@ -1,5 +1,19 @@
 # Change Log
 
+## [Unreleased]
+
+### What's new
+
+- **Codev Cockpit: the whole fleet in one tree.** A new button below Codev opens Tower → workspaces → architects → builders → changed files. This window's workspace keeps every action of the Workspace and Agents views, and another workspace's rows open that workspace's window (#1963).
+- **Work and Decisions in VS Code.** `Codev: Open Work` and `Codev: Open Decisions` (or the Cockpit's Decisions entry) open the dashboard's Work and Decisions views in the editor area, in your color theme. Rule on decisions, open a builder's terminal, start a shell, and follow issue, PR and spec links without leaving the editor (#1963).
+- **Arrange Cockpit: architect | Work over Decisions.** `Codev: Arrange Cockpit`, or the layout button on the Cockpit's title bar, puts the `main` architect on the left with Work above Decisions on the right. It also runs by itself the first time the Cockpit is shown in a window, and once a notice offers to turn that off (`codev.cockpit.autoArrange`). It never closes an editor, unsaved or untitled ones included (#1963).
+
+### Fixes
+
+- **Work and Decisions render in the Codev IDE 1.138.** That IDE's webview host cannot deliver a webview's files, so a panel that loads its code by URL stays blank there (cluesmith/codev-ide#67). The Work and Decisions panels now carry their code inside the page, on every VS Code version, and load nothing from the extension; only that page's own script runs. The contextual panel and the Markdown preview stay blank in that IDE until it is fixed.
+- **The Codev button's badge clears while Tower is disconnected.** It kept the last count of builders needing attention through a Tower outage; it now repaints whenever the connection changes, and shows nothing until Tower is back.
+- **Spawn Builder runs in this window's workspace.** It ran `afx spawn` in the extension host's own directory (Tower's, in the Codev IDE), so it could spawn into another project, or fail where that directory is no project. It now runs in this window's workspace, the parent workspace in a builder-worktree window, and without a workspace it says so instead of prompting.
+
 ## [3.3.8] - 2026-11-24
 
 ### What's new

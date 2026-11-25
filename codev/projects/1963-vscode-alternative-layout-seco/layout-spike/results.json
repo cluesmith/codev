@@ -1,0 +1,258 @@
+{
+  "started": "2026-11-24T06:52:47.035Z",
+  "vscodeVersion": "1.147.0",
+  "autoSave": "off",
+  "trusted": false,
+  "a": {
+    "groupsBefore": 5,
+    "tabsBefore": [
+      {
+        "viewColumn": 1,
+        "tabs": [
+          {
+            "label": "a.txt",
+            "kind": "text",
+            "dirty": false,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/a.txt"
+          }
+        ]
+      },
+      {
+        "viewColumn": 2,
+        "tabs": [
+          {
+            "label": "b.txt",
+            "kind": "text",
+            "dirty": true,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/b.txt"
+          }
+        ]
+      },
+      {
+        "viewColumn": 3,
+        "tabs": [
+          {
+            "label": "c.txt",
+            "kind": "text",
+            "dirty": false,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/c.txt"
+          }
+        ]
+      },
+      {
+        "viewColumn": 4,
+        "tabs": [
+          {
+            "label": "d.txt",
+            "kind": "text",
+            "dirty": true,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/d.txt"
+          },
+          {
+            "label": "UNTITLED-in-4",
+            "kind": "text",
+            "dirty": true,
+            "uri": "untitled:Untitled-1"
+          }
+        ]
+      },
+      {
+        "viewColumn": 5,
+        "tabs": [
+          {
+            "label": "e.txt",
+            "kind": "text",
+            "dirty": true,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/e.txt"
+          },
+          {
+            "label": "UNTITLED-in-5",
+            "kind": "text",
+            "dirty": true,
+            "uri": "untitled:Untitled-2"
+          }
+        ]
+      }
+    ],
+    "groupsAfter": 3,
+    "layoutAfter": {
+      "orientation": 0,
+      "groups": [
+        {
+          "size": 547
+        },
+        {
+          "size": 547,
+          "groups": [
+            {
+              "size": 453
+            },
+            {
+              "size": 452
+            }
+          ]
+        }
+      ]
+    },
+    "tabsAfter": [
+      {
+        "viewColumn": 1,
+        "tabs": [
+          {
+            "label": "a.txt",
+            "kind": "text",
+            "dirty": false,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/a.txt"
+          }
+        ]
+      },
+      {
+        "viewColumn": 2,
+        "tabs": [
+          {
+            "label": "b.txt",
+            "kind": "text",
+            "dirty": true,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/b.txt"
+          }
+        ]
+      },
+      {
+        "viewColumn": 3,
+        "tabs": [
+          {
+            "label": "c.txt",
+            "kind": "text",
+            "dirty": false,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/c.txt"
+          },
+          {
+            "label": "d.txt",
+            "kind": "text",
+            "dirty": true,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/d.txt"
+          },
+          {
+            "label": "UNTITLED-in-4",
+            "kind": "text",
+            "dirty": true,
+            "uri": "untitled:Untitled-1"
+          },
+          {
+            "label": "e.txt",
+            "kind": "text",
+            "dirty": true,
+            "uri": "file:///private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/b220eadf-5293-4c67-95a3-546bd584cc12/scratchpad/spike/ws/e.txt"
+          },
+          {
+            "label": "UNTITLED-in-5",
+            "kind": "text",
+            "dirty": true,
+            "uri": "untitled:Untitled-2"
+          }
+        ]
+      }
+    ],
+    "perDoc": {
+      "a": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": false,
+        "dirtyAfter": false,
+        "textPreserved": true
+      },
+      "b": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": true,
+        "dirtyAfter": true,
+        "textPreserved": true
+      },
+      "c": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": false,
+        "dirtyAfter": false,
+        "textPreserved": true
+      },
+      "d": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": true,
+        "dirtyAfter": true,
+        "textPreserved": true
+      },
+      "e": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": true,
+        "dirtyAfter": true,
+        "textPreserved": true
+      },
+      "UNTITLED-in-4": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": true,
+        "dirtyAfter": true,
+        "textPreserved": true
+      },
+      "UNTITLED-in-5": {
+        "tabStillOpen": true,
+        "docStillOpen": true,
+        "dirtyBefore": true,
+        "dirtyAfter": true,
+        "textPreserved": true
+      }
+    },
+    "closedDocsDuringLayout": [],
+    "pass": true,
+    "idempotent": true
+  },
+  "d": {
+    "columnBefore": 2,
+    "columnAfterReveal": 3,
+    "visibleMove": {
+      "sameLoad": true,
+      "ticksAdvanced": true,
+      "p1": {
+        "loadId": "agcdhyakwmh",
+        "n": 6
+      },
+      "p2": {
+        "loadId": "agcdhyakwmh",
+        "n": 21
+      }
+    },
+    "hiddenBeforeReveal": true,
+    "columnAfterHiddenReveal": 1,
+    "hiddenMove": {
+      "sameLoad": true,
+      "ticksAdvanced": true,
+      "p3": {
+        "loadId": "agcdhyakwmh",
+        "n": 44
+      }
+    },
+    "pass": true
+  },
+  "b": {
+    "columnBefore": 3,
+    "columnAfter": 1,
+    "exitStatus": null,
+    "pidBefore": 55514,
+    "pidAfter": 55514,
+    "log": "B1-55514\nB2-55514\n",
+    "pass": true
+  },
+  "c": {
+    "columnBefore": null,
+    "columnAfterMoveToEditor": 1,
+    "columnAfterFirstGroup": 1,
+    "exitStatus": null,
+    "pidBefore": 55728,
+    "pidAfter": 55728,
+    "log": "C1-55728\nC2-55728\n",
+    "pass": true
+  },
+  "finished": "2026-11-24T06:53:20.512Z"
+}

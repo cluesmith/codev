@@ -1,15 +1,13 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
+import { WorkView as SharedWorkView } from '@cluesmith/codev-workspace-views';
+import type { WorkViewHost } from '@cluesmith/codev-workspace-views';
 import { useOverview } from '../hooks/useOverview.js';
-import { createShellTab } from '../lib/api.js';
+import { createFileTab, createShellTab } from '../lib/api.js';
 import type { OverviewBuilder, DashboardState } from '../lib/api.js';
-import { BuilderCard } from './BuilderCard.js';
-import { NeedsAttentionList } from './NeedsAttentionList.js';
-import { BacklogList } from './BacklogList.js';
-import { RecentlyClosedList } from './RecentlyClosedList.js';
-import { FileTree } from './FileTree.js';
+import { findBuilderTab } from '../lib/issueIds.js';
 import { OpenFilesShellsSection } from './OpenFilesShellsSection.js';
 import { TipBanner } from './TipBanner.js';
-import { findBuilderTab } from '../lib/issueIds.js';
+import { WorkFilePanel } from './WorkFilePanel.js';
 
 interface WorkViewProps {
   state: DashboardState | null;
@@ -17,9 +15,14 @@ interface WorkViewProps {
   onSelectTab?: (id: string) => void;
 }
 
+/**
+ * The dashboard's Work tab: the shared Work view (Spec 1963, @cluesmith/codev-workspace-views)
+ * with the dashboard as its host. Tower is read through lib/api.ts, a builder's *Open* selects its
+ * terminal tab, *+ Shell* and the spec / plan / review links open dashboard tabs, and the
+ * dashboard-only pieces (the tip of the day, Open Files & Shells, the Files panel) go in as slots.
+ */
 export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
   const { data: overview, error: overviewError, refresh: refreshOverview } = useOverview();
-  const [filePanelOpen, setFilePanelOpen] = useState(false);
 
   const handleNewShell = useCallback(async () => {
     try {
@@ -38,145 +41,41 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
     }
   }, [state?.builders, onSelectTab]);
 
-  if (!state) {
-    return (
-      <div className="work-view">
-        <p className="work-loading">Loading...</p>
-      </div>
-    );
-  }
+  const handleOpenArtifact = useCallback(async (filePath: string) => {
+    try {
+      await createFileTab(filePath);
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to open file:', err);
+    }
+  }, [onRefresh]);
 
-  // Spec 823: count once outside the render loop so each BuilderCard receives
-  // a stable prop. Null-safe `?? 0` handles the loading edge — when no state
-  // is available yet, architectCount=0 makes `architectCount > 1` false so the
-  // attribution span is never rendered.
-  const architectCount = state.architects?.length ?? 0;
+  const host: WorkViewHost = {
+    // The view shows its loading state until the dashboard state is in, as it always has.
+    overview: state ? { data: overview, error: overviewError } : null,
+    openBuilder: handleOpenBuilder,
+    newShell: handleNewShell,
+    refresh: refreshOverview,
+    openArtifact: handleOpenArtifact,
+  };
 
   return (
-    <div className={`work-view ${filePanelOpen ? 'file-panel-open' : ''}`}>
-      <div className="work-content">
-        <div className="work-header">
-          <h2 className="work-title">Work</h2>
-          <div className="work-actions">
-            <button className="work-btn" onClick={handleNewShell}>+ Shell</button>
-            <button className="work-btn work-btn-secondary" onClick={refreshOverview}>Refresh</button>
-          </div>
-        </div>
-
-        {overviewError && (
-          <div className="work-error">Failed to load overview: {overviewError}</div>
-        )}
-
-        <TipBanner />
-
-        {/* Active Builders */}
-        <section className="work-section">
-          <h3 className="work-section-title">Builders</h3>
-          {overview?.builders && overview.builders.length > 0 ? (
-            <table className="builder-table">
-              <thead>
-                <tr>
-                  <th>Issue</th>
-                  <th>Title</th>
-                  <th>State</th>
-                  <th>Progress</th>
-                  <th>Elapsed</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {overview.builders.map(builder => (
-                  <BuilderCard
-                    key={builder.id}
-                    builder={builder}
-                    onOpen={handleOpenBuilder}
-                    architectCount={architectCount}
-                  />
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p className="work-empty">No active builders</p>
-          )}
-        </section>
-
-        {/* Open Files & Shells (Spec 467) */}
-        <OpenFilesShellsSection
-          utils={state?.utils ?? []}
-          annotations={state?.annotations ?? []}
-          onSelectTab={id => onSelectTab?.(id)}
-        />
-
-        {overview?.forgeStatus === 'rate-limited' && (
-          <p className="work-unavailable">
-            Forge rate limited — PRs, backlog and recently closed may be stale until{' '}
-            {overview.forgeResetAt ? new Date(overview.forgeResetAt).toLocaleTimeString() : 'the budget resets'}
-          </p>
-        )}
-
-        {/* Needs Attention */}
-        <section className="work-section">
-          <h3 className="work-section-title">Needs Attention</h3>
-          {overview?.errors?.prs ? (
-            <p className="work-unavailable">{overview.errors.prs}</p>
-          ) : (
-            <NeedsAttentionList
-              prs={overview?.pendingPRs ?? []}
-              builders={overview?.builders ?? []}
-              architects={overview?.architects ?? []}
-            />
-          )}
-        </section>
-
-        {/* Backlog & Bugs */}
-        <section className="work-section">
-          <h3 className="work-section-title">Backlog</h3>
-          {overview?.errors?.issues ? (
-            <p className="work-unavailable">{overview.errors.issues}</p>
-          ) : (
-            <BacklogList items={overview?.backlog ?? []} onRefresh={onRefresh} />
-          )}
-        </section>
-
-        {/* Recently Closed */}
-        {overview?.recentlyClosed && overview.recentlyClosed.length > 0 && (
-          <section className="work-section">
-            <h3 className="work-section-title">Recently Closed</h3>
-            <RecentlyClosedList items={overview.recentlyClosed} onRefresh={onRefresh} />
-          </section>
-        )}
-      </div>
-
-      {/* Collapsible File Panel */}
-      <div className={`work-file-panel ${filePanelOpen ? 'expanded' : 'collapsed'}`}>
-        <div className="work-file-panel-header">
-          <span
-            className="work-file-panel-toggle"
-            onClick={() => setFilePanelOpen(!filePanelOpen)}
-          >
-            {filePanelOpen ? '▼' : '▲'}
-          </span>
-          <span
-            className="work-file-panel-label"
-            onClick={() => setFilePanelOpen(!filePanelOpen)}
-          >
-            Files
-          </span>
-          {!filePanelOpen && (
-            <input
-              className="work-file-panel-search"
-              type="text"
-              placeholder="Search files..."
-              onFocus={() => setFilePanelOpen(true)}
-            />
-          )}
-        </div>
-        {filePanelOpen && (
-          <div className="work-file-panel-content">
-            <FileTree onRefresh={onRefresh} />
-          </div>
-        )}
-      </div>
-    </div>
+    <SharedWorkView
+      host={host}
+      // Spec 823: the attribution tag counts the workspace's registered architects here.
+      architectCount={state?.architects?.length ?? 0}
+      slots={{
+        tip: <TipBanner />,
+        // Spec 467
+        openFilesShells: (
+          <OpenFilesShellsSection
+            utils={state?.utils ?? []}
+            annotations={state?.annotations ?? []}
+            onSelectTab={id => onSelectTab?.(id)}
+          />
+        ),
+        filePanel: panel => <WorkFilePanel {...panel} onRefresh={onRefresh} />,
+      }}
+    />
   );
 }

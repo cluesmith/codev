@@ -10,7 +10,9 @@
     "types": [],
     "noEmit": true,
     "declaration": false,
-    "declarationMap": false
+    "declarationMap": false,
+    // The Work and Decisions panels (Spec 1963) are TSX; the other webviews are .ts.
+    "jsx": "react-jsx"
   },
-  "include": ["src/markdown-preview/webview", "src/contextual-panel/webview"]
+  "include": ["src/markdown-preview/webview", "src/contextual-panel/webview", "src/workspace-views/webview"]
 }

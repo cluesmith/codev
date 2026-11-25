@@ -46,6 +46,12 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Security
 
+- [From #1963] **VS Code's webview script opens any clicked anchor with an `href` through VS Code's
+  own opener.** `handleInnerClick` listens on the window, in the bubble phase, and ignores
+  `defaultPrevented`. A native `<a href>` in a webview therefore bypasses a host-side http(s)
+  allowlist, and a link the host also opens opens twice. Stop the click's propagation and send it
+  to the host.
+
 - [From 0048] DOMPurify for XSS protection when rendering user-provided content
 - [From 0048] External links need `target="_blank" rel="noopener noreferrer"`
 - [From 0055] Context matters for escaping: JS context needs different escaping than HTML context
@@ -320,6 +326,79 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ## Testing
 
+- [From #1963] **An isolated harness against Tower must not run any Tower-contacting CLI.**
+  - `afx spawn` (`getTowerClient()` with no port) and porch's dispatcher (`new TowerClient()` for
+    `refreshOverview`) go to :4100, and neither has a port override. So does the extension's
+    shell-out to them.
+  - Create state over HTTP to the explicit port, or in-process with the db path pinned and checked.
+    Stub the CLIs on PATH, and keep a :4100 connection tripwire running.
+  - Keep fixtures out of temp roots: Tower's `GET /api/workspaces` drops workspaces under `/tmp`,
+    `/private/tmp` and `os.tmpdir()` (`isTempDirectory`), and startup reconciliation kills their
+    sessions.
+  - Recording stubs pay off. Checking the argv and cwd a UI action actually ran found Spawn
+    Builder's missing `cwd`, live on `main`.
+- [From #1963] **Three traps when measuring in VS Code for the Web, each of which cost a rerun:**
+  - A closed window's extension host keeps polling through its reconnection grace period, which
+    inflated request counts about fourfold. Restart the server for each measured layout.
+  - A context-menu click that lands within ~500 ms of the menu opening is dropped. Wait, and assert
+    the menu closed.
+  - A `.catch(() => {})` on a palette helper hid commands whose titles did not exist, so the "alone"
+    layouts were not alone. Match exact labels and throw, and assert the side bar, secondary side
+    bar and panel on screen before measuring.
+
+  Two smaller ones that broke selectors and setups:
+  - A lone editor group's tab `aria-label`s carry no `, Editor Group N`.
+  - The Welcome page can reopen on a reload even with *Show welcome page on startup* unticked, and
+    it lands in the first group of a carefully set-up layout. 1.147.0 opens it from the startup
+    editor, from a newly installed extension's walkthrough, and from a restored walkthrough. A
+    check that needs a known first group closes it after the reload.
+
+- [From #1963] **Screenshots bound for a public repo need a neutral shell and a gate, not care.**
+  VS Code opens a local shell in a visible terminal panel by itself, and macOS's `/etc/bashrc`
+  prompt (`host:dir user$`) showed in 12 committed screenshots before anyone looked. Fixing the one
+  shot that was noticed left the rest. The fix that holds has two parts:
+  - give the harness HOME a profile with a bare `PS1`;
+  - OCR every shot a run writes (`tesseract`) and fail the run on a host/user prompt.
+
+  The detector was checked against all 110 committed shots: it flagged exactly the 12.
+
+- [From #1963] **Rendered evidence belongs on a never-merged evidence branch, not in the PR's
+  tree.**
+  - Screenshots, results JSON and DOM snapshots committed per phase made every claim checkable.
+  - They also put 15 MB, with 114 PNGs, into one project folder. All of `codev/projects` on main
+    is 4.8 MB with no PNG.
+  - With every retake, they added 23.5 MB of blobs to a 68 MB pack.
+
+  Push evidence to an orphan branch (`evidence/<builder-id>`; plumbing, no checkout). Commit only
+  an index to the PR branch: each check, its pass count, and permalinks pinned to the evidence
+  commit's SHA. Decide this before the first harness run: blobs already pushed stay in history.
+
+- [From #1963] **A tripwire that records and exits is not a guard, and a flag is not proof of a
+  config path.**
+  - A harness's first ide-server run wrote `codev.towerPort` under `--user-data-dir`. A VS Code
+    server ignores that flag: it forces the user data dir to `<server-data-dir>/data` and reads
+    `Machine/settings.json` there.
+  - So the extension under test used its default port, the owner's Tower. It sent about 9,100
+    requests over 25 minutes, all of them refused 401 by the isolated key.
+  - The tripwire saw the connection within a second, wrote a marker and exited. The run went on
+    until its script finished.
+  - The fixes:
+    - the tripwire stops the run when it fires: SIGSTOP the whole tree until no new process
+      appears, SIGKILL it, then report;
+    - a mode that could reach the protected service runs under prevention, here a `sandbox-exec`
+      profile denying outbound TCP to the port, with a launch canary on a throwaway port proving
+      it applies;
+    - the settings path is read from the server's own bundle, and the run refuses if that fails.
+
+  Self-test each fix: that the tripwire *stops* the run, not only that it *fires*.
+
+- [From #1963] **Re-run every verify script on the final head, not only the phase's own.** A late
+  phase made each window open arranged into three editor groups by default. Two older helpers
+  still assumed one group: one read the left group's active tab, the other pressed Enter after a
+  fixed delay. The scripts using them had not run since their own phases, so both failures
+  surfaced only when every script ran on the final head. A default changed in one phase is an
+  input to every earlier script.
+
 - [From #1915] A test's cleanup that kills every pid it recorded can kill an unrelated process: Windows reuses pids quickly, and the recorded process is often long dead by `afterAll`. Kill a recorded pid only if the live process with that pid was created no later than the recording (`__tests__/helpers/tracked-pids.ts`). This matters more than it looks because vitest 4 ignores `poolOptions.forks.singleFork`, so test files run in parallel workers: one file's cleanup ran inside another file's assertion window and is the likely killer of a CIM-created Tower in tower-lifecycle.windows Phase 4(b).
 
 - [From #1595] Harness hook semantics are claims to measure in a real session, not to read from docs. Two spikes and full unit coverage still missed that Claude's `Notification(idle_prompt)` fires 60 s after `Stop` even while the turn's background task runs (it flipped a working agent to idle), and that an approved permission fires no hook at all (#1851). Both surfaced only in Phase 8's scripted real-session run with permissions in `default` mode: the operator's `auto` mode never raises a prompt, so a verification run must set the mode it means to test.
@@ -502,6 +581,45 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From #1940] **To claim "unchanged" or "no slower", record the before in a commit of its own, ahead of the change.** The frames that must stay byte-identical were pinned by a test committed against the old code; the latency baseline was a test that runs unchanged on old and new code. For timings, compare the median of several runs and note the load average beside each: single runs on a busy machine read 3.10 and 5.03 ms against a 2.19 ms baseline, five quiet runs read 2.27 ms.
 
 ## UI/UX
+
+- [From #1963] **Theme-token coverage is not contrast.** A webview mapped every token to a VS Code
+  variable and passed its coverage test, yet five mappings were wrong for text:
+  - the button background, which high-contrast themes make black (the accent is also text);
+  - `disabledForeground`, drawn at half alpha;
+  - `errorForeground` and `charts.yellow`, both under 3:1 in Light Modern;
+  - every `code` element, which VS Code's webview stylesheet colours.
+
+  Measure every visible text against its composited background in Dark, Light, HC Dark and HC
+  Light. Prefer the colours made for text: `textLink-foreground`, `input-placeholderForeground`,
+  `list-errorForeground` and `list-warningForeground`.
+- [From #1963] **Editor-area webview traps in VS Code 1.147.0, all found by rendering:**
+  - `WebviewPanel.reveal(column)` into another group lands the panel as a **preview** tab, which
+    the next file opened there replaces. Keep it with `workbench.action.keepEditor`.
+  - A restored webview is revived only when its tab is shown, so creating a panel before that
+    leaves two. Open in the restored tab's group, then close the restored tab.
+  - Moving a group's only editor closes the group and renumbers the rest, so place editors in
+    column order before `vscode.setEditorLayout`. That call merges removed groups' editors into the
+    last group and closes none.
+  - A hidden retained webview still reports `document.visibilityState === 'visible'`, so relay the
+    panel's visibility from the host.
+
+- [From #1963] **A webview that loads its files by URL depends on the host's webview service
+  worker; one that carries them inline does not.** Codev IDE 1.138 pins an old webview host page
+  whose service worker cannot deliver a webview's resources (cluesmith/codev-ide#67): every
+  webview's HTML arrived and its scripts never did. Inlining the bundle (`<script nonce>`, a
+  `<style>`, `localResourceRoots: []`) takes that path out. Two traps when doing so:
+  - Escape `</script`, `<!--` and `</style` in the inlined text, and check with a parser that each
+    escaped position is in a string, a regex literal, an untagged template or a comment. In code
+    the rewrite is a syntax error; in a tagged template it changes what the tag reads from `.raw`.
+  - A nonce in `style-src` switches `'unsafe-inline'` off, so a nonce-only style policy refuses
+    style attributes that sanitized Markdown keeps (aligned table columns). React `style` props
+    still apply, because CSSOM writes are not governed by the policy.
+  - A webview's default styles come from the host page, so a different host page means different
+    defaults. 1.138's older page gave `code` a white foreground in High Contrast Light without the
+    dark background it pairs with, and its defaults are unlayered (1.128 and later use
+    `@layer vscode-default`). Diff the host pages' default-styles blocks and state, in the
+    webview's own stylesheet, every differing default for an element it renders; then compare
+    computed styles under each page's defaults.
 
 - [From #1938] React 19 compares `dangerouslySetInnerHTML` by object identity, not by its
   `__html` string: an inline `{ __html: html }` re-sets the element's HTML on every render, wiping

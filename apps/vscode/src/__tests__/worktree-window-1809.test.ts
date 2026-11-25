@@ -25,6 +25,7 @@ vi.mock('vscode', () => ({
 
 const { resolveWorkspaceDevTarget } = await import('../commands/dev-shared.js');
 const { fireActivity, setActivityHooks, setActivityHooksSuppressed } = await import('../activity-hooks.js');
+const { workspaceActivityBadge } = await import('../mailbox-indicators.js');
 
 describe('resolveWorkspaceDevTarget', () => {
   it('targets the builder for a worktree window root', () => {
@@ -95,6 +96,19 @@ describe('parent-scoped surfaces in a builder-worktree window', () => {
 
   it('shows no parent builder counts in the status bar or the activity-bar badge', () => {
     expect(EXT_SRC).toMatch(/const updateStatusBarCounts = \(\) => \{[\s\S]*?if \(isBuilderWorktreeWindow\) \{ return; \}/);
-    expect(EXT_SRC).toMatch(/if \(isBuilderWorktreeWindow \|\| connectionManager\?\.getState\(\) !== 'connected' \|\| !data\) \{\s*buildersView\.badge = undefined;/);
+    // Spec 1963: the badge is computed once, with the worktree-window flag, and assigned to every
+    // view that renders this window's agents (the Agents view and the Cockpit).
+    expect(EXT_SRC).toMatch(/agentTreeHosts\?\.setBadge\(workspaceActivityBadge\(overviewCache\.getData\(\), \{\s*connected: connectionManager\?\.getState\(\) === 'connected',\s*builderWorktreeWindow: isBuilderWorktreeWindow,/);
+    expect(EXT_SRC).toMatch(/\{ view: buildersView, rows: buildersProvider, revealWhenNoneVisible: true \},\s*\{ view: cockpitView, rows: cockpitProvider \},/);
+    expect(EXT_SRC).not.toMatch(/(buildersView|cockpitView)\.badge = /);
+  });
+
+  it('suppresses the badge value itself in a worktree window, whatever the data', () => {
+    const data = {
+      builders: [{ id: 'b', blocked: 'plan review', lastDataAt: null }],
+      architects: [], heldCount: 2, mailboxEscalated: false, queuedFeedback: {},
+    } as never;
+    expect(workspaceActivityBadge(data, { connected: true, builderWorktreeWindow: false })).toBeDefined();
+    expect(workspaceActivityBadge(data, { connected: true, builderWorktreeWindow: true })).toBeUndefined();
   });
 });
