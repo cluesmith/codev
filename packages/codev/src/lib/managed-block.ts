@@ -121,7 +121,7 @@ function splitAroundBlock(doc: string): AroundBlock | null {
  * CR LF is CR LF; anything else (all LF, both kinds, or no line break at all) takes LF, the
  * ending the published templates and the rendered block carry.
  */
-function rootDocLineEnding(doc: string): '\r\n' | '\n' {
+export function rootDocLineEnding(doc: string): '\r\n' | '\n' {
   const split = splitAroundBlock(doc);
   const outside = split ? [split.before, split.after] : [doc];
   const count = (pattern: RegExp): number => outside.reduce((n, s) => n + (s.match(pattern) ?? []).length, 0);
