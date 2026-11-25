@@ -12,6 +12,7 @@ const mockSweepHusks = vi.fn();
 vi.mock('../lib/tower-client.js', () => ({
   getTowerClient: () => ({
     isRunning: mockIsRunning,
+    probeHealth: async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' }),
     findHuskCandidates: mockFindHuskCandidates,
     sweepHusks: mockSweepHusks,
   }),

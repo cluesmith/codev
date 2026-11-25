@@ -54,6 +54,7 @@ export {
   type TowerWorkspace,
   type TowerWorkspaceStatus,
   type TowerHealth,
+  type TowerHealthProbe,
   type TowerTunnelStatus,
   type TowerStatus,
   type TowerTerminal,

@@ -41,6 +41,7 @@ import { existsSync, readFileSync, realpathSync, statSync, unlinkSync, writeFile
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { TowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getBuilder } from '../state.js';
 import { getConfig } from '../utils/index.js';
@@ -277,11 +278,11 @@ export async function selfRefresh(options: SelfRefreshOptions): Promise<void> {
   // proceed with Tower down — reporting a clean dry run in that state would be
   // the rehearsal lying about the thing most likely to stop the real run.
   const client = new TowerClient();
-  if (!(await client.isRunning())) {
+  const tower = await checkTower(client);
+  if (tower.state !== 'running') {
     fatal(
-      'Tower is not running, so the post-clear re-entry cannot be scheduled. Refusing to ' +
-        'clear — a cleared builder with no re-entry is a builder nobody is coming back for. ' +
-        'Start it with: afx tower start',
+      `${tower.message}\nThe post-clear re-entry cannot be scheduled, so refusing to clear — ` +
+        'a cleared builder with no re-entry is a builder nobody is coming back for.',
     );
     return;
   }

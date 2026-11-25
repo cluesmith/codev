@@ -18,6 +18,7 @@ vi.mock('../lib/tower-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/tower-client.js')>()),
   TowerClient: class {
     isRunning = isRunningMock;
+    probeHealth = async () => ((await isRunningMock()) ? { state: 'running' } : { state: 'not-running' });
     sendMessage = sendMessageMock;
   },
 }));

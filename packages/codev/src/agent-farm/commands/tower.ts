@@ -8,10 +8,11 @@ import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
-import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR, TowerClient } from '../lib/tower-client.js';
+import { checkTower } from '../lib/tower-check.js';
+import { listProcessCensus } from '../servers/process-census.js';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
-import { isPortAvailable } from '../utils/shell.js';
 import Database from 'better-sqlite3';
 import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
@@ -108,10 +109,28 @@ function logToFile(message: string): void {
 }
 
 /**
- * Check if a port is already in use (inverse of isPortAvailable from shell utils)
+ * Why `afx tower start` refuses a port whose holder accepted the connection but did not
+ * answer (#1901): name the process, so the reader can see whether it is a Tower, and leave
+ * replacing it to them.
  */
-async function isPortInUse(port: number): Promise<boolean> {
-  return !(await isPortAvailable(port));
+async function unresponsivePortMessage(port: number, tower: { error: string; elapsedMs: number }): Promise<string> {
+  const pids = getProcessesOnPort(port);
+  let describe = (pid: number): string => `PID ${pid}`;
+  if (pids.length > 0) {
+    try {
+      const census = await listProcessCensus();
+      describe = (pid) => `PID ${pid}: ${census.find((p) => p.pid === pid)?.cmdline || '(command line not readable)'}`;
+    } catch (err) {
+      describe = (pid) => `PID ${pid} (process table unreadable: ${err instanceof Error ? err.message : String(err)})`;
+    }
+  }
+  return [
+    `A process is listening on port ${port} but did not answer /health within ` +
+      `${Math.round(tower.elapsedMs / 1000)} s (${tower.error}):`,
+    ...(pids.length > 0 ? pids.map((pid) => `  ${describe(pid)}`) : ['  (no listening PID found)']),
+    'If the machine is busy, wait and run afx tower start again.',
+    'To replace it deliberately: afx tower stop, then afx tower start.',
+  ].join('\n');
 }
 
 /**
@@ -245,28 +264,17 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     return;
   }
 
-  // Check if already running and responding
-  if (await isServerResponding(port)) {
-    const dashboardUrl = `http://localhost:${port}`;
-    logger.info(`Tower already running at ${dashboardUrl}`);
+  // Only a refused connection means "start one" (#1901). A process that accepted the connection
+  // but did not answer is, under load, usually a live Tower: stopping it is a human's decision
+  // (afx tower stop), never a side effect of start.
+  const tower = await checkTower(new TowerClient({ port, host: '127.0.0.1' }));
+  if (tower.state === 'running') {
+    logger.info(`Tower already running at http://localhost:${port}`);
     return;
   }
-
-  // Check if port is in use but not responding (zombie process?)
-  if (await isPortInUse(port)) {
-    logger.warn(`Port ${port} is in use but tower not responding. Attempting cleanup...`);
-    logToFile(`Port ${port} in use but not responding, attempting cleanup`);
-    const pids = getProcessesOnPort(port);
-    for (const pid of pids) {
-      try {
-        process.kill(pid, 'SIGTERM');
-        logToFile(`Killed process ${pid} on port ${port}`);
-      } catch {
-        // Process may have already exited
-      }
-    }
-    // Wait for port to be released
-    await new Promise((r) => setTimeout(r, 1000));
+  if (tower.state === 'unresponsive') {
+    logToFile(`Port ${port} held but /health unanswered (${tower.error}); refusing to start`);
+    fatal(await unresponsivePortMessage(port, tower));
   }
 
   const config = getConfig();

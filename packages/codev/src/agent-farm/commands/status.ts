@@ -8,6 +8,7 @@ import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { getTowerClient } from '../lib/tower-client.js';
+import { checkTower, type TowerCheck } from '../lib/tower-check.js';
 import { getTypeColor } from '../utils/display.js';
 import { currentArchitectName } from '../utils/architect-name.js';
 import { discoverBuilders, type StoredBuilderIdentity } from '../servers/overview.js';
@@ -288,7 +289,7 @@ function renderActivity(visible: Builder[], views: Map<string, BuilderLiveView>)
  * stdout in `--json` mode — safe for tooling to `JSON.parse`.
  */
 function emitStatusJson(params: {
-  towerRunning: boolean;
+  tower: TowerCheck;
   // `name` is explicitly nullable (not optional): an unregistered workspace
   // must still emit `"name": null` so the machine-readable contract is stable
   // for tooling — `JSON.stringify` would otherwise drop an `undefined` key.
@@ -304,10 +305,16 @@ function emitStatusJson(params: {
   visible: Builder[];
   views: Map<string, BuilderLiveView>;
 }): void {
-  const { towerRunning, workspace, architects, visible, views, ownerFilter, fleet, mailbox } = params;
+  const { tower, workspace, architects, visible, views, ownerFilter, fleet, mailbox } = params;
 
   const payload = {
-    tower: { running: towerRunning },
+    // `running: false` covers both a Tower that is down and one that took the connection but did
+    // not answer; `state` tells them apart and `error` says why it did not answer (#1901).
+    tower: {
+      running: tower.state === 'running',
+      state: tower.state,
+      error: tower.state === 'unresponsive' ? tower.error : null,
+    },
     workspace,
     fleet,
     mailbox,
@@ -356,7 +363,8 @@ export async function status(options: StatusOptions = {}): Promise<void> {
 
   // Try tower API first (Phase 3 - Spec 0090)
   const client = getTowerClient();
-  const towerRunning = await client.isRunning();
+  const tower = await checkTower(client);
+  const towerRunning = tower.state === 'running';
 
   // Builder ownership (`spawnedByArchitect`) lives in state.db, so load it up
   // front — it's the canonical owner source whether or not Tower is running.
@@ -405,7 +413,7 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       }
     }
     emitStatusJson({
-      towerRunning,
+      tower,
       workspace: { path: workspacePath, name: workspaceName ?? null, active: workspaceActive },
       architects,
       visible,
@@ -516,9 +524,14 @@ export async function status(options: StatusOptions = {}): Promise<void> {
     return;
   }
 
-  // Tower not running - show message and fall back to local state
-  logger.kv('Tower', chalk.gray('not running'));
-  logger.info(`Run 'afx tower start' to start the tower daemon`);
+  // Tower not reachable - show why and fall back to local state
+  if (tower.state === 'unresponsive') {
+    logger.kv('Tower', chalk.yellow('not answering'));
+    logger.warn(tower.message);
+  } else {
+    logger.kv('Tower', chalk.gray('not running'));
+    logger.info(`Run 'afx tower start' to start the tower daemon`);
+  }
 
   showArtifactConfig(workspacePath);
 

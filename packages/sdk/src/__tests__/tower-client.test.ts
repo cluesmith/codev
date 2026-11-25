@@ -132,6 +132,54 @@ describe('TowerClient REST', () => {
   });
 });
 
+describe('TowerClient.probeHealth (#1901)', () => {
+  const throwing = (err: unknown) => vi.fn(async () => { throw err; }) as unknown as typeof fetch;
+  const errno = (code: string) => Object.assign(new Error(`connect ${code}`), { code });
+  /** Node's fetch over `localhost`: one attempt per address, the aggregate's code copied from the first. */
+  const nodeFetchFailure = (...codes: string[]) =>
+    Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new AggregateError(codes.map(errno), ''), { code: codes[0] }),
+    });
+
+  it('reports running with the health payload on a healthy answer', async () => {
+    const { impl } = jsonFetch(200, { status: 'healthy', uptime: 5 });
+    expect(await new TowerClient(opts(impl)).probeHealth()).toMatchObject({ state: 'running', health: { uptime: 5 } });
+  });
+
+  it('reports not-running only when every address refused the connection', async () => {
+    const client = new TowerClient(opts(throwing(nodeFetchFailure('ECONNREFUSED', 'ECONNREFUSED'))));
+    expect(await client.probeHealth()).toEqual({ state: 'not-running' });
+  });
+
+  it('still reports not-running when ::1 is unreachable and 127.0.0.1 refused (broken IPv6)', async () => {
+    const client = new TowerClient(opts(throwing(nodeFetchFailure('ENETUNREACH', 'ECONNREFUSED'))));
+    expect(await client.probeHealth()).toEqual({ state: 'not-running' });
+  });
+
+  it('does not let a refused ::1 mask a 127.0.0.1 that failed another way', async () => {
+    const client = new TowerClient(opts(throwing(nodeFetchFailure('ECONNREFUSED', 'ECONNRESET'))));
+    expect((await client.probeHealth()).state).toBe('unresponsive');
+  });
+
+  it('reports a timeout as unresponsive, not as not-running', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    const client = new TowerClient(opts(throwing(timeout)));
+    expect(await client.probeHealth()).toEqual({ state: 'unresponsive', error: 'Request timeout' });
+    expect(await client.isRunning()).toBe(false);
+  });
+
+  it('keeps the reset reason Node puts on the cause', async () => {
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: errno('ECONNRESET') });
+    const client = new TowerClient(opts(throwing(reset)));
+    expect(await client.probeHealth()).toEqual({ state: 'unresponsive', error: 'fetch failed: ECONNRESET' });
+  });
+
+  it('reports an error status as unresponsive with the status and body', async () => {
+    const { impl } = jsonFetch(503, { error: 'BUSY' });
+    expect(await new TowerClient(opts(impl)).probeHealth()).toEqual({ state: 'unresponsive', error: 'HTTP 503: BUSY' });
+  });
+});
+
 describe('parseSseText', () => {
   it('decodes one complete data: envelope and returns no tail', () => {
     const seen: SseEnvelope[] = [];

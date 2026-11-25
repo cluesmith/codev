@@ -29,7 +29,16 @@ const h = vi.hoisted(() => {
   };
 });
 
-vi.mock('../lib/tower-client.js', () => ({ DEFAULT_TOWER_PORT: 4100, AGENT_FARM_DIR: h.agentFarmDir }));
+vi.mock('../lib/tower-client.js', () => ({
+  DEFAULT_TOWER_PORT: 4100,
+  AGENT_FARM_DIR: h.agentFarmDir,
+  // towerStart's "is one already up?" probe (#1901): nothing is listening, so it launches.
+  TowerClient: class {
+    async probeHealth() {
+      return { state: 'not-running' };
+    }
+  },
+}));
 vi.mock('../utils/config.js', () => ({ getConfig: () => ({ serversDir: h.agentFarmDir }) }));
 vi.mock('../utils/shell.js', () => ({ isPortAvailable: vi.fn(async () => true) }));
 vi.mock('node:http', () => {

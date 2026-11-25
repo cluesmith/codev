@@ -44,6 +44,7 @@ const {
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: class {
     isRunning = mockIsRunning;
+    probeHealth = async () => ((await mockIsRunning()) ? { state: 'running' } : { state: 'not-running' });
     sendMessage = mockSendMessage;
     getTerminal = mockGetTerminal;
     getTerminalOutput = mockGetTerminalOutput;

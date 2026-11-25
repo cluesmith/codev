@@ -184,6 +184,16 @@ export interface TowerHealth {
   timestamp: string;
 }
 
+/**
+ * One `/health` probe, classified (#1901). `not-running`: the connection was refused, so
+ * nothing is listening. `unresponsive`: something accepted the connection but did not answer
+ * healthily; `error` carries the reason.
+ */
+export type TowerHealthProbe =
+  | { state: 'running'; health: TowerHealth }
+  | { state: 'not-running' }
+  | { state: 'unresponsive'; error: string };
+
 /** Issue #1227: a shellper the husk sweep would reap (or has reaped). */
 export interface HuskCandidate {
   pid: number;
@@ -317,6 +327,11 @@ export interface TowerClientOptions {
    * to the global fetch, which exists in browsers, Node 18+, and React Native.
    */
   fetchFn?: typeof fetch;
+  /**
+   * How long one request may wait for Tower's answer, in ms. Defaults to 10 000. A test against
+   * a deliberately stalled server sets it short (#1901).
+   */
+  requestTimeoutMs?: number;
 }
 
 // ── Client ─────────────────────────────────────────────────────
@@ -327,10 +342,23 @@ import { encodeWorkspacePath } from './workspace.js';
  * Whether a fetch failure was a refused TCP connection: nothing was listening, so the
  * request provably never reached Tower. Node's fetch reports it as `fetch failed` with the
  * `ECONNREFUSED` on `err.cause`, which a check of `err.message` alone never sees (#1950).
+ *
+ * `localhost` resolves to both `::1` and `127.0.0.1`, and when every address fails Node's cause
+ * is an AggregateError whose `code` is copied from the FIRST attempt only. So each attempt is
+ * judged (#1901): the connection counts as refused when at least one attempt was refused and
+ * every other one also failed before reaching a server (an unreachable `::1` on a machine with
+ * broken IPv6, say). A refused `::1` must not mask a `127.0.0.1` that was reached and then
+ * failed, such as a reset.
  */
+const NEVER_REACHED_CODES = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EADDRNOTAVAIL']);
+
 function isConnectionRefused(err: unknown): boolean {
   if (!(err instanceof Error)) return String(err).includes('ECONNREFUSED');
-  const cause = (err as { cause?: { code?: unknown; message?: unknown } }).cause;
+  const cause = (err as { cause?: { code?: unknown; message?: unknown; errors?: unknown } }).cause;
+  if (Array.isArray(cause?.errors) && cause.errors.length > 0) {
+    const codes = cause.errors.map((attempt) => (attempt as { code?: unknown } | null)?.code);
+    return codes.includes('ECONNREFUSED') && codes.every((code) => typeof code === 'string' && NEVER_REACHED_CODES.has(code));
+  }
   return (
     err.message.includes('ECONNREFUSED') ||
     cause?.code === 'ECONNREFUSED' ||
@@ -390,6 +418,7 @@ export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
   private readonly fetchFn: typeof fetch;
+  private readonly requestTimeoutMs: number;
 
   constructor(portOrOptions?: number | TowerClientOptions) {
     let options: TowerClientOptions;
@@ -403,6 +432,7 @@ export class TowerClient {
     this.baseUrl = `http://${host}:${port}`;
     this.getAuthKey = options.getAuthKey ?? (() => null);
     this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
+    this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
   /**
@@ -427,7 +457,7 @@ export class TowerClient {
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
         headers,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
 
       if (!response.ok) {
@@ -453,13 +483,30 @@ export class TowerClient {
       if (message.includes('timeout')) {
         return { ok: false, status: 0, error: 'Request timeout' };
       }
-      return { ok: false, status: 0, error: message };
+      // Node's fetch says only `fetch failed`; the reason (ECONNRESET, …) is on the cause (#1901).
+      const causeCode = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+      return { ok: false, status: 0, error: typeof causeCode === 'string' ? `${message}: ${causeCode}` : message };
     }
   }
 
-  async isRunning(): Promise<boolean> {
+  /**
+   * Probe `/health` once and say why it failed, not just that it did (#1901). Only a refused
+   * connection means nothing is listening; a timeout, a reset, an error status or an unreadable
+   * body all come from something that accepted the connection, which under load is usually a
+   * live Tower whose event loop is starved. Retrying, and wording the result for a person, is
+   * the caller's policy.
+   */
+  async probeHealth(): Promise<TowerHealthProbe> {
     const result = await this.request<TowerHealth>('/health');
-    return result.ok && result.data?.status === 'healthy';
+    if (result.ok && result.data?.status === 'healthy') return { state: 'running', health: result.data };
+    if (result.connectionRefused) return { state: 'not-running' };
+    if (result.status === 0) return { state: 'unresponsive', error: result.error ?? 'no response' };
+    if (!result.ok) return { state: 'unresponsive', error: `HTTP ${result.status}: ${result.error}` };
+    return { state: 'unresponsive', error: `reported status ${JSON.stringify(result.data?.status)}` };
+  }
+
+  async isRunning(): Promise<boolean> {
+    return (await this.probeHealth()).state === 'running';
   }
 
   async getHealth(): Promise<TowerHealth | null> {
@@ -595,7 +642,7 @@ export class TowerClient {
 
   async deactivateWorkspace(
     workspacePath: string
-  ): Promise<{ ok: boolean; stopped?: number[]; error?: string }> {
+  ): Promise<{ ok: boolean; stopped?: number[]; error?: string; status?: number; connectionRefused?: boolean }> {
     const encoded = encodeWorkspacePath(workspacePath);
     const result = await this.request<{ success: boolean; stopped?: number[]; error?: string }>(
       `/api/workspaces/${encoded}/deactivate`,
@@ -603,7 +650,9 @@ export class TowerClient {
     );
 
     if (!result.ok) {
-      return { ok: false, error: result.error };
+      // `status` 0 without `connectionRefused` means Tower took the request and never answered,
+      // so the caller cannot know whether it deactivated (#1901).
+      return { ok: false, error: result.error, status: result.status, connectionRefused: result.connectionRefused };
     }
 
     return {
@@ -652,7 +701,7 @@ export class TowerClient {
    */
   async getAddressBook(
     caller: { workspace?: string; from?: string } = {},
-  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string; unknownRoute?: true }> {
+  ): Promise<{ ok: true; result: AddressBookResponse } | { ok: false; error: string; unknownRoute?: true; unanswered?: true }> {
     const query = new URLSearchParams();
     if (caller.workspace !== undefined) query.set('workspace', caller.workspace);
     if (caller.from !== undefined) query.set('from', caller.from);
@@ -660,7 +709,9 @@ export class TowerClient {
     const result = await this.request<AddressBookResponse>(`/api/address-book${text === '' ? '' : `?${text}`}`);
     if (!result.ok || result.data === undefined) {
       const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
-      return isUnknownRoute(result) ? { ...failure, unknownRoute: true } : failure;
+      if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+      // No HTTP answer at all (timeout, reset, refused): says nothing about which Tower it is (#1901).
+      return result.status === 0 ? { ...failure, unanswered: true } : failure;
     }
     return { ok: true, result: result.data };
   }
@@ -861,7 +912,7 @@ export class TowerClient {
   async renameTerminal(
     sessionId: string,
     name: string,
-  ): Promise<{ ok: boolean; status: number; data?: { id: string; name: string }; error?: string }> {
+  ): Promise<{ ok: boolean; status: number; data?: { id: string; name: string }; error?: string; connectionRefused?: boolean }> {
     return this.request<{ id: string; name: string }>(`/api/terminals/${sessionId}/rename`, {
       method: 'PATCH',
       body: JSON.stringify({ name }),
@@ -899,7 +950,7 @@ export class TowerClient {
         method: 'POST',
         headers,
         body,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
       if (!response.ok) {
         const text = await response.text();
@@ -1181,7 +1232,7 @@ export class TowerClient {
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
         headers,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
       const text = await response.text();
       let body: unknown = null;
@@ -1217,7 +1268,7 @@ export class TowerClient {
       }
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         headers,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
       if (response.ok) {
         const bytes = new Uint8Array(await response.arrayBuffer());
