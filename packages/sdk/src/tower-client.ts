@@ -1268,7 +1268,7 @@ export class TowerClient {
       }
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         headers,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
       if (response.ok) {
         const bytes = new Uint8Array(await response.arrayBuffer());
