@@ -1303,6 +1303,13 @@ describe('overview', () => {
       expect(worktreeNameToRoleId('worktree-a_-1')).toBe('worktree-a_-1');
     });
 
+    it('maps an all-digit task short id to what buildAgentName produces (#1992)', () => {
+      // buildAgentName strips leading zeros from an all-digit id (task-0123 → builder-task-123).
+      for (const id of ['0123', '0000', '0', '1234', 'S0-L', '_-LM']) {
+        expect(worktreeNameToRoleId(`task-${id}`), id).toBe(buildAgentName('task', id));
+      }
+    });
+
     it('resolves every pre-#1740 numeric and short-id form exactly as before', () => {
       const cases: Array<[string, string]> = [
         ['spir-126-x', 'builder-spir-126'], ['bugfix-296-x', 'builder-bugfix-296'], ['pir-1298-x', 'builder-pir-1298'],
@@ -2261,6 +2268,18 @@ describe('overview', () => {
       const filtered = await cache.getOverview(tmpDir, activeSet);
       expect(filtered.builders).toHaveLength(1);
       expect(filtered.builders[0].issueId).toBe('42');
+    });
+
+    it('keeps every live task builder whatever characters its short id has (#1992)', async () => {
+      // No stored builder rows, so each role id comes from the worktree name.
+      // The live set is keyed by the role ids spawn registers the terminals under.
+      const shortIds = ['S0-L', '_-LM', '0123'];
+      for (const id of shortIds) createBuilderWorktree(tmpDir, `task-${id}`);
+
+      const active = new Set(shortIds.map(id => buildAgentName('task', id)));
+      const data = await new OverviewCache().getOverview(tmpDir, active);
+
+      expect(data.builders.map(b => b.id).sort()).toEqual(['task-0123', 'task-S0-L', 'task-_-LM']);
     });
 
     it('returns no builders when activeBuilderRoleIds is empty', async () => {
