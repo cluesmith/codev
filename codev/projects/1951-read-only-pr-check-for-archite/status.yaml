@@ -141,7 +141,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1951/codev/projects/1951-read-only-pr-check-for-archite/1951-docs_guidance-iter1-claude.txt
 started_at: '2026-11-23T18:53:58.201Z'
-updated_at: '2026-11-25T01:17:04.432Z'
+updated_at: '2026-11-25T01:17:06.691Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-23T21:21:59.024Z'
@@ -179,3 +179,5 @@ pr_history:
     pr_number: 1958
     branch: builder/spir-1951
     created_at: '2026-11-25T01:17:04.430Z'
+    merged: true
+    merged_at: '2026-11-25T01:17:06.690Z'
