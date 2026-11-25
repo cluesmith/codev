@@ -160,8 +160,10 @@ describe('issue #1982 — codev update on root docs', () => {
     expect(report).toContain('  - (removed, nothing left to merge) CLAUDE.md.codev-new');
   });
 
-  it('a checkout whose directory is not the name init saw is still up to date', async () => {
+  it('a checkout whose directory is not the name init saw is still up to date; its leftover is resolved', async () => {
     const before = ROOT_DOCS.map(read);
+    // A leftover this bug wrote while the checkout still had init's name.
+    write('CLAUDE.md.codev-new', before[0]);
     process.chdir(baseDir);
     const renamed = path.join(baseDir, 'cloned-elsewhere');
     fs.renameSync(projectDir, renamed);
@@ -173,6 +175,16 @@ describe('issue #1982 — codev update on root docs', () => {
     expect(result.rootConflicts).toEqual([]);
     expect(codevNewFiles(projectDir)).toEqual([]);
     expect(ROOT_DOCS.map(read)).toEqual(before);
+  });
+
+  it('a CRLF checkout of an unedited doc is up to date', async () => {
+    const crlf = read('CLAUDE.md').replace(/\n/g, '\r\n');
+    write('CLAUDE.md', crlf);
+
+    const { result } = await runUpdate();
+
+    expect(result.rootConflicts).toEqual([]);
+    expect(codevNewFiles(projectDir)).toEqual([]);
   });
 
   it('an edited skill is still kept, with its new version as .codev-new beside it', async () => {
