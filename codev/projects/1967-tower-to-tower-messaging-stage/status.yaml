@@ -1,7 +1,7 @@
 id: '1967'
 title: tower-to-tower-messaging-stage
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-25T23:41:48.066Z'
+updated_at: '2026-11-25T23:41:52.892Z'
