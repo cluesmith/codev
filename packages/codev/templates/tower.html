@@ -1929,8 +1929,10 @@
       errorEl.style.display = 'none';
       errorEl.textContent = '';
       // Pre-populate with existing registration values, or defaults
-      if (lastCloudStatus && lastCloudStatus.towerName) {
-        nameInput.value = lastCloudStatus.towerName;
+      // #1871: offer the name the user chose (the display name), not the slug the
+      // cloud derived from it, so re-registering does not ask for `<name>-2`.
+      if (lastCloudStatus && (lastCloudStatus.displayName || lastCloudStatus.towerName)) {
+        nameInput.value = lastCloudStatus.displayName || lastCloudStatus.towerName;
       } else {
         nameInput.value = (lastCloudStatus && lastCloudStatus.hostname) || '';
       }

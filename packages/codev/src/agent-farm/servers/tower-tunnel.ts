@@ -52,6 +52,8 @@ export interface TunnelDeps {
 // ============================================================================
 
 let tunnelClient: TunnelClient | null = null;
+/** The registration `tunnelClient` was built from; meaningful only while it is set. */
+let tunnelRegistration: CloudConfig | null = null;
 let configWatcher: fs.FSWatcher | null = null;
 let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
 let metadataRefreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -175,6 +177,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
   client.sendMetadata(metadata);
 
   tunnelClient = client;
+  tunnelRegistration = config;
   client.connect();
 
   // Ensure config watcher is running — the config directory now exists.
@@ -214,6 +217,10 @@ function markDeregistered(config: CloudConfig): void {
   _deps?.log('ERROR', `Tower "${config.tower_name}" was deregistered from Codev Cloud (deleted there, or its key replaced by a newer registration). Tunnel stopped; credentials kept in ${getCloudConfigPath()}. Run 'afx tower connect' to register again.`);
 }
 
+function sameCredentials(a: CloudConfig, b: CloudConfig): boolean {
+  return a.api_key === b.api_key && a.tower_id === b.tower_id && a.server_url === b.server_url;
+}
+
 /**
  * Start watching cloud-config.json for changes.
  * On change: reconnect with new credentials.
@@ -244,10 +251,18 @@ function startConfigWatcher(): void {
               tunnelClient = null;
             }
           } else if (config) {
-            // Skip if already connected (avoids redundant reconnect when the OAuth
-            // callback writes config and connects directly — the file watcher fires
-            // 500ms later and would kill the working connection)
-            if (tunnelClient && tunnelClient.getState() === 'connected') {
+            // Skip if already connected with this registration (avoids redundant
+            // reconnect when the OAuth callback writes config and connects directly —
+            // the file watcher fires 500ms later and would kill the working
+            // connection). An identity-only change (#1871) is skipped too, but new
+            // credentials must replace the client, or it keeps the old key until the
+            // cloud rejects it.
+            if (
+              tunnelClient &&
+              tunnelClient.getState() === 'connected' &&
+              tunnelRegistration !== null &&
+              sameCredentials(tunnelRegistration, config)
+            ) {
               _deps?.log('INFO', 'Cloud config changed but tunnel already connected, skipping reconnect');
               return;
             }

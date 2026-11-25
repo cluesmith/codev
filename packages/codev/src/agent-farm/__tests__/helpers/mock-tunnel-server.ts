@@ -243,8 +243,8 @@ export class MockTunnelServer {
 
   /** Bodies received by the redeem endpoint, oldest first */
   redeemBodies: Array<Record<string, unknown>> = [];
-  /** Auth messages received, successful or not */
-  authAttempts = 0;
+  /** API keys presented in auth messages, oldest first, successful or not */
+  authKeys: string[] = [];
 
   /** Get the number of active H2 sessions */
   getActiveSessionCount(): number {
@@ -299,7 +299,7 @@ export class MockTunnelServer {
   }
 
   private handleAuth(ws: WebSocket, apiKey: string): void {
-    this.authAttempts++;
+    this.authKeys.push(apiKey);
     // Check forced error
     if (this.options.forceError) {
       ws.send(JSON.stringify({ type: 'auth_error', reason: this.options.forceError }));

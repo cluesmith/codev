@@ -202,10 +202,10 @@ describe('Issue #1871: Tower follows the cloud identity', () => {
       expect(status.deregisteredAt).toBe(readCloudConfig()!.deregistered_at);
 
       // No half-open retry: the #1372 breaker would try again after this long.
-      const attempts = cloud.authAttempts;
+      const attempts = cloud.authKeys.length;
       expect(attempts).toBe(2);
       await vi.advanceTimersByTimeAsync(AUTH_RETRY_INTERVAL_MS + 60_000);
-      expect(cloud.authAttempts).toBe(attempts);
+      expect(cloud.authKeys.length).toBe(attempts);
 
       // A Tower restart does not connect a deregistered registration, nor does smart reconnect.
       shutdownTunnel();
@@ -214,26 +214,31 @@ describe('Issue #1871: Tower follows the cloud identity', () => {
       expect(reconnect.status).toBe(400);
       expect(reconnect.body).toContain('deregistered');
       await vi.advanceTimersByTimeAsync(1000);
-      expect(cloud.authAttempts).toBe(attempts);
+      expect(cloud.authKeys.length).toBe(attempts);
     }, 20_000);
 
-    it('does not stamp a registration written after the tunnel connected', async () => {
-      writeCloudConfig(registration({ tower_name: 'mac-2', display_name: 'mac' }));
+    it('a registration replaced while connected reconnects with the new key and is never stamped', async () => {
       vi.spyOn(Math, 'random').mockReturnValue(0);
-      vi.useFakeTimers({ shouldAdvanceTime: true });
+      writeCloudConfig(registration({ tower_name: 'mac-2', display_name: 'mac' }));
       await initTunnel(deps, { getInstances: async () => [] });
       await until(async () => (await tunnelStatus()).state === 'connected');
 
-      // A re-registration elsewhere replaced the key on disk while connected.
+      // A re-registration elsewhere replaced the key on disk while connected; the
+      // cloud now accepts only the new key and drops the old session.
       const replaced = registration({ api_key: 'ctk_ReplacedKey0002', tower_name: 'mac-2', display_name: 'mac' });
-      writeCloudConfig(replaced);
-      await until(() => logs.some((l) => l.includes('already connected, skipping reconnect')));
-
       cloud.configure({ acceptKey: replaced.api_key });
-      cloud.disconnectAll();
-      await vi.advanceTimersByTimeAsync(calculateBackoff(1, () => 0) + 100);
-      await until(() => logs.some((l) => l.includes('holds a different registration')));
+      writeCloudConfig(replaced);
 
+      // The config watcher swaps the client instead of keeping the stale one.
+      await until(async () => cloud.authKeys.at(-1) === replaced.api_key && (await tunnelStatus()).state === 'connected');
+      // Drop every session: whatever reconnects must use the new key — a stale
+      // client still holding the old one would show up here.
+      cloud.disconnectAll();
+      await until(() => cloud.authKeys.length >= 3, 8000);
+      await until(async () => (await tunnelStatus()).state === 'connected');
+
+      expect(cloud.authKeys[0]).toBe(API_KEY);
+      expect(cloud.authKeys.slice(1).every((k) => k === replaced.api_key)).toBe(true);
       expect(readCloudConfig()).toEqual(replaced);
     }, 20_000);
   });
