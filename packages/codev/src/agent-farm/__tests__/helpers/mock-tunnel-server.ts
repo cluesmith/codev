@@ -4,7 +4,7 @@
  * Lightweight WebSocket server that implements the codevos.ai tunnel protocol:
  * 1. Accepts WebSocket connections on /tunnel
  * 2. Waits for JSON auth message: { type: "auth", apiKey: "ctk_..." }
- * 3. Responds with { type: "auth_ok", towerId: "..." } or { type: "auth_error", reason: "..." }
+ * 3. Responds with { type: "auth_ok", towerId: "...", slug?, name? } or { type: "auth_error", reason: "..." }
  * 4. Converts WebSocket to duplex stream and runs H2 client over it
  *
  * TICK-001: Rewritten from TCP to WebSocket to match codevos.ai server.
@@ -21,6 +21,17 @@ export interface MockTunnelServerOptions {
   acceptKey?: string;
   /** Tower ID to return on successful auth */
   towerId?: string;
+  /**
+   * Slug and display name to return in `auth_ok`, as the cloud does since
+   * codev-cloud#17. Unset, `auth_ok` carries only `towerId` (an older cloud).
+   */
+  slug?: string;
+  name?: string;
+  /**
+   * Body for `POST /api/towers/register/redeem` (Issue #1871). Unset, the
+   * endpoint answers 404. Request bodies are recorded in `redeemBodies`.
+   */
+  redeemResponse?: Record<string, unknown>;
   /** Force error response instead of OK */
   forceError?: 'invalid_api_key' | 'rate_limited' | 'internal_error' | 'invalid_auth_frame';
   /** Disconnect after auth (before H2) */
@@ -61,6 +72,16 @@ export class MockTunnelServer {
     };
     // Create an HTTP server for WebSocket upgrade + metadata POST handler
     this.httpServer = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/api/towers/register/redeem' && this.options.redeemResponse) {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.on('end', () => {
+          this.redeemBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(this.options.redeemResponse));
+        });
+        return;
+      }
       if (req.method === 'POST' && req.url === '/api/tower/metadata') {
         const chunks: Buffer[] = [];
         req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -212,6 +233,19 @@ export class MockTunnelServer {
     this.h2Sessions = [];
   }
 
+  /**
+   * Change how later connections are answered, e.g. `{ acceptKey: 'none' }` to
+   * reject every key as a cloud-side delete does, or a new `slug` for a rename.
+   */
+  configure(options: Partial<MockTunnelServerOptions>): void {
+    this.options = { ...this.options, ...options };
+  }
+
+  /** Bodies received by the redeem endpoint, oldest first */
+  redeemBodies: Array<Record<string, unknown>> = [];
+  /** Auth messages received, successful or not */
+  authAttempts = 0;
+
   /** Get the number of active H2 sessions */
   getActiveSessionCount(): number {
     return this.h2Sessions.filter((s) => !s.destroyed).length;
@@ -265,6 +299,7 @@ export class MockTunnelServer {
   }
 
   private handleAuth(ws: WebSocket, apiKey: string): void {
+    this.authAttempts++;
     // Check forced error
     if (this.options.forceError) {
       ws.send(JSON.stringify({ type: 'auth_error', reason: this.options.forceError }));
@@ -282,7 +317,12 @@ export class MockTunnelServer {
     }
 
     // Auth success
-    ws.send(JSON.stringify({ type: 'auth_ok', towerId: this.options.towerId }));
+    ws.send(JSON.stringify({
+      type: 'auth_ok',
+      towerId: this.options.towerId,
+      ...(this.options.slug !== undefined ? { slug: this.options.slug } : {}),
+      ...(this.options.name !== undefined ? { name: this.options.name } : {}),
+    }));
 
     if (this.options.disconnectAfterAuth) {
       ws.close();
