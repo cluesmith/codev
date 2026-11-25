@@ -2388,9 +2388,11 @@ workspaces, so no single default makes sense (owner ruling, 2026-10-21, retired 
   straight to `./ide/?folder=…`, always relative to `location.href` (never a stored slug), carrying
   no key or cookie. The public prefix (for the `x-forwarded-prefix` stamp and the cookie
   Path alike) comes from the relay-stamped inbound `x-forwarded-prefix` on a tunnel-borne request
-  when it matches `^/t/[A-Za-z0-9._-]+/ide$` (it tracks cloud-side renames; the stored `tower_name`
-  does not), else from `tower_name`, which is used only if it matches `^[A-Za-z0-9._-]+$`
-  (`getPublicAuthority`).
+  when it matches `^/t/[A-Za-z0-9._-]+/ide$` (it tracks a cloud-side rename at once), else from
+  the stored `tower_name`, which is used only if it matches `^[A-Za-z0-9._-]+$`
+  (`getPublicAuthority`). `tower_name` holds the cloud's slug: it is set from the redeem response
+  and refreshed from `auth_ok` on every reconnect (#1871), so it trails a rename only until the
+  tunnel next reconnects (the cloud does not close the session on rename).
 - **State**: a Tower-managed `~/.agent-farm/ide-server.json` record (`{prefix, port, serverPath,
   pid}`, plus optional `serverVersion`, `extensionsDir`, `sidebarVersion` from Spec 1789; legacy
   records without them still parse, and a retired `defaultFolder` is ignored), the `cloud-config.json` pattern — **no

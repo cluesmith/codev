@@ -896,7 +896,10 @@ afx tower register [options]
 
 **Options:**
 - `--reauth` - Re-authenticate without changing tower name
+- `--claim` - Take the name back from a disconnected tower you own, instead of registering as `<name>-2`
 - `-p, --port <port>` - Tower port to signal after registration (default: 4100)
+
+The cloud owns the routing name (the slug in `/t/<slug>/`). Tower stores the slug the cloud assigns (e.g. `<name>-2` when the name is taken) and follows a cloud-side rename on its next reconnect.
 
 #### afx tower deregister
 
@@ -919,6 +922,8 @@ afx tower status [options]
 
 **Options:**
 - `-p, --port <port>` - Tower port (default: 4100)
+
+Shows the tower's slug, display name, connection state and the access URL built from the slug. If the cloud rejects the key after it had connected (tower deleted in the cloud, or key replaced), status says `deregistered`. The credentials are kept; run `afx tower connect` to register again.
 
 **Environment Variables:**
 - `CODEVOS_URL` - Override the codevos.ai server URL (default: `https://codevos.ai`). Useful for local development or staging.

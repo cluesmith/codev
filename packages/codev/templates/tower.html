@@ -1831,6 +1831,18 @@
         return;
       }
 
+      // #1871: the cloud rejected a key that had connected — the tower was
+      // deleted there or re-registered elsewhere. Connect registers it again.
+      if (status.state === 'deregistered') {
+        el.innerHTML = `
+          <span class="cloud-status" title="Codev Cloud no longer knows this tower (deleted there, or its key replaced by a newer registration). Connect to register it again.">
+            <span class="cloud-dot cloud-dot--red"></span>
+            ${escapeHtml(status.towerName || 'tower')} deregistered
+            <button class="cloud-btn" onclick="cloudConnect()" ${cloudLoading ? 'disabled' : ''}>Connect</button>
+          </span>`;
+        return;
+      }
+
       if (!status.registered) {
         el.innerHTML = `
           <span class="cloud-status">

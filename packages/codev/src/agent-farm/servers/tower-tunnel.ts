@@ -16,11 +16,13 @@ import {
   TUNNEL_PROXY_HEADER,
   AUTH_RETRY_FAILED_MARKER,
   type TunnelState,
+  type TunnelIdentity,
   type TowerMetadata,
 } from '../lib/tunnel-client.js';
 import {
   readCloudConfig,
   writeCloudConfig,
+  updateCloudConfig,
   deleteCloudConfig,
   getCloudConfigPath,
   getOrCreateMachineId,
@@ -161,7 +163,12 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     if (state === 'auth_failed' && !reason?.includes(AUTH_RETRY_FAILED_MARKER)) {
       _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'afx tower connect --reauth\' to update credentials.');
     }
+    if (state === 'deregistered') {
+      markDeregistered(config);
+    }
   });
+
+  client.onAuthOk((identity) => adoptCloudIdentity(config, identity));
 
   // Gather and set initial metadata before connecting
   const metadata = await gatherMetadata();
@@ -174,6 +181,37 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
   startConfigWatcher();
 
   return client;
+}
+
+/**
+ * Follow the cloud's identity for this tower (Issue #1871): a rename in the
+ * cloud UI changes the slug, and Tower learns it from `auth_ok` on the next
+ * reconnect. A cloud that predates codev-cloud#17 sends no slug, and the stored
+ * identity stands.
+ */
+function adoptCloudIdentity(config: CloudConfig, identity: TunnelIdentity): void {
+  if (!identity.slug) return;
+  const current = readCloudConfig();
+  if (!current) return;
+  const name = identity.name ?? current.display_name;
+  if (current.tower_name === identity.slug && current.display_name === name) return;
+  if (updateCloudConfig(config.api_key, { tower_name: identity.slug, display_name: name })) {
+    _deps?.log('INFO', `Codev Cloud identity changed: slug "${current.tower_name}" → "${identity.slug}"${name ? ` (name "${name}")` : ''}`);
+  }
+}
+
+/**
+ * The cloud rejected a key this tunnel had connected with (Issue #1871).
+ * Stamp the registration deregistered rather than deleting it — the user may
+ * want to inspect the credentials — and say how to recover.
+ */
+function markDeregistered(config: CloudConfig): void {
+  const marked = updateCloudConfig(config.api_key, { deregistered_at: new Date().toISOString() });
+  if (!marked) {
+    _deps?.log('WARN', 'Tunnel key rejected after a successful connection, but cloud-config.json now holds a different registration; leaving it in place.');
+    return;
+  }
+  _deps?.log('ERROR', `Tower "${config.tower_name}" was deregistered from Codev Cloud (deleted there, or its key replaced by a newer registration). Tunnel stopped; credentials kept in ${getCloudConfigPath()}. Run 'afx tower connect' to register again.`);
 }
 
 /**
@@ -199,7 +237,13 @@ function startConfigWatcher(): void {
         configWatchDebounce = null;
         try {
           const config = readCloudConfig();
-          if (config) {
+          if (config?.deregistered_at) {
+            _deps?.log('INFO', 'Cloud config marks this tower deregistered, tunnel stays down');
+            if (tunnelClient) {
+              tunnelClient.disconnect();
+              tunnelClient = null;
+            }
+          } else if (config) {
             // Skip if already connected (avoids redundant reconnect when the OAuth
             // callback writes config and connects directly — the file watcher fires
             // 500ms later and would kill the working connection)
@@ -261,7 +305,9 @@ export async function initTunnel(
   // Auto-connect tunnel if registered
   try {
     const config = readCloudConfig();
-    if (config) {
+    if (config?.deregistered_at) {
+      deps.log('WARN', `Tower "${config.tower_name}" was deregistered from Codev Cloud at ${config.deregistered_at}; not connecting. Run 'afx tower connect' to register again.`);
+    } else if (config) {
       deps.log('INFO', `Cloud config found, connecting tunnel (tower: ${config.tower_name}, key: ${maskApiKey(config.api_key)})`);
       await connectTunnel(config);
     } else {
@@ -384,16 +430,20 @@ export async function handleTunnelEndpoint(
     try {
       const machineId = getOrCreateMachineId();
       _deps?.log('INFO', `OAuth callback: redeeming token for tower "${pending.name}" (key: ${maskApiKey(token)})`);
-      const { towerId, apiKey } = await redeemToken(pending.serverUrl, token, pending.name, machineId);
+      const { towerId, apiKey, slug, name } = await redeemToken(pending.serverUrl, token, pending.name, machineId);
 
+      // Persist the cloud's slug, not the requested name: every public URL
+      // Tower builds derives from tower_name (Issue #1871).
       writeCloudConfig({
         tower_id: towerId,
-        tower_name: pending.name,
+        tower_name: slug,
+        display_name: name,
         api_key: apiKey,
         server_url: pending.serverUrl,
       });
 
-      _deps?.log('INFO', `Registration complete: tower="${pending.name}" id=${towerId} key=${maskApiKey(apiKey)}`);
+      const renamed = slug !== pending.name;
+      _deps?.log('INFO', `Registration complete: tower="${slug}"${renamed ? ` (requested "${pending.name}")` : ''} id=${towerId} key=${maskApiKey(apiKey)}`);
 
       // Connect tunnel with new credentials
       const config = readCloudConfig();
@@ -403,7 +453,10 @@ export async function handleTunnelEndpoint(
 
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(htmlPage('Connected to Codev Cloud',
-        `<p>Tower "<strong>${pending.name}</strong>" is now connected.</p>` +
+        `<p>Tower "<strong>${escapeHtml(slug)}</strong>" is now connected.</p>` +
+        (renamed
+          ? `<p>Registered as <strong>${escapeHtml(slug)}</strong>: <strong>${escapeHtml(pending.name)}</strong> was taken or is not a valid tower name.</p>`
+          : '') +
         '<p>Redirecting to Tower homepage...</p>' +
         '<meta http-equiv="refresh" content="3;url=/">' +
         '<p><a href="/">Back to Tower</a></p>'));
@@ -495,6 +548,11 @@ export async function handleTunnelEndpoint(
       if (!config) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: "Not registered. Run 'afx tower connect' or use the Connect button in the Tower UI." }));
+        return;
+      }
+      if (config.deregistered_at) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: "This tower was deregistered from Codev Cloud. Run 'afx tower connect' or use the Connect button in the Tower UI to register it again." }));
         return;
       }
       if (tunnelClient) tunnelClient.resetCircuitBreaker();
@@ -592,11 +650,14 @@ export async function handleTunnelEndpoint(
       // Config file may be corrupted — treat as unregistered
     }
 
-    const state = tunnelClient?.getState() ?? 'disconnected';
-    const uptime = tunnelClient?.getUptime() ?? null;
+    // A deregistered registration (Issue #1871) has no tunnel, whatever a
+    // leftover client says; its credentials stay on disk, so name it.
+    const deregistered = Boolean(config?.deregistered_at);
+    const state = deregistered ? 'deregistered' : (tunnelClient?.getState() ?? 'disconnected');
+    const uptime = deregistered ? null : (tunnelClient?.getUptime() ?? null);
 
     const response: Record<string, unknown> = {
-      registered: config !== null,
+      registered: config !== null && !deregistered,
       state,
       uptime,
       hostname: os.hostname(),
@@ -605,8 +666,10 @@ export async function handleTunnelEndpoint(
     if (config) {
       response.towerId = config.tower_id;
       response.towerName = config.tower_name;
+      response.displayName = config.display_name ?? null;
       response.serverUrl = config.server_url;
-      response.accessUrl = `${config.server_url}/t/${config.tower_name}/`;
+      response.accessUrl = deregistered ? null : `${config.server_url}/t/${config.tower_name}/`;
+      if (deregistered) response.deregisteredAt = config.deregistered_at;
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
