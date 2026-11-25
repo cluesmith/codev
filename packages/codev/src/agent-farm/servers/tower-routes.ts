@@ -3664,7 +3664,9 @@ async function handleWorkspaceState(
     annotations: [],
     workspaceName: path.basename(workspacePath),
     version,
-    hostname: (() => { try { return readCloudConfig()?.tower_name; } catch { return undefined; } })(),
+    // A human-facing title (Spec 443): the display name the owner chose, not the
+    // cloud's routing slug, which tower_name holds since #1871.
+    hostname: (() => { try { const c = readCloudConfig(); return c ? (c.display_name ?? c.tower_name) : undefined; } catch { return undefined; } })(),
     teamEnabled: await hasTeam(path.join(workspacePath, 'codev', 'team')),
     decisionsEnabled: await decisionsFilePresent(workspacePath, ctx.log),
   };

@@ -18,7 +18,7 @@ import {
   DEFAULT_CLOUD_URL,
   type CloudConfig,
 } from '../lib/cloud-config.js';
-import { redeemToken } from '../lib/token-exchange.js';
+import { redeemToken, type RedeemResult } from '../lib/token-exchange.js';
 import { getTowerClient, type TowerTunnelStatus } from '../lib/tower-client.js';
 import { prompt, confirm } from '../../lib/cli-prompts.js';
 
@@ -52,6 +52,8 @@ export async function getTunnelStatus(port?: number): Promise<TowerTunnelStatus 
 
 export interface TowerRegisterOptions {
   reauth?: boolean;
+  /** Take the name over from a disconnected tower of the same user (Issue #1871). */
+  claim?: boolean;
   serviceUrl?: string;
   port?: number;
 }
@@ -72,8 +74,8 @@ export interface TowerRegisterOptions {
 export async function towerRegister(options: TowerRegisterOptions = {}): Promise<void> {
   const existing = readCloudConfig();
 
-  // Check existing registration
-  if (existing && !options.reauth) {
+  // Check existing registration (a deregistered one is dead — nothing to confirm)
+  if (existing && !options.reauth && !existing.deregistered_at) {
     const proceed = await confirm(
       `This tower is already registered as '${existing.tower_name}'. Re-register?`,
       false,
@@ -128,7 +130,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   // Prompt for tower name (skip on reauth)
   let towerName: string;
   if (options.reauth && existing) {
-    towerName = existing.tower_name;
+    towerName = existing.display_name ?? existing.tower_name;
     logger.kv('Tower name', towerName);
   } else {
     const defaultName = hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -139,18 +141,19 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   // Exchange token for API key
   logger.info('Exchanging token...');
 
-  let towerId: string;
-  let apiKey: string;
+  let registered: RedeemResult;
   try {
-    ({ towerId, apiKey } = await redeemToken(serverUrl, token, towerName, getMachineId()));
+    registered = await redeemToken(serverUrl, token, towerName, getMachineId(), { claimSlug: options.claim });
   } catch (err) {
     fatal(`Token exchange failed: ${(err as Error).message}`);
   }
+  const { towerId, apiKey, slug, name } = registered;
 
-  // Write config
+  // Write config: the cloud's slug is the routing identity, not the typed name (Issue #1871)
   const config: CloudConfig = {
     tower_id: towerId,
-    tower_name: towerName,
+    tower_name: slug,
+    display_name: name,
     api_key: apiKey,
     server_url: serverUrl,
   };
@@ -160,9 +163,13 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   await signalTower('connect', options.port);
 
   // Print success
-  const accessUrl = `${serverUrl}/t/${towerName}/`;
+  const accessUrl = `${serverUrl}/t/${slug}/`;
   logger.blank();
-  logger.success(`Tower '${towerName}' registered successfully.`);
+  logger.success(`Tower '${slug}' registered successfully.`);
+  if (slug !== towerName) {
+    logger.info(`Registered as '${slug}': '${towerName}' was taken or is not a valid tower name.` +
+      (options.claim ? '' : " Re-run with --claim to take the name back from a disconnected tower you own."));
+  }
   logger.kv('Tower ID', towerId);
   logger.kv('API Key', maskApiKey(apiKey));
   logger.kv('Access URL', accessUrl);
@@ -223,11 +230,19 @@ export async function towerCloudStatus(port?: number): Promise<void> {
 
   logger.blank();
   logger.header('Cloud Connection');
-  logger.kv('Registration', 'registered');
-  logger.kv('Tower Name', config.tower_name);
+  logger.kv('Registration', config.deregistered_at ? `deregistered (${config.deregistered_at})` : 'registered');
+  logger.kv('Tower Slug', config.tower_name);
+  if (config.display_name) logger.kv('Display Name', config.display_name);
   logger.kv('Tower ID', config.tower_id);
   logger.kv('Server', config.server_url);
   logger.kv('API Key', maskApiKey(config.api_key));
+
+  if (config.deregistered_at) {
+    // Issue #1871: the cloud rejected this key after it had connected.
+    logger.warn('Codev Cloud no longer knows this tower (deleted there, or its key replaced by a newer registration).');
+    logger.info("Credentials are kept in cloud-config.json. Run 'afx tower connect' to register again.");
+    return;
+  }
 
   // Try to get live tunnel status from daemon
   const status = await getTunnelStatus(port);

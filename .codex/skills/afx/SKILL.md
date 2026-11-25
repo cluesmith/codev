@@ -281,6 +281,7 @@ afx tower stop                  # Stop Tower
 afx tower log                   # Tail Tower logs
 afx tower status                # Check daemon and cloud connection status
 afx tower connect               # Connect to Codev Cloud
+afx tower connect --claim       # Re-register, taking the name back from your disconnected tower
 afx tower disconnect            # Disconnect from Codev Cloud
 ```
 

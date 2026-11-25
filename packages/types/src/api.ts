@@ -839,13 +839,19 @@ export interface AddressBookResponse {
 // --- Tunnel (GET /api/tunnel/status) ---
 
 export interface TunnelStatus {
+  /** False for a deregistered registration, whose credentials stay on disk (Issue #1871). */
   registered: boolean;
-  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed' | 'error';
+  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed' | 'deregistered' | 'error';
   uptime: number | null;
   towerId: string | null;
+  /** The cloud's slug: the routing identity in `/t/<slug>/` (Issue #1871). */
   towerName: string | null;
+  /** The cloud's display name, when known (Issue #1871). */
+  displayName?: string | null;
   serverUrl: string | null;
   accessUrl: string | null;
+  /** When the cloud rejected the key after it had connected (Issue #1871). */
+  deregisteredAt?: string;
 }
 
 // --- Tower version (GET /api/version) ---
