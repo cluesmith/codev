@@ -78,4 +78,25 @@ git blobs (installed template 0 CR LF / 168 LF, as published).
   13 tests fail on main's managed-block.ts. Probe branch deleted for good.
 - CMAP round 2: claude APPROVE; codex REQUEST_CHANGES only on porch's `chore(porch):` commits
   (rebutted). Open for the architect: `.codev-new` is still the template's line ending (LF) for
-  a CR LF doc — pre-existing, a design call, not changed here.
+  a CR LF doc — pre-existing, a design call, not changed here. (Then ruled: fix it here, below.)
+
+## 2026-11-25 — architect ruling: .codev-new in its doc's line ending
+
+- Architect reproduced the fix on a CR LF project, accepted the porch-commit rebuttal, and ruled
+  (own call, owner may overrule): a `.codev-new` beside a root doc is written in that doc's line
+  ending, same rule; the #1985 leftover-removal must still settle it.
+- `scaffold.ts`: `copyRootFiles` writes `.codev-new` via `inDocLineEnding` (exports
+  `rootDocLineEnding`). Settling already normalises, so no change there; tests pin both settle
+  paths (merged doc; older shipped version via the hashes) for a CR LF `.codev-new`.
+- Tests: 2 new regressions (CR LF doc → CR LF `.codev-new`; LF doc → LF `.codev-new` from a CR LF
+  template), 2 guards; air-1985's `.codev-new` expectation made ending-independent.
+  14 tests fail on main's code across the four root-doc files; 62/62 with the fix.
+- Probe extended (LF edited project; `.codev-new` endings; merge step) and run BEFORE (main +
+  probe, 45715166133, fails as it should) and AFTER (head + probe, 45715172568, green):
+  CR LF edited doc's `.codev-new` 0/168 LF, 0 of 168 lines identical → 168/0 CR LF, 168 of 168;
+  removed after merge in both. Insert-damaged row at main: 152/16 stays mixed (now measured).
+- Branch run at `d1a763de2`: 45715161906 all green (1982 13/13, 1985 22/22, 1990 11/11, codev
+  unit 458 files 0 failed). PR CI green. Both probe branches deleted.
+- CMAP round 3 read the PR body before its update landed: both flagged the stale body (since
+  fixed). No code defects. Nits: `inDocLineEnding`'s comment overstates its fallback (ENOENT
+  unreachable at the call site); a genuinely mixed doc's two boundary breaks now take LF.
