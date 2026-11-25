@@ -262,9 +262,10 @@ Where sender-held mail and grants are stored, and how the per-peer queue is buil
 ## Wire Contract (proposed to Codev Cloud)
 
 *This section is written to be read on its own by the Codev Cloud architect, and is the Tower
-half's proposal for codev-cloud issue #22. This is revision 2. It takes in the cloud architect's
-first answers (comment 7174155361), marked (a) to (h), and their review of revision 1 (comment
-7174678201), marked [r1] to [r18]. Where it and the approved spec differ, the difference is also
+half's proposal for codev-cloud issue #22. This is revision 3. It takes in the cloud architect's
+first answers (comment 7174155361), marked (a) to (h), their review of revision 1 (comment
+7174678201), marked [r1] to [r18], and their four corrections to revision 2 and one suggestion
+(comment 7174920555), marked [r2-A] to [r2-D] and [r2-s]. Where it and the approved spec differ, the difference is also
 listed under "Departures from the Approved Spec".*
 
 ### Parties and principles
@@ -445,19 +446,26 @@ x-codev-peer-request-id: <message id or query id: a UUID chosen by S>
 
 - The recipient Tower, the request id, the kind and the version travel in headers, outside the
   payload (a). C needs nothing from the body.
-- **C validates the call** before anything else, and answers `400 malformed` (or
-  `400 unsupported-version`) without forwarding when: `x-codev-peer-request-id` is not a UUID in
-  canonical lower-case form (`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`);
-  `x-codev-peer-kind` is not one of the two kinds; `x-codev-peer-version` is not a version C
-  relays; `x-codev-peer-to` names S itself [r7]; or the call carries a `Content-Encoding` header
-  of any value, so that "the bytes" means one thing for the size cap and the hash [r9]. R
-  validates the request id and kind again from the statement.
-- **The payload is opaque to C** and at most 102 400 bytes (d). C refuses a larger one with
-  `413 too-large` without forwarding it.
-- C authenticates S by its key on every call (how it makes that cheap is C's choice), checks that
-  `x-codev-peer-to` is another Tower of S's account, applies its limits, builds the statement from
-  its own records, forwards once, and returns R's answer. **C never retries a forward and never
-  queues one.** One relay call is one forward attempt at most.
+- **The payload is opaque to C** and at most 102 400 bytes (d).
+- **C's checks, in this order** [r2-A]. The first that fails is the answer, and nothing is
+  forwarded. S treats these answers differently (section 6), so the order is part of the contract.
+
+  | Step | C checks | Answer if not |
+  |---|---|---|
+  | 1 | The key authenticates (on every call; how C makes that cheap is C's choice). C tells a caller without a valid key nothing about its headers | `401 unauthenticated` |
+  | 2 | The headers are valid: `x-codev-peer-request-id` is a UUID in canonical lower-case form (`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`); `x-codev-peer-kind` is one of the two kinds; `x-codev-peer-to` does not name S itself [r7]; and the call carries no `Content-Encoding` header of any value, so that "the bytes" means one thing for the size cap and the hash [r9]. And `x-codev-peer-version` is a version C relays | `400 malformed`; for the version, `400 unsupported-version` |
+  | 3 | The payload is at most 102 400 bytes, from `Content-Length` and again while reading | `413 too-large` |
+  | 4 | The per-Tower limit (message calls only; section 7) | `429 rate-limited` |
+  | 5 | `x-codev-peer-to` is another Tower of S's account | `404 unknown-tower` |
+  | 6 | The per-pair limit for the kind (section 7) | `429 rate-limited` |
+  | 7 | R has a live session | `503 tower-offline` |
+  | 8 | That session stated this version | `409 peer-unsupported` |
+  | 9 | C can build a statement whose every field fits its rule (section 5) | `500 cloud-error` |
+  | 10 | Forward once, and return R's answer | R's answer, `502 tower-error` or `504 no-answer` |
+
+  R validates the request id and kind again from the statement.
+- **C never retries a forward and never queues one.** One relay call is one forward attempt at
+  most.
 - **C waits at most 15 000 ms for R's complete answer** (e). With no complete answer by then, or if
   the stream dies before a complete answer, C answers `504 no-answer`. A session that is gone
   before anything is sent is `503 tower-offline` [r8].
@@ -569,12 +577,30 @@ uses the exact bytes:
 | `toTowerId`, `fromTowerId`, `fromOwnerId` | String of 1 to 64 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `-` |
 | `fromTowerSlug` | String matching `^[a-z0-9][a-z0-9-]{0,62}$`. S's slug at the moment of issue |
 | `fromOwnerHandle` | `null`, or a string matching `^[a-z][a-z0-9-]{0,62}$`. Always `null` until accounts have handles (stage 3) |
-| `fromOwnerEmail` | String of 1 to 254 bytes as UTF-8, containing none of the code points Decision 7 removes from a body. Inside the base64url bytes, so a non-ASCII address is never a raw header value (b) |
+| `fromOwnerEmail` | String of 1 to 254 bytes as UTF-8, containing none of the **excluded code points** listed below the table [r2-C]. Inside the base64url bytes, so a non-ASCII address is never a raw header value (b) |
 | `sameOwner` | JSON boolean. Always `true` in stage 2; a stage 2 Tower answers `false` with `no-grant` (below) |
 | `requestId` | String, a UUID in canonical lower-case form, copied from S's validated header |
 | `issuedAt` | JSON integer, epoch ms, 1 to 2^53 − 1. When C issued the statement |
 | `statementId` | String of exactly 22 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `-`, `_`: the base64url of 16 random bytes, new for every statement, including two for one message |
 | `payloadSha256` | String of exactly 64 characters from `0`–`9`, `a`–`f`: the SHA-256 of exactly the bytes C forwards |
+
+**The excluded code points** for `fromOwnerEmail` [r2-C]. The list is fixed by this contract and
+does not follow a Unicode version. It is the list the approved spec's Decision 7 removes from a
+remote body, plus the four Decision 7 keeps or converts (tab, line feed, U+2028, U+2029), because
+this value reaches a frame header in stage 3 and a header must stay on one line:
+
+- U+0000 to U+001F, all of them, tab (U+0009) and line feed (U+000A) included;
+- U+007F to U+009F (DEL and the C1 controls);
+- U+00AD (soft hyphen), U+061C (Arabic letter mark), U+180E (Mongolian vowel separator);
+- U+200B to U+200F (zero-width space, non-joiner, joiner, and the two direction marks);
+- U+2028 (line separator) and U+2029 (paragraph separator);
+- U+202A to U+202E (the embedding and override controls);
+- U+2060 to U+2064 (word joiner and the invisible operators);
+- U+2066 to U+2069 (the isolate controls);
+- U+FEFF (byte-order mark, zero-width no-break space).
+
+The shared vectors (section 11) carry an email containing one code point from each line, each
+expected `not-verified`.
 
 - Every field comes from C's own records or from C itself, except `requestId` and `kind`, copied
   from S's validated headers, and `payloadSha256`, computed by C.
@@ -649,8 +675,9 @@ answer; any other status is C's.
 | `addresses` | array | with `answered` | Discovery results (below) |
 | `truncated` | boolean | with `answered` | `true` when R trimmed `addresses` to fit the 65 536-byte answer |
 
-- **What C checks of R's answer** [r4]: the status is 200, the content type is `application/json`,
-  the body is at most 65 536 bytes, and `x-codev-peer-outcome` is one of R's five outcomes. C does
+- **What C checks of R's answer** [r4]: the status is 200, the media type of `Content-Type` is
+  `application/json`, compared without its parameters, so `application/json; charset=utf-8`
+  passes [r2-D], the body is at most 65 536 bytes, and `x-codev-peer-outcome` is one of R's five outcomes. C does
   not parse the body. If any check fails, C answers `502 tower-error`; otherwise it passes the
   status, the two headers and the body through unchanged.
 - **S validates the shape** of every answer. A 200 whose body does not fit this shape, or whose
@@ -747,6 +774,11 @@ the next back-off interval if it does not, then retries the same row first, keep
   reconnect). Five in a row for one peer means the two sides disagree about the contract. S keeps
   retrying at the capped interval, and shows the peer as "not verifying" in `afx peer list`, the
   Peers panel and its record, until a message to that peer gets any other answer.
+- **A run of `cloud-error`** [r2-s] (Departures, G15). C answers `500 cloud-error` when a record it
+  holds does not fit the statement rules, which lasts until someone fixes that record. Five in a row
+  for one peer: S keeps retrying at the capped interval, and shows the peer as "cloud error" in
+  `afx peer list`, the Peers panel and its record, until a message to that peer gets any other
+  answer.
 - **A wrong clock** (Decision 3; Departures, G12). A `clock-skew` answer marks that peer "clock out
   of range" at S, in the same three places, until a later message to it gets any other answer. At
   R, while any relayed request in the last 10 minutes was refused as `clock-skew`, `afx peer list`,
@@ -765,10 +797,14 @@ the next back-off interval if it does not, then retries the same row first, keep
 
 The sizes and times are protocol constants (above), not limits C sets.
 
-- **What counts** [r11]. A call counts once it passes authentication, whatever its outcome
-  (`tower-offline` and `unknown-tower` included). A retry is a call like any other and counts, and
-  so does a call whose answer is `not-verified`. S's one-call-per-peer rule and its back-off keep
-  retries few.
+- **What counts** [r11] [r2-B]. A call counts against the per-Tower limit once it authenticates
+  (step 1 of section 4), and against the per-pair limit only once it passes the recipient check
+  (step 5), whatever its outcome after that (`tower-offline` included). So `unknown-tower` counts
+  against the per-Tower limit and never touches a per-pair counter: C keeps per-pair counters only
+  for pairs within one account, and a Tower sending made-up recipient ids cannot grow them. A call
+  whose `x-codev-peer-kind` is not valid counts as a message. A retry is a call like any other and
+  counts, and so does a call whose answer is `not-verified`. S's one-call-per-peer rule and its
+  back-off keep retries few.
 - **Calls with a bad key** are limited by C for its own protection; the number is C's and not part
   of the contract [r16]. A Tower with a bad key may therefore get `429` rather than `401` once that
   limit trips.
@@ -879,7 +915,7 @@ spec at the gate adopts them, except where the owner rules otherwise.
 | C3 | Held at the sender: offline, cloud unreachable, or not verified; "if no answer comes back" the row stays held (Decision 5) | A named outcome `no-answer`, distinct from `tower-offline`, from a cloud relay timeout of 15 seconds; both held at the sender. R answers within 5 seconds | (e) "Online" is soft: a vanished peer looks online for about 135 seconds, and a relay to it would otherwise hang |
 | C4 | "A refusal for rate is never retried automatically by the sending Tower; the sender is told, and decides" (Decision 3) | Kept for a fresh send whose sender is still waiting. For mail already held at the sender, a rate-limited answer **from either source** (the cloud's `429`, or `rate-limited` in R's answer) leaves the row held and pauses that peer's queue for `retryAfterSec`, or the next back-off interval when there is none, keeping the order. R sends `retryAfterSec` when its per-peer minute limit tripped | After an outage a backlog of up to 50 held messages is drained in one go. At 30 a minute per pair at the cloud, and 30 a minute per peer at R, messages 31 to 50 would otherwise end refused, against "accepted exactly once when the route returns" |
 | C5 | "Every relay attempt" is recorded at the cloud; "every inbound decision" and "every outbound attempt" at the Towers (Decision 3) | Rate-limited attempts, not-verified requests and unauthenticated calls are recorded as one counted row per sender, reason and minute. The cloud counts them in memory and writes once a minute, so a deploy or crash can lose up to a minute of flood counts (see also K1) | (h) Otherwise the record is what a flood fills |
-| C6 | Cloud limits "per sending Tower and per pair", with a number only per Tower (Decision 3) | Per pair: 30 messages a minute. The 60 a minute counts message calls only; queries are limited per pair only; a call counts once authenticated, whatever its outcome, retries and not-verified included. The listing and switch-state routes: 30 a minute per Tower each. The limit on calls with a bad key is the cloud's own and not in the contract (K3) | (h) [r10] [r11] The numbers were missing |
+| C6 | Cloud limits "per sending Tower and per pair", with a number only per Tower (Decision 3) | Per pair: 30 messages a minute. The 60 a minute counts message calls only; queries are limited per pair only; a call counts against the per-Tower limit once authenticated and against the per-pair limit only once its recipient is another Tower of the account, so `unknown-tower` never touches a per-pair counter; a call with an invalid kind counts as a message; retries and not-verified included. The listing and switch-state routes: 30 a minute per Tower each. The limit on calls with a bad key is the cloud's own and not in the contract (K3) | (h) [r10] [r11] [r2-B] The numbers were missing |
 | C7 | `--raw`, `--interrupt`, `--no-enter`, `--delay`: refused by the sending Tower; "the receiving Tower refuses them again" (Decision 5) | The sending Tower refuses them. The payload has no field that can ask for them, and R acts on no field it does not know, so R has nothing to refuse | The intent, that R never honours them, holds by construction; a field R would only ever refuse adds nothing |
 | C8 | "A peer with no grant gets the same answer as a Tower that does not exist" (Decision 6); full reasons between my own Towers (Decision 5 and the walkthrough) | Between my own Towers, a discovery query without a grant is refused with `no-grant` and the command to add one. The identical answer stays for other owners, in stage 3 | The two decisions disagree for own Towers; this follows Decision 5 and the walkthrough |
 | C9 | Front door only: a refusal reason, and rules for grants in such a workspace (Decisions 4, 5, 10) | Not built, and no such refusal exists | The owner cut the front-door-only setting at stage 1's plan approval (decision main-31); nothing exists for stage 2 to interact with |
@@ -907,6 +943,7 @@ spec at the gate adopts them, except where the owner rules otherwise.
 | G12 | A wrong clock must show "in `afx peer list` and in its record, and the sender of one of my own Towers is told the reason" (Decision 3), but nothing said how | R: while any relayed request in the last 10 minutes was refused as `clock-skew`, `afx peer list`, the Peers panel and the record say this Tower's clock may be out of range. S: a `clock-skew` answer marks that peer "clock out of range" in the same three places until a later message to it gets any other answer. Mirrors G10 |
 | G13 | Which answers resolve the sender's row | Contract section 6, "How S resolves its row": `delivered` and `held` at R both end it as accepted; `duplicate: true` resolves it as the state it reports |
 | G14 | The order of the sending Tower's own refusals when several apply | Contract section 4: the address as text, then remote messaging off, not connected, not registered, no relay, an option, too large, unknown Tower, the builder rule, the cap on waiting mail |
+| G15 | A cloud that cannot build a valid statement for a peer (`500 cloud-error`) fails until someone fixes a record, and the sender would retry silently for 30 days | After five in a row for one peer, the peer is shown as "cloud error" in `afx peer list`, the Peers panel and the record. Mirrors G10 and G12 [r2-s] |
 
 ### Facts that differ from the approved spec's description of today, with no design change
 
@@ -1070,9 +1107,15 @@ Added by this spec, all against the stand-in:
   answered `held`, `busy` within 5 seconds and delivered once the lock is free.
 - **A run of `not-verified`.** The stand-in MACs with a wrong secret: after five attempts the peer
   shows as "not verifying"; once the stand-in is fixed, the next retry delivers and the mark clears.
+- **A run of `cloud-error` (G15).** The stand-in answers `500 cloud-error` for one peer: the message
+  stays held, after five attempts the peer shows as "cloud error" in `afx peer list`, the Peers panel
+  and the record; once the stand-in answers normally, the next retry delivers and the mark clears.
+- **The stand-in's order of checks.** For each adjacent pair of steps in contract section 4's table,
+  a call that fails both gets the earlier step's answer; `unknown-tower` leaves the stand-in's
+  per-pair counters unchanged.
 - **The Peers panel and held-mail indicator**, rendered in a browser with Playwright: the peer list,
-  the switch state, a peer that is not verifying, a peer whose clock is out of range, and the
-  three counts.
+  the switch state, a peer that is not verifying, a peer whose clock is out of range, a peer shown
+  as "cloud error", and the three counts.
 - **Secrets and bodies.** After a full walkthrough: neither Tower's `global.db` contains the session
   secret, any statement or any MAC (the mailbox holds bodies there by design); and neither Tower's
   logs, `cloud-config.json` nor records contain the secret, a statement, a MAC or any body text.

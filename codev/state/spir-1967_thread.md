@@ -65,3 +65,10 @@
   - OQ1 now states the cost if codev-cloud#22 slips (PR merged and inert, builder stopped, parked at
     verify-approval, resume with `afx spawn 1967 --resume`; the worktree in the meantime is the
     owner's call).
+- Cloud architect confirmed revision 2 (codev-cloud#22 comment 7174920555; vector reproduces there).
+  Revision 3 takes their four corrections and one suggestion: C's ten-step order of checks as a
+  table in section 4 (401 before header validation, so a keyless caller learns nothing); per-pair
+  counters only after the recipient check, so `unknown-tower` cannot grow them, and an invalid kind
+  counts as a message; the email rule's excluded code points written out in the contract (Decision
+  7's list plus tab, LF, U+2028, U+2029); media-type-only check of R's answer; a run of
+  `500 cloud-error` shown like not-verified (G15).
