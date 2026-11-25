@@ -19,6 +19,7 @@ import { init } from '../commands/init.js';
 import { update, type UpdateResult } from '../commands/update.js';
 import { HOT_BLOCK_BEGIN, ROOT_DOCS, syncHotContextBlock, withEmptyHotBlock } from '../lib/managed-block.js';
 import { hashRootDocForm, PROJECT_NAME_PLACEHOLDER, rootDocHashForm } from '../lib/scaffold.js';
+import { getTemplatesDir } from '../lib/templates.js';
 import { SHIPPED_ROOT_DOC_HASHES } from '../lib/shipped-root-doc-hashes.js';
 
 // init shells out to `git init` and `codev doctor`; neither bears on the files compared here.
@@ -55,11 +56,23 @@ const VERSIONS = ['v1.1.0', 'v3.1.5', 'v3.3.4'] as const;
 const PRE_BLOCK_VERSIONS = ['v1.1.0', 'v3.1.5'] as const;
 type Doc = (typeof ROOT_DOCS)[number];
 
-/** A doc as `init` of `version` wrote it for `projectName`. */
+/**
+ * A doc as `init` of `version` wrote it for `projectName`. Read with LF line endings, as git
+ * stores and the release shipped it: a Windows checkout turns the fixture into CRLF.
+ */
 function shipped(version: string, doc: Doc, projectName = 'fresh'): string {
-  const template = fs.readFileSync(path.join(FIXTURES, `${version}.${doc}.template`), 'utf-8');
+  const template = fs.readFileSync(path.join(FIXTURES, `${version}.${doc}.template`), 'utf-8').replace(/\r\n/g, '\n');
   return template.split(PROJECT_NAME_PLACEHOLDER).join(projectName);
 }
+
+/** The template update writes as `.codev-new`: the package skeleton's, under `projectName`. */
+function packageTemplate(doc: Doc, projectName: string): string {
+  const template = fs.readFileSync(path.join(getTemplatesDir(), 'templates', doc), 'utf-8');
+  return template.split(PROJECT_NAME_PLACEHOLDER).join(projectName);
+}
+
+/** A doc's first line, in either line ending. */
+const firstLine = (doc: string): string => doc.split(/\r?\n/, 1)[0];
 
 function currentTemplate(templatesDir: string, doc: Doc): string {
   return fs.readFileSync(path.join(templatesDir, doc), 'utf-8');
@@ -155,7 +168,7 @@ describe('issue #1985 — codev update on root docs from an older release', () =
     expect(result.updated).toEqual(['AGENTS.md']);
     // Only the managed block may change (a pre-block doc gets one); everything else is kept.
     expect(withEmptyHotBlock(read('CLAUDE.md'))).toBe(withEmptyHotBlock(edited));
-    expect(read('CLAUDE.md.codev-new')).toBe(fresh['CLAUDE.md']);
+    expect(read('CLAUDE.md.codev-new')).toBe(packageTemplate('CLAUDE.md', 'fresh'));
     expect(read('AGENTS.md')).toBe(fresh['AGENTS.md']);
   });
 
@@ -203,14 +216,14 @@ describe('issue #1985 — codev update on root docs from an older release', () =
     expect(result.updated).toEqual(['CLAUDE.md', 'AGENTS.md']);
     expect(codevNewFiles(projectDir)).toEqual([]);
     expect(ROOT_DOCS.map(read)).toEqual(expected);
-    expect(read('CLAUDE.md').split('\n', 1)[0]).toBe('# legacy app - v2 - Claude Code Instructions');
+    expect(firstLine(read('CLAUDE.md'))).toBe('# legacy app - v2 - Claude Code Instructions');
   });
 
   it('a "$" in the project name is written literally, by init and by a replacement', async () => {
     const name = 'cash$&flow';
     const named = await initProject(name);
     const heading = `# ${name} - Claude Code Instructions`;
-    expect(fs.readFileSync(path.join(named, 'CLAUDE.md'), 'utf-8').split('\n', 1)[0]).toBe(heading);
+    expect(firstLine(fs.readFileSync(path.join(named, 'CLAUDE.md'), 'utf-8'))).toBe(heading);
     process.chdir(projectDir);
     write('CLAUDE.md', shipped('v1.1.0', 'CLAUDE.md', name));
 
