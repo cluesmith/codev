@@ -1,0 +1,903 @@
+{
+  "at": "2026-11-24T23:48:21.429Z",
+  "serviceWorkers": [
+    {
+      "at": 2474,
+      "url": "https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765"
+    },
+    {
+      "at": 6790,
+      "url": "https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765"
+    },
+    {
+      "at": 103614,
+      "url": "https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765"
+    },
+    {
+      "at": 153139,
+      "url": "https://0to2k6qplb09mpr0fnaka4a4n0rr6kh55enhlsvr0fsdvm7an03d.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765"
+    }
+  ],
+  "observations": [
+    {
+      "label": "the built-in Markdown preview",
+      "rendered": false,
+      "existing": [],
+      "openedAt": 4933,
+      "observedAt": 54322,
+      "webviews": [
+        {
+          "id": "1436c033-a43c-4465-b487-0440a8c9940d",
+          "extensionId": "vscode.markdown-language-features",
+          "purpose": "",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "loading",
+              "title": "",
+              "bodyClass": null,
+              "rootChildren": null,
+              "workView": false,
+              "markdownBody": false,
+              "textLength": 0,
+              "text": "",
+              "scripts": [
+                "(inline)",
+                "markdown-language-features/media/pre.js"
+              ],
+              "stylesheets": [],
+              "resources": []
+            }
+          ]
+        }
+      ],
+      "console": [
+        {
+          "at": 6311,
+          "type": "warning",
+          "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+          "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+          "worker": null
+        }
+      ],
+      "errors": [
+        {
+          "at": 7120,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7120,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7122,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7122,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7122,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7122,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7122,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7122,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 7123,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        }
+      ],
+      "requests": [
+        {
+          "n": 184,
+          "at": 6318,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/index.html",
+          "type": "document",
+          "frame": "/…/blank",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 6730
+        },
+        {
+          "n": 186,
+          "at": 6792,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/service-worker.js",
+          "type": "script",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 6970
+        },
+        {
+          "n": 187,
+          "at": 6975,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 7115
+        },
+        {
+          "n": 188,
+          "at": 7117,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/pre.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 189,
+          "at": 7117,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/extensions/github/markdown.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 190,
+          "at": 7118,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/markdown.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 191,
+          "at": 7118,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/highlight.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 192,
+          "at": 7118,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-math/notebook-out/katex.min.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 193,
+          "at": 7118,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-math/preview-styles/index.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 194,
+          "at": 7118,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/index.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 195,
+          "at": 7118,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/index.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        }
+      ]
+    },
+    {
+      "label": "the Codev contextual panel",
+      "rendered": false,
+      "existing": [
+        "0262891b-f1ba-4038-94d8-1e6f98b46daf"
+      ],
+      "openedAt": 54366,
+      "observedAt": 101753,
+      "webviews": [
+        {
+          "id": "0262891b-f1ba-4038-94d8-1e6f98b46daf",
+          "extensionId": "cluesmith.codev-vscode",
+          "purpose": "webviewView",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "loading",
+              "title": "Codev",
+              "bodyClass": "vscode-dark",
+              "rootChildren": 0,
+              "workView": false,
+              "markdownBody": false,
+              "textLength": 0,
+              "text": "",
+              "scripts": [
+                "(inline)",
+                "dist/webview/contextual-panel.js"
+              ],
+              "stylesheets": [
+                {
+                  "href": "dist/webview/contextual-panel.css",
+                  "loaded": false
+                }
+              ],
+              "resources": []
+            }
+          ]
+        }
+      ],
+      "console": [],
+      "errors": [],
+      "requests": []
+    },
+    {
+      "label": "the Codev Markdown preview",
+      "rendered": false,
+      "existing": [],
+      "openedAt": 101841,
+      "observedAt": 151983,
+      "webviews": [
+        {
+          "id": "85854ac7-e45d-4ba1-b274-d823f72ce3dd",
+          "extensionId": "cluesmith.codev-vscode",
+          "purpose": "",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "loading",
+              "title": "Codev Markdown Preview",
+              "bodyClass": "vscode-dark",
+              "rootChildren": 0,
+              "workView": false,
+              "markdownBody": false,
+              "textLength": 0,
+              "text": "",
+              "scripts": [
+                "(inline)",
+                "dist/webview/markdown-preview.js"
+              ],
+              "stylesheets": [
+                {
+                  "href": "dist/webview/markdown-preview.css",
+                  "loaded": false
+                }
+              ],
+              "resources": []
+            }
+          ]
+        }
+      ],
+      "console": [
+        {
+          "at": 103306,
+          "type": "warning",
+          "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+          "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+          "worker": null
+        }
+      ],
+      "errors": [
+        {
+          "at": 103952,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 103952,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 103952,
+          "kind": "weberror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        },
+        {
+          "at": 103952,
+          "kind": "pageerror",
+          "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+        }
+      ],
+      "requests": [
+        {
+          "n": 197,
+          "at": 103311,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/index.html",
+          "type": "document",
+          "frame": "/…/blank",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 103589
+        },
+        {
+          "n": 198,
+          "at": 103615,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/service-worker.js",
+          "type": "script",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 103777
+        },
+        {
+          "n": 199,
+          "at": 103782,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 103943
+        },
+        {
+          "n": 200,
+          "at": 103946,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/dist/webview/markdown-preview.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        },
+        {
+          "n": 201,
+          "at": 103946,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/dist/webview/markdown-preview.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "pending"
+        }
+      ]
+    },
+    {
+      "label": "the Work panel",
+      "rendered": true,
+      "existing": [],
+      "openedAt": 152027,
+      "observedAt": 157066,
+      "webviews": [
+        {
+          "id": "0481a337-8847-43b7-8450-62724bb5933c",
+          "extensionId": "cluesmith.codev-vscode",
+          "purpose": "",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "complete",
+              "title": "Work",
+              "bodyClass": "vscode-dark",
+              "rootChildren": 1,
+              "workView": true,
+              "markdownBody": false,
+              "textLength": 508,
+              "text": "Work\n+ Shell\nRefresh\nBUILDERS\nIssue\tTitle\tState\tProgress\t\n#101 · main\ngated-spec\nBlocked: spec revie",
+              "scripts": [
+                "(inline)",
+                "(inline)"
+              ],
+              "stylesheets": [],
+              "resources": []
+            }
+          ]
+        }
+      ],
+      "console": [
+        {
+          "at": 152726,
+          "type": "warning",
+          "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+          "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+          "worker": null
+        }
+      ],
+      "errors": [],
+      "requests": [
+        {
+          "n": 202,
+          "at": 152729,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/index.html",
+          "type": "document",
+          "frame": "/…/blank",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 153113
+        },
+        {
+          "n": 203,
+          "at": 153139,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/service-worker.js",
+          "type": "script",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 153346
+        },
+        {
+          "n": 204,
+          "at": 153353,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 153520
+        }
+      ]
+    }
+  ],
+  "allConsole": [
+    {
+      "at": 730,
+      "type": "log",
+      "text": "%c INFO color: #33f Resolving connection token (127.0.0.1:18765)...",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 731,
+      "type": "log",
+      "text": "%c INFO color: #33f Resolved connection token (127.0.0.1:18765) after 2 ms",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 735,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-Management-a6e1f98c-aba5-46e0-8131-a47af396ffb7)...",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 738,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-Management-a6e1f98c-aba5-46e0-8131-a47af396ffb7) was successful after 3 ms.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 880,
+      "type": "warning",
+      "text": "The web worker extension host is started in a same-origin iframe!",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 882,
+      "type": "log",
+      "text": "%c INFO color: #33f Updating additional builtin extensions cache",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 882,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-ExtensionHost-77706b1c-a87f-40ea-8588-8a2a3248aafa)...",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 888,
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/node_modules/vsda/rust/web/vsda_bg.wasm",
+      "worker": null
+    },
+    {
+      "at": 888,
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/node_modules/vsda/rust/web/vsda.js",
+      "worker": null
+    },
+    {
+      "at": 900,
+      "type": "warning",
+      "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html?&vscodeWebWorkerExtHostId=0cb935a2-0262-4a33-8181-7b040dee60c3",
+      "worker": null
+    },
+    {
+      "at": 907,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-ExtensionHost-77706b1c-a87f-40ea-8588-8a2a3248aafa) was successful after 24 ms.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 948,
+      "type": "log",
+      "text": "%c INFO color: #33f [reconnection-grace-time] Client received grace time from server: 10800000ms (10800s)",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 960,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost:remote] Initializing (remoteAuthority=127.0.0.1:18765)",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 962,
+      "type": "log",
+      "text": "%c INFO color: #33f [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1564,
+      "type": "log",
+      "text": "%c INFO color: #33f [DefaultAccount] Authentication provider is not available. {id: none, name: None, enterprise: false}",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1887,
+      "type": "warning",
+      "text": "%c WARN color: #993 Authentication provider none was not declared in the Extension Manifest.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1887,
+      "type": "warning",
+      "text": "%c WARN color: #993 Authentication provider none-enterprise was not declared in the Extension Manifest.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1951,
+      "type": "warning",
+      "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2641,
+      "type": "log",
+      "text": "Found unexpected service worker version. Found: 4. Expected: 6",
+      "source": "https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0262891b-f1ba-4038-94d8-1e6f98b46daf&parentId=1&origin=c5c82f14-9ad4-442c-a751-6958a052e15e&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765&purpose=webviewView",
+      "worker": null
+    },
+    {
+      "at": 2641,
+      "type": "log",
+      "text": "Attempting to reload service worker",
+      "source": "https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0262891b-f1ba-4038-94d8-1e6f98b46daf&parentId=1&origin=c5c82f14-9ad4-442c-a751-6958a052e15e&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765&purpose=webviewView",
+      "worker": null
+    },
+    {
+      "at": 4172,
+      "type": "error",
+      "text": "Extension `vscode.typescript-language-features` is already registered",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4199,
+      "type": "error",
+      "text": "%c  ERR color: #f33 [Extension Host] Extension `vscode.typescript-language-features` is already registered",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4199,
+      "type": "error",
+      "text": "%c[Extension Host] %cExtension `vscode.typescript-language-features` is already registered color: blue color: ",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4217,
+      "type": "error",
+      "text": "%c  ERR color: #f33 [Extension Host] Extension `vscode.typescript-language-features` is already registered",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4217,
+      "type": "error",
+      "text": "%c[Extension Host] %cExtension `vscode.typescript-language-features` is already registered color: blue color: ",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 5973,
+      "type": "log",
+      "text": "%c INFO color: #33f [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 6311,
+      "type": "warning",
+      "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 6972,
+      "type": "log",
+      "text": "Found unexpected service worker version. Found: 4. Expected: 6",
+      "source": "https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765",
+      "worker": null
+    },
+    {
+      "at": 6972,
+      "type": "log",
+      "text": "Attempting to reload service worker",
+      "source": "https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765",
+      "worker": null
+    },
+    {
+      "at": 103306,
+      "type": "warning",
+      "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 103778,
+      "type": "log",
+      "text": "Found unexpected service worker version. Found: 4. Expected: 6",
+      "source": "https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765",
+      "worker": null
+    },
+    {
+      "at": 103778,
+      "type": "log",
+      "text": "Attempting to reload service worker",
+      "source": "https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765",
+      "worker": null
+    },
+    {
+      "at": 152726,
+      "type": "warning",
+      "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "source": "http://127.0.0.1:18765/ide/stable-50cad256c2ef6d8d156631d1386f12befae4f5f2/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 153347,
+      "type": "log",
+      "text": "Found unexpected service worker version. Found: 4. Expected: 6",
+      "source": "https://0to2k6qplb09mpr0fnaka4a4n0rr6kh55enhlsvr0fsdvm7an03d.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0481a337-8847-43b7-8450-62724bb5933c&parentId=1&origin=acfa1098-7bb1-4ec7-8a51-bd69bb3748c2&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765",
+      "worker": null
+    },
+    {
+      "at": 153347,
+      "type": "log",
+      "text": "Attempting to reload service worker",
+      "source": "https://0to2k6qplb09mpr0fnaka4a4n0rr6kh55enhlsvr0fsdvm7an03d.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0481a337-8847-43b7-8450-62724bb5933c&parentId=1&origin=acfa1098-7bb1-4ec7-8a51-bd69bb3748c2&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765",
+      "worker": null
+    }
+  ],
+  "allErrors": [
+    {
+      "at": 2874,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0262891b-f1ba-4038-94d8-1e6f98b46daf&parentId=1&origin=c5c82f14-9ad4-442c-a751-6958a052e15e&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765&purpose=webviewView:447:42"
+    },
+    {
+      "at": 2874,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0262891b-f1ba-4038-94d8-1e6f98b46daf&parentId=1&origin=c5c82f14-9ad4-442c-a751-6958a052e15e&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765&purpose=webviewView:447:42"
+    },
+    {
+      "at": 2881,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0262891b-f1ba-4038-94d8-1e6f98b46daf&parentId=1&origin=c5c82f14-9ad4-442c-a751-6958a052e15e&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765&purpose=webviewView:447:42"
+    },
+    {
+      "at": 2881,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://191dt5sb9b29ubfstf36t9rrehbuok295skmo0hmmbs7t0mi3tob.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=0262891b-f1ba-4038-94d8-1e6f98b46daf&parentId=1&origin=c5c82f14-9ad4-442c-a751-6958a052e15e&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765&purpose=webviewView:447:42"
+    },
+    {
+      "at": 7120,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7120,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7122,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7122,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7122,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7122,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7122,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7122,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 7123,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0mukiclmo33f1papiv3e852aiq888e07t333rn61svg6qphj2vfh.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=1436c033-a43c-4465-b487-0440a8c9940d&parentId=1&origin=b19cc2d6-54f9-4fe3-8777-c6fce404ed7c&swVersion=6&extensionId=vscode.markdown-language-features&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 103952,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 103952,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 103952,
+      "kind": "weberror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    },
+    {
+      "at": 103952,
+      "kind": "pageerror",
+      "text": "DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\n    at https://0g8s3u9v2mq495q2f1o5ti7jb60ifs9c9s9i3ris74jmgd6nn7v6.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/index.html?id=85854ac7-e45d-4ba1-b274-d823f72ce3dd&parentId=1&origin=930cce10-b4c4-41df-b9e0-caea6b388e71&swVersion=6&extensionId=cluesmith.codev-vscode&platform=browser&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=http%3A%2F%2F127.0.0.1%3A18765&remoteAuthority=127.0.0.1%3A18765:447:42"
+    }
+  ]
+}

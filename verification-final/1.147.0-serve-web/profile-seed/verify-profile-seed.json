@@ -1,0 +1,23 @@
+{
+  "script": "profile-seed",
+  "at": "2026-11-24T22:54:48.405Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "existing profile, seeded: a new browser profile uses Codev on a build without the Cockpit container (origin/main's activity bar)",
+      "ok": true,
+      "detail": "activity bar [\"Explorer (⇧⌘E)\",\"Search (⇧⌘F)\",\"Source Control (⌃⇧G)\",\"Run and Debug (⇧⌘D)\",\"Extensions (⇧⌘X)\",\"Codev (⌥⌘C)\",\"Accounts\",\"Manage\"]; Codev opened",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/profile-seed-activity-bar.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/profile-seed-01-seeded.png"
+      ],
+      "ms": 10806
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "2 screenshots read"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+2026-11-24T22:21:37.811Z tripwire watching :4100 for pids in /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/pids (+ socket holders under /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/run, /tmp/cckp-d0fe2076, /private/tmp/cckp-d0fe2076)
+2026-11-24T22:21:38.182Z sample 1: tree of 4, no connection on :4100
+2026-11-24T22:22:16.481Z sample 31: tree of 30, no connection on :4100
+2026-11-24T22:23:05.327Z sample 61: tree of 37, no connection on :4100
+2026-11-24T22:23:42.646Z sample 91: tree of 37, no connection on :4100
+2026-11-24T22:24:20.541Z sample 121: tree of 27, no connection on :4100
+2026-11-24T22:24:58.316Z sample 151: tree of 27, no connection on :4100
+2026-11-24T22:25:35.319Z sample 181: tree of 27, no connection on :4100
+2026-11-24T22:26:12.037Z sample 211: tree of 26, no connection on :4100
+2026-11-24T22:26:48.871Z sample 241: tree of 26, no connection on :4100
+2026-11-24T22:27:25.687Z sample 271: tree of 26, no connection on :4100
+2026-11-24T22:28:04.538Z sample 301: tree of 27, no connection on :4100
+2026-11-24T22:28:44.077Z sample 331: tree of 28, no connection on :4100
+2026-11-24T22:29:23.908Z sample 361: tree of 27, no connection on :4100
+2026-11-24T22:30:05.191Z sample 391: tree of 31, no connection on :4100
+2026-11-24T22:30:44.171Z sample 421: tree of 31, no connection on :4100
+2026-11-24T22:31:22.329Z sample 451: tree of 31, no connection on :4100
+2026-11-24T22:31:59.159Z sample 481: tree of 36, no connection on :4100
+2026-11-24T22:32:35.898Z sample 511: tree of 36, no connection on :4100
+2026-11-24T22:33:12.709Z sample 541: tree of 36, no connection on :4100
+2026-11-24T22:33:49.433Z sample 571: tree of 36, no connection on :4100
+2026-11-24T22:34:26.132Z sample 601: tree of 38, no connection on :4100
+2026-11-24T22:35:02.855Z sample 631: tree of 37, no connection on :4100
+2026-11-24T22:35:39.490Z sample 661: tree of 36, no connection on :4100

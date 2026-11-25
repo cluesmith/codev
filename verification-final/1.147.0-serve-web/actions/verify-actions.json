@@ -1,0 +1,230 @@
+{
+  "script": "actions",
+  "at": "2026-11-24T22:35:29.750Z",
+  "ownerPortRequests": [],
+  "popups": [
+    "http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/alpha/.builders/spir-101",
+    "http://localhost:18764/workspace/L3ByaXZhdGUvdmFyL2ZvbGRlcnMvZG4vd3FjcGxuaG41MGJicDJneDE2MDFkbTA0MDAwMGduL1QvY29ja3BpdC1maXh0dXJlcy0zUnBjWVEvYWxwaGE/",
+    "http://127.0.0.1:18799/admin",
+    "http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/beta",
+    "http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/beta",
+    "http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/beta"
+  ],
+  "results": [
+    {
+      "name": "scenario 12: a builder row's menu shows the Agents entries (blocked and waiting rows)",
+      "ok": true,
+      "detail": "blocked-builder-spir: 11 entries; awaiting-builder-spir: 10 entries",
+      "shots": [],
+      "ms": 1378
+    },
+    {
+      "name": "the same builder's menu in the Agents view matches the Cockpit's",
+      "ok": true,
+      "detail": "11 identical entries",
+      "shots": [],
+      "ms": 3544
+    },
+    {
+      "name": "Approve Gate is inline on the blocked row only",
+      "ok": true,
+      "detail": "#101 inline [\"Codev: Approve Gate\"]",
+      "shots": [],
+      "ms": 663
+    },
+    {
+      "name": "builder menu › Codev: Open Builder Terminal",
+      "ok": true,
+      "detail": "{\"tabs\":[\"Codev: #102 second-main, Editor Group 2\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-01-open-builder-terminal.png"
+      ],
+      "ms": 6456
+    },
+    {
+      "name": "builder menu › Codev: View Spec File",
+      "ok": true,
+      "detail": "{\"tabs\":[\"101-gated-spec.md, Editor Group 2\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-02-view-spec.png"
+      ],
+      "ms": 5955
+    },
+    {
+      "name": "builder menu › Codev: View Plan File",
+      "ok": true,
+      "detail": "{\"notes\":[\"Codev: No plan file for builder 101 yet — the builder hasn't written one.\"]}",
+      "shots": [],
+      "ms": 5884
+    },
+    {
+      "name": "builder menu › Codev: View Review File",
+      "ok": true,
+      "detail": "{\"notes\":[\"Codev: No review file for builder 101 yet — the builder hasn't written one.\"]}",
+      "shots": [],
+      "ms": 36070
+    },
+    {
+      "name": "builder menu › Codev: View Diff",
+      "ok": true,
+      "detail": "{\"tabs\":[\"Reviewing #101 (main ↔ HEAD) (2 files), preview, Editor Group 2\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-03-view-diff.png"
+      ],
+      "ms": 36637
+    },
+    {
+      "name": "builder menu › Codev: Open Worktree in New Window",
+      "ok": true,
+      "detail": "{\"popupUrl\":\"http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/alpha/.builders/spir-101\",\"stub\":[{\"at\":\"2026-11-24T22:31:45.621Z\",\"tool\":\"codev\",\"argv\":[\"--version\"],\"cwd\":\"/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/alpha\",\"caller\":\"vscode\"}]}",
+      "shots": [],
+      "ms": 6156
+    },
+    {
+      "name": "builder menu › Codev: Open Worktree Folder",
+      "ok": true,
+      "detail": "{}",
+      "shots": [],
+      "ms": 5874
+    },
+    {
+      "name": "builder menu › Codev: Run Worktree Setup",
+      "ok": true,
+      "detail": "{\"stub\":[{\"at\":\"2026-11-24T22:31:56.438Z\",\"tool\":\"afx\",\"argv\":[\"setup\",\"101\"],\"cwd\":\"/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/alpha\",\"caller\":\"vscode\"}]}",
+      "shots": [],
+      "ms": 5874
+    },
+    {
+      "name": "builder menu › Codev: Run Dev, then the workspace row offers Stop Dev; then Codev: Stop Dev",
+      "ok": true,
+      "detail": "started Dev: spir-101; row then offered [\"Codev: Stop Dev\",\"Codev: Open Dev URL\"]; stopped",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-04-worktree-dev-running.png"
+      ],
+      "ms": 10229
+    },
+    {
+      "name": "Approve Gate (inline) on #101 relays to its architect",
+      "ok": true,
+      "detail": "dialog \"Approve spec review for #101 — gated-spec?\"; POST /api/send ×1; no porch call; \"Codev: sent to main but held (no-profile) — it will reach them when their prompt is clear. The spec review gate (#101) is NOT approved yet.\"",
+      "shots": [],
+      "ms": 36209
+    },
+    {
+      "name": "workspace row: inline and context entries",
+      "ok": true,
+      "detail": "inline [\"Codev: Spawn Builder\",\"Codev: New Shell\",\"Codev: Add Architect\"]; menu [\"Codev: Spawn Builder\",\"Codev: New Shell\",\"Codev: Add Architect\",\"Codev: Open Web Interface\",\"Codev: Start Dev (this workspace)\",\"Codev: Open Dev URL\"]",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-05-workspace-row.png"
+      ],
+      "ms": 1086
+    },
+    {
+      "name": "workspace row › Spawn Builder (inline) runs `afx spawn` through the stub",
+      "ok": true,
+      "detail": "afx spawn 4242 --protocol spir in /private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/alpha",
+      "shots": [],
+      "ms": 36343
+    },
+    {
+      "name": "workspace row › New Shell (inline)",
+      "ok": true,
+      "detail": "{\"tabs\":[\"Codev: Shell #3, Editor Group 2\"],\"terminals\":[\"Shell 1\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-06-new-shell.png"
+      ],
+      "ms": 35442
+    },
+    {
+      "name": "workspace row › Add Architect (inline) asks main",
+      "ok": true,
+      "detail": "{\"notes\":[\"Codev: Asked main to add a 'ops' architect.\"]}",
+      "shots": [],
+      "ms": 5080
+    },
+    {
+      "name": "workspace row › Open Web Interface opens the isolated Tower's dashboard",
+      "ok": true,
+      "detail": "http://localhost:18764/workspace/L3ByaXZhdGUvdmFyL2ZvbGRlcnMvZG4vd3FjcGxuaG41MGJicDJneDE2MDFkbTA0MDAwMGduL1QvY29ja3BpdC1maXh0dXJlcy0zUnBjWVEvYWxwaGE/",
+      "shots": [],
+      "ms": 33084
+    },
+    {
+      "name": "workspace row › Start Dev, then Stop Dev replaces it, then Stop Dev",
+      "ok": true,
+      "detail": "dev Dev: main; menu while running [\"Codev: Stop Dev (this workspace)\",\"Codev: Open Dev URL\"]; after stop [\"Codev: Start Dev (this workspace)\",\"Codev: Open Dev URL\"]",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-07-workspace-dev-running.png"
+      ],
+      "ms": 10124
+    },
+    {
+      "name": "workspace row › Open Dev URL lists both URLs and opens the picked one",
+      "ok": true,
+      "detail": "QuickPick [\"App\",\"Admin\"]; opened http://127.0.0.1:18799/admin",
+      "shots": [],
+      "ms": 2890
+    },
+    {
+      "name": "Remove Architect is offered on siblings only; a childless sibling's row goes with it",
+      "ok": true,
+      "detail": "MAIN menu []; QA menu [\"Codev: Remove Architect\"]; dialog \"Remove architect 'qa'?The terminal will be closed and the architect will be deregistered. Any in-flight builders spawned by 'qa' will fall back to 'main' for messaging.\"; architects now [\"main\",\"web\"]; QA row gone",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-08-qa-added.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-09-qa-removed.png"
+      ],
+      "ms": 11206
+    },
+    {
+      "name": "Remove Architect on a sibling with a builder: the header stays as the builder's owner",
+      "ok": true,
+      "detail": "dialog \"Remove architect 'web'?The terminal will be closed and the architect will be deregistered. Any in-flight builders spawned by 'web' will fall back to 'main' for messaging.\"; architects now [\"main\"]; WEB still holds \"[specify] #103 web-work agent exited [13m]\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-10-web-removed.png"
+      ],
+      "ms": 6393
+    },
+    {
+      "name": "another workspace's rows carry no builder or architect actions",
+      "ok": true,
+      "detail": "no Codev entry on beta's MAIN or #201",
+      "shots": [],
+      "ms": 3057
+    },
+    {
+      "name": "scenario 12: another workspace's architect row opens that workspace's window",
+      "ok": true,
+      "detail": "http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/beta",
+      "shots": [],
+      "ms": 533
+    },
+    {
+      "name": "scenario 12: another workspace's builder row opens that workspace's window",
+      "ok": true,
+      "detail": "http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/beta",
+      "shots": [],
+      "ms": 499
+    },
+    {
+      "name": "another workspace row: inline Open opens it, as in the Tower view",
+      "ok": true,
+      "detail": "inline [\"Codev: Open Workspace\",\"Codev: Deactivate Workspace\"]; opened http://127.0.0.1:18765/?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-3RpcYQ/beta",
+      "shots": [],
+      "ms": 1580
+    },
+    {
+      "name": "another workspace row: inline Deactivate moves it to Dormant",
+      "ok": true,
+      "detail": "dialog \"Deactivate “gamma”? This stops its architect and any running terminals.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/actions-11-gamma-dormant.png"
+      ],
+      "ms": 7582
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "11 screenshots read"
+    }
+  ]
+}

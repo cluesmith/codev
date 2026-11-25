@@ -1,0 +1,41 @@
+{
+  "script": "reconnect",
+  "at": "2026-11-24T22:35:56.184Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "a loaded Cockpit keeps its content while the isolated Tower is down",
+      "ok": true,
+      "detail": "kept \"MAIN (2)\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/reconnect-01-connected.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/reconnect-02-tower-down-loaded.png"
+      ],
+      "ms": 15120
+    },
+    {
+      "name": "a window loaded while Tower is down shows Not connected to Tower",
+      "ok": true,
+      "detail": "row \"Not connected to Tower\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/reconnect-03-not-connected.png"
+      ],
+      "ms": 4373
+    },
+    {
+      "name": "Tower back + the row's Reconnect → the hierarchy returns",
+      "ok": true,
+      "detail": "clicked Reconnect; \"MAIN (0)\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/reconnect-04-reconnected.png"
+      ],
+      "ms": 3131
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "4 screenshots read"
+    }
+  ]
+}

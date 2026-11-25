@@ -1,0 +1,56 @@
+{
+  "script": "webviews",
+  "at": "2026-11-24T23:45:30.899Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "workbench loads on alpha",
+      "ok": true,
+      "detail": "4 frames",
+      "shots": [],
+      "ms": 5494
+    },
+    {
+      "name": "built-in webview: VS Code's own Markdown preview of a fixture .md renders styled content",
+      "ok": true,
+      "detail": "1 webview(s): new vscode.markdown-language-features [active-frame:visible]; content: fake.html complete root=null text=64 scripts=[\"(inline)\",\"markdown-language-features/media/pre.js\",\"markdown-language-features/media/index.js\",\"mermaid-markdown-features/markdown-preview-out/index.js\"] resources=29; stylesheets not loaded: none; webview requests 32: 0 pending, 0 failed; console errors 0: \"%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Failed to read runtime plugin inventory Error: Runtime plugin inventory is unavailable.\\n    at zst._discove\" | \"%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Runtime plugin inventory retry limit reached.\"; page errors 0",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-01-builtin-markdown-preview.png"
+      ],
+      "ms": 4398
+    },
+    {
+      "name": "existing Codev webview: the contextual panel (codev.contextualPanel) renders",
+      "ok": true,
+      "detail": "1 webview(s): existing cluesmith.codev-vscode/webviewView [active-frame:visible]; content: fake.html complete root=1 text=167 scripts=[\"(inline)\",\"dist/webview/contextual-panel.js\"] resources=2; stylesheets not loaded: none; webview requests 0: 0 pending, 0 failed; console errors 0; page errors 0",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-02-codev-contextual-panel.png"
+      ],
+      "ms": 2081
+    },
+    {
+      "name": "existing Codev webview: the Codev Markdown preview (codev.markdownPreview) renders",
+      "ok": true,
+      "detail": "1 webview(s): new cluesmith.codev-vscode [active-frame:visible]; content: fake.html complete root=1 text=64 scripts=[\"(inline)\",\"dist/webview/markdown-preview.js\"] resources=2; stylesheets not loaded: none; webview requests 5: 0 pending, 0 failed; console errors 0; page errors 0",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-03-codev-markdown-preview.png"
+      ],
+      "ms": 4670
+    },
+    {
+      "name": "this PR's Work panel renders",
+      "ok": true,
+      "detail": "1 webview(s): new cluesmith.codev-vscode [active-frame:visible]; content: fake.html complete root=1 text=300 scripts=[\"(inline)\",\"(inline)\"] resources=0; stylesheets not loaded: none; webview requests 3: 0 pending, 0 failed; console errors 0; page errors 0",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-04-work-panel.png"
+      ],
+      "ms": 5053
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "4 screenshots read"
+    }
+  ]
+}

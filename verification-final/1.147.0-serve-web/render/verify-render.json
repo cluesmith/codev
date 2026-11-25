@@ -1,0 +1,59 @@
+{
+  "script": "render",
+  "at": "2026-11-24T22:22:11.631Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "scenario 11: the Cockpit button sits directly below Codev",
+      "ok": true,
+      "detail": "items 5: \"Codev (⌥⌘C) - 1 blocked, 2 waiting on input\", 6: \"Codev Cockpit - 1 blocked, 2 waiting on input\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/render-01-activity-bar.png"
+      ],
+      "ms": 6458
+    },
+    {
+      "name": "scenario 11: the existing Codev container is unchanged",
+      "ok": true,
+      "detail": "contribution identical to origin/main; renders Workspace, Agents, Backlog, Pull Requests, Recently Closed, Status",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/render-02-codev-container.png"
+      ],
+      "ms": 1138
+    },
+    {
+      "name": "scenario 12: hierarchy with N>1, N=1 and N=0 builders across workspaces",
+      "ok": true,
+      "detail": "{\"alpha\":[\"MAIN (2)\",\"  [specify] #101 gated-spec blocked on spec review [<1m]\",\"  [specify] #102 second-main agent exited [<1m]\",\"WEB (1)\",\"  [specify] #103 web-work agent exited [<1m]\",\"Decisions\"],\"beta\":[\"MAIN (1)\",\"  [specify] #201 beta-one agent exited [<1m]\",\"Decisions\"],\"gamma\":[\"MAIN (0)\",\"Decisions\"]}",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/render-03-hierarchy-light.png"
+      ],
+      "ms": 2221
+    },
+    {
+      "name": "the Dormant group",
+      "ok": true,
+      "detail": "Dormant (1): delta",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/render-04-dormant.png"
+      ],
+      "ms": 1005
+    },
+    {
+      "name": "scenario 18 (hierarchy part): dark theme, then a live switch back to light",
+      "ok": true,
+      "detail": "vs-dark then vs; rows kept across the switch",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/render-05-hierarchy-dark.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/render-06-hierarchy-light-again.png"
+      ],
+      "ms": 7642
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "6 screenshots read"
+    }
+  ]
+}

@@ -1,0 +1,174 @@
+{
+  "script": "arrange",
+  "at": "2026-11-24T23:44:54.931Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "fresh profile: the Cockpit button sits directly below Codev",
+      "ok": true,
+      "detail": "items 5: \"Codev (⌥⌘C) - 1 blocked, 2 waiting on input\", 6: \"Codev Cockpit - 1 blocked, 2 waiting on input\"",
+      "shots": [],
+      "ms": 4575
+    },
+    {
+      "name": "scenario 13 setup: editors across four groups, two dirty files, a clean file and two untitled buffers",
+      "ok": true,
+      "detail": "1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1] active \"UNTITLED-ONE kept • Untitled-1, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [arrange-b.txt, Editor Group 2] active \"arrange-b.txt, Editor Group 2\" dirty [arrange-b.txt, Editor Group 2]; 3: [arrange-c.txt, Editor Group 3] active \"arrange-c.txt, Editor Group 3\"; 4: [UNTITLED-TWO kept • Untitled-2, Editor Group 4] active \"UNTITLED-TWO kept • Untitled-2, Editor Group 4\" dirty [UNTITLED-TWO kept • Untitled-2, Editor Group 4]",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-01-before.png"
+      ],
+      "ms": 12723
+    },
+    {
+      "name": "scenario 7 / 9: the first show of the Cockpit arranges main | (Work over Decisions), each active in its group",
+      "ok": true,
+      "detail": "1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, Codev: Architect, Editor Group 1] active \"Codev: Architect, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [arrange-b.txt, Editor Group 2, Work, Editor Group 2] active \"Work, Editor Group 2\" dirty [arrange-b.txt, Editor Group 2]; 3: [arrange-c.txt, Editor Group 3, Decisions, Editor Group 3, UNTITLED-TWO kept • Untitled-2, Editor Group 3] active \"Decisions, Editor Group 3\" dirty [UNTITLED-TWO kept • Untitled-2, Editor Group 3]",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-02-arranged-dark.png"
+      ],
+      "ms": 1108
+    },
+    {
+      "name": "scenario 7: the one-time notice offers Don't arrange automatically; dismissing it changes nothing",
+      "ok": true,
+      "detail": "\"Codev: The editor area was arranged for the Cockpit: the main architect on the left, Work and Decisions on the right. This happens the first time the Cockpit is shown in a window. Codev: Arrange Cockpit arranges it again at any time.\" with [\"Don't arrange automatically\"]; dismissed",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-03-notice.png"
+      ],
+      "ms": 267
+    },
+    {
+      "name": "scenario 13: every pre-existing editor survives the arrange with its unsaved content; the architect is the live session; both panels render",
+      "ok": true,
+      "detail": "editors after: {\"arrange-a.txt\":{\"group\":1,\"dirty\":true,\"line\":\"DIRTY-A alpha note a\"},\"arrange-b.txt\":{\"group\":2,\"dirty\":true,\"line\":\"DIRTY-B alpha note b\"},\"arrange-c.txt\":{\"group\":3,\"dirty\":false,\"line\":\"alpha note c\"},\"UNTITLED-ONE kept\":{\"group\":1,\"dirty\":true,\"line\":\"UNTITLED-ONE kept\"},\"UNTITLED-TWO kept\":{\"group\":3,\"dirty\":true,\"line\":\"UNTITLED-TWO kept\"}}; 1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, Codev: Architect, Editor Group 1] active \"Codev: Architect, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [arrange-b.txt, Editor Group 2, Work, Editor Group 2] active \"Work, Editor Group 2\" dirty [arrange-b.txt, Editor Group 2]; 3: [arrange-c.txt, Editor Group 3, Decisions, Editor Group 3, UNTITLED-TWO kept • Untitled-2, Editor Group 3] active \"Decisions, Editor Group 3\" dirty [UNTITLED-TWO kept • Untitled-2, Editor Group 3]",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-04-editors-kept.png"
+      ],
+      "ms": 3270
+    },
+    {
+      "name": "scenario 13: re-running Arrange Cockpit (title bar, then palette) changes nothing; a typed Decisions draft persists; no notice",
+      "ok": true,
+      "detail": "groups unchanged [{\"tabs\":[\"Welcome, Editor Group 1\",\"arrange-a.txt, Editor Group 1\",\"UNTITLED-ONE kept • Untitled-1, Editor Group 1\",\"Codev: Architect, Editor Group 1\"],\"active\":\"Codev: Architect, Editor Group 1\",\"dirty\":[\"arrange-a.txt, Editor Group 1\",\"UNTITLED-ONE kept • Untitled-1, Editor Group 1\"]},{\"tabs\":[\"arrange-b.txt, Editor Group 2\",\"Work, Editor Group 2\"],\"active\":\"Work, Editor Group 2\",\"dirty\":[\"arrange-b.txt, Editor Group 2\"]},{\"tabs\":[\"arrange-c.txt, Editor Group 3\",\"Decisions, Editor Group 3\",\"UNTITLED-TWO kept • Untitled-2, Editor Group 3\"],\"active\":\"Decisions, Editor Group 3\",\"dirty\":[\"UNTITLED-TWO kept • Untitled-2, Editor Group 3\"]}]; both webviews kept; draft kept",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-05-rerun-draft.png"
+      ],
+      "ms": 8050
+    },
+    {
+      "name": "the architect's 14:00Z ruling: at the split's Work width the view fits and a typical title stays readable (20+ of 44 characters)",
+      "ok": true,
+      "detail": "Work at 473 px: no sideways scroll, a typical 44-character title shows 42 characters, each state on one line, Open buttons end by 450 of 473, hidden .builder-col-elapsed, .builder-col-progress",
+      "shots": [],
+      "ms": 2
+    },
+    {
+      "name": "rendered: the split with a pending decision, in Light Modern and Dark Modern",
+      "ok": true,
+      "detail": "arranged in both themes",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-06-split-vs.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-07-split-vs-dark.png"
+      ],
+      "ms": 7517
+    },
+    {
+      "name": "scenario 7: showing the Cockpit again leaves the editor area alone; the command arranges on demand",
+      "ok": true,
+      "detail": "still one group after re-showing; the command arranged: 1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, Codev: Architect, Editor Group 1, arrange-b.txt, Editor Group 1, arrange-c.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] active \"Codev: Architect, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-08-rearranged.png"
+      ],
+      "ms": 11031
+    },
+    {
+      "name": "the architect terminal moved into the panel comes back to the left group: the same session",
+      "ok": true,
+      "detail": "1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, arrange-c.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1, Codev: Architect, Editor Group 1] active \"Codev: Architect, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"; no new Tower terminal",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-09-from-panel.png"
+      ],
+      "ms": 4574
+    },
+    {
+      "name": "another terminal named like the architect: arrange stops before moving an editor and says why; with that terminal closed, it arranges (codex review)",
+      "ok": true,
+      "detail": "\"Codev: Arrange Cockpit stopped: another terminal is also named \"Codev: Architect\", so the architect's tab cannot be told apart from it; rename or close that terminal and arrange again.\"; editors unmoved: 1: [Welcome, arrange-a.txt, UNTITLED-ONE kept • Untitled-1, arrange-b.txt, arrange-c.txt, UNTITLED-TWO kept • Untitled-2, Codev: Architect, Work, Decisions] active \"Codev: Architect\" dirty [arrange-a.txt, UNTITLED-ONE kept • Untitled-1, arrange-b.txt, UNTITLED-TWO kept • Untitled-2] preview [Welcome]; namesake closed, then 1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, arrange-c.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1, Codev: Architect, Editor Group 1] active \"Codev: Architect, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-10-namesake-refused.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-11-namesake-closed-arranged.png"
+      ],
+      "ms": 52327
+    },
+    {
+      "name": "existing profile: after a reload the restored Cockpit arranges again, the architect reopened on the left; no notice; the button is still below Codev",
+      "ok": true,
+      "detail": "1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, arrange-c.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1, Codev: Architect, Editor Group 1] active \"Codev: Architect, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-12-reloaded.png"
+      ],
+      "ms": 6168
+    },
+    {
+      "name": "scenario 14: main not live — the existing warning, no other architect opened, Work and Decisions still arranged",
+      "ok": true,
+      "detail": "\"Codev: No 'main' architect found — is the workspace activated?\"; 1: [Welcome, Editor Group 1, arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, arrange-c.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] active \"UNTITLED-TWO kept • Untitled-2, Editor Group 1\" dirty [arrange-a.txt, Editor Group 1, UNTITLED-ONE kept • Untitled-1, Editor Group 1, arrange-b.txt, Editor Group 1, UNTITLED-TWO kept • Untitled-2, Editor Group 1] preview [Welcome, Editor Group 1]; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-13-main-not-live.png"
+      ],
+      "ms": 8195
+    },
+    {
+      "name": "scenario 7 (second fresh profile): Don't arrange automatically turns codev.cockpit.autoArrange off at the user level; the command still arranges",
+      "ok": true,
+      "detail": "button below Codev: true; settings.json holds \"codev.cockpit.autoArrange\": false; reload with the Cockpit showing left 1 group; the command arranged 1: [Welcome, Editor Group 1, Codev: Architect, Editor Group 1] active \"Codev: Architect, Editor Group 1\" preview [Welcome, Editor Group 1]; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-14-dont-arrange.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-15-setting-off-command.png"
+      ],
+      "ms": 24018
+    },
+    {
+      "name": "scenario 19: in a builder-worktree window, no auto-arrange, no title-bar action, and the command explains",
+      "ok": true,
+      "detail": "\"Codev: Arrange Cockpit is not offered in a builder-worktree window. Use it from the parent workspace's window.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-16-worktree-explains.png"
+      ],
+      "ms": 10348
+    },
+    {
+      "name": "scenario 19: in a no-workspace window, no auto-arrange, no title-bar action, and the command explains",
+      "ok": true,
+      "detail": "\"Codev: Arrange Cockpit needs a Codev workspace, and this window has none. Open a folder containing a Codev project.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-17-no-workspace-explains.png"
+      ],
+      "ms": 6937
+    },
+    {
+      "name": "a reload with Tower down and the Cockpit showing: the automatic arrange places Work over Decisions and shows no error toast (claude review)",
+      "ok": true,
+      "detail": "with Tower down: 1: [] active \"null\"; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"; toasts []",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-18-auto-tower-down.png"
+      ],
+      "ms": 22162
+    },
+    {
+      "name": "a restored, not yet revived panel tab counts: with no architect and only Work and Decisions in the first group after a reload, arrange keeps an empty left column (claude review)",
+      "ok": true,
+      "detail": "before the reload 1: [Work, Decisions] active \"Decisions\"; after it, \"Work\" never shown, under \"Decisions\"; the command arranged 1: [] active \"null\"; 2: [Work, Editor Group 2] active \"Work, Editor Group 2\"; 3: [Decisions, Editor Group 3] active \"Decisions, Editor Group 3\"; toasts [\"Codev: Not connected to Tower\"]",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/arrange-19-restored-tab-empty-left.png"
+      ],
+      "ms": 16249
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "19 screenshots read"
+    }
+  ]
+}

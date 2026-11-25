@@ -1,0 +1,150 @@
+{
+  "script": "decisions",
+  "at": "2026-11-25T00:05:20.835Z",
+  "ownerPortRequests": [],
+  "popups": [
+    "http://127.0.0.1:18765/ide?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-zHPvXv/beta",
+    "https://example.com/fixture/main-1",
+    "http://127.0.0.1:18765/ide?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-zHPvXv/alpha"
+  ],
+  "results": [
+    {
+      "name": "scenario 12: a Decisions entry under every active workspace, none under the dormant one",
+      "ok": true,
+      "detail": "{\"alpha\":[\"MAIN (2)\",\"WEB (1)\",\"Decisions\"],\"beta\":[\"MAIN (1)\",\"Decisions\"],\"gamma\":[\"MAIN (0)\",\"Decisions\"]}; Dormant: delta, a leaf (beta and gamma have no decisions file)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-01-entries.png"
+      ],
+      "ms": 13868
+    },
+    {
+      "name": "scenario 12: another workspace's Decisions entry opens that workspace's window",
+      "ok": true,
+      "detail": "beta's entry → http://127.0.0.1:18765/ide?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-zHPvXv/beta",
+      "shots": [],
+      "ms": 355
+    },
+    {
+      "name": "scenario 12: this workspace's Decisions entry opens the panel, which renders the items",
+      "ok": true,
+      "detail": "tab \"Decisions, Editor Group 3\"; 3 open; main-1 offers compact / stacked / hold; one tab after a second click",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-02-panel.png"
+      ],
+      "ms": 1698
+    },
+    {
+      "name": "scenario 15: a workspace image (bytes through the host), an https image, and two not loaded (the browser's 404, Tower's refusal)",
+      "ok": true,
+      "detail": "workspace SVG 240×120 from blob:; https image loaded; 404: \"Image not loaded Gone board https://example.com/fixture/gone-board.svg\" (The browser could not load this image from its address.); refused: \"Image not loaded Outside image ../../../outside.svg\" (The image ../../../outside.svg is outside the workspace, so it was not read.)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-03-images.png"
+      ],
+      "ms": 65
+    },
+    {
+      "name": "scenario 15: the full-size view opens over the panel; Escape and Close each close it",
+      "ok": true,
+      "detail": "opened on blob:…; Escape closed it; Close closed it",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-04-full-size.png"
+      ],
+      "ms": 134
+    },
+    {
+      "name": "scenario 15: an http(s) link opens in the browser, through the extension host",
+      "ok": true,
+      "detail": "→ https://example.com/fixture/main-1 (after VS Code's prompt: \"Do you want Code to open the external website?https://example.com/fixture/main-1\")",
+      "shots": [],
+      "ms": 873
+    },
+    {
+      "name": "scenario 15: rule an item — the file is updated, the card shows the ruling, the architect is notified",
+      "ok": true,
+      "detail": "file updated; card shows it; Tower: Decisions notice held (no-profile) → main @ alpha (mailbox 3956dcd2...)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-05-draft.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-06-ruled.png"
+      ],
+      "ms": 696
+    },
+    {
+      "name": "scenario 15: a stale fingerprint is refused, and the draft is kept",
+      "ok": true,
+      "detail": "\"Item main-2 changed since it was shown; review it and submit again.\"; draft and word kept",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-07-stale-refused.png"
+      ],
+      "ms": 1095
+    },
+    {
+      "name": "scenario 21: the Decisions poll stops while its panel is hidden, and resumes when shown",
+      "ok": true,
+      "detail": "3 reads in 6 s shown; 0 in 8 s hidden; reading again once shown; draft kept (retained context)",
+      "shots": [],
+      "ms": 19697
+    },
+    {
+      "name": "scenario 18: light, dark and high-contrast themes, switched live with the panel open",
+      "ok": true,
+      "detail": "Dark Modern: body rgb(31, 31, 31), text rgb(204, 204, 204), card border rgb(43, 43, 43), contrast id 6.6 / Submit 6.6 / option word 8.8 / badge 8.9; lowest of 62 texts 5.5 div.decisions-error \"Item main-2 changed sinc\", 5.6 legend.decisions-section-label \"Your word\", 5.6 label.decisions-section-label.decisions-comment-label \"Comment or question\"; under 4.5: none; Dark High Contrast: body rgb(0, 0, 0), text rgb(255, 255, 255), card border rgb(111, 195, 223), contrast id 8 / Submit 8 / option word 21 / badge 10.1; lowest of 62 texts 6.6 div.decisions-error \"Item main-2 changed sinc\", 7 span.decisions-item-id \"main-2\", 7 span.decisions-item-id \"main-1\"; under 4.5: none; Light High Contrast: body rgb(255, 255, 255), text rgb(41, 41, 41), card border rgb(15, 74, 133), contrast id 9 / Submit 9 / option word 13 / badge 9.3; lowest of 62 texts 5.5 span.decisions-count \"3 open\", 5.5 time.decisions-stamp \"Nov 21, 2026, 2:00 AM PS\", 5.5 span.decisions-image-missing \"Image not loaded Gone bo\"; under 4.5: none; Light Modern: body rgb(255, 255, 255), text rgb(59, 59, 59), card border rgb(229, 229, 229), contrast id 6.3 / Submit 6.3 / option word 10.5 / badge 4.1; lowest of 62 texts 4.1 span.decisions-badge \"Recommended\", 4.1 span.decisions-badge \"Recommended\", 4.1 span.decisions-badge \"Recommended\"; under 4.5: 4.3 div.decisions-section-label, 4.3 label.decisions-section-label.decisions-comment-label, 4.3 legend.decisions-section-label, 4.1 span.decisions-badge",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-08-theme-vs-dark.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-09-theme-hc-black.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-10-theme-hc-light.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-11-theme-vs.png"
+      ],
+      "ms": 19216
+    },
+    {
+      "name": "the panel is restored after a window reload",
+      "ok": true,
+      "detail": "one Decisions tab, its cards rendered",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-12-restored.png"
+      ],
+      "ms": 2875
+    },
+    {
+      "name": "scenario 19: in a builder-worktree window, Open Decisions explains, and the entry navigates to the parent",
+      "ok": true,
+      "detail": "\"Codev: Decisions is not offered in a builder-worktree window. Use it from the parent workspace's window.\"; entry → http://127.0.0.1:18765/ide?folder=/private/var/folders/dn/wqcplnhn50bbp2gx1601dm040000gn/T/cockpit-fixtures-zHPvXv/alpha",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-13-worktree-explains.png"
+      ],
+      "ms": 6571
+    },
+    {
+      "name": "scenario 19: in a no-workspace window, Open Decisions explains",
+      "ok": true,
+      "detail": "\"Codev: Decisions needs a Codev workspace, and this window has none. Open a folder containing a Codev project.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-14-no-workspace-explains.png"
+      ],
+      "ms": 5142
+    },
+    {
+      "name": "scenario 16: no decisions file shows the empty state; afx decisions init, then an item, and it appears",
+      "ok": true,
+      "detail": "\"There is no decisions file at codev/state/pending-decisions.md. To start one, run afx decisions init in this workspace.\" (rgb(59, 59, 59), the description colour, on no fill) → afx decisions init: \"[ok] Created codev/state/pending-decisions.md\" → 0 open → main-1 appears (adopt / wait)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-15-empty-state.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-16-initialized.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/decisions-17-item-appears.png"
+      ],
+      "ms": 14002
+    },
+    {
+      "name": "scenario 22: the webview never contacts Tower; the key is in no request; remote item images are its only network loads",
+      "ok": true,
+      "detail": "211 browser requests, none to :18764, none keyed; webview frames: {\"extension resource\":4,\"remote item image\":6}",
+      "shots": [],
+      "ms": 14
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "17 screenshots read"
+    }
+  ]
+}

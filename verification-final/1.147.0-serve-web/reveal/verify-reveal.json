@@ -1,0 +1,23 @@
+{
+  "script": "reveal",
+  "at": "2026-11-24T22:22:29.155Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "active-file reveal expands collapsed workspace and architect rows",
+      "ok": true,
+      "detail": "diff tab \"src/feature/alpha.ts (#101) (alpha.ts), preview, Editor Group 1\"; row \"alpha.ts\" selected=true focused=false",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/reveal-01-collapsed.png",
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/reveal-02-revealed.png"
+      ],
+      "ms": 5239
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "2 screenshots read"
+    }
+  ]
+}

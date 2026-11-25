@@ -1,0 +1,56 @@
+{
+  "script": "webviews",
+  "at": "2026-11-24T23:48:25.008Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "workbench loads on alpha",
+      "ok": true,
+      "detail": "4 frames",
+      "shots": [],
+      "ms": 4929
+    },
+    {
+      "name": "built-in webview: VS Code's own Markdown preview of a fixture .md renders styled content",
+      "ok": false,
+      "detail": "did not render. 1 webview(s): new vscode.markdown-language-features [active-frame:visible]; content: fake.html loading root=null text=0 scripts=[\"(inline)\",\"markdown-language-features/media/pre.js\"] resources=0; stylesheets not loaded: none; webview requests 11: 8 pending (vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/pre.js, vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/extensions/github/markdown.css, vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/markdown.css, vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/highlight.css), 0 failed; console errors 0: \"An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.\"; page errors 16: \"DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\" | \"DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\" | \"DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\" (screenshot /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-01-builtin-markdown-preview.png)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-02-failure.png"
+      ],
+      "ms": 49433
+    },
+    {
+      "name": "existing Codev webview: the contextual panel (codev.contextualPanel) renders",
+      "ok": false,
+      "detail": "did not render. 1 webview(s): existing cluesmith.codev-vscode/webviewView [active-frame:visible]; content: fake.html loading root=0 text=0 scripts=[\"(inline)\",\"dist/webview/contextual-panel.js\"] resources=0; stylesheets not loaded: dist/webview/contextual-panel.css; webview requests 0: 0 pending, 0 failed; console errors 0; page errors 0 (screenshot /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-03-codev-contextual-panel.png)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-04-failure.png"
+      ],
+      "ms": 47471
+    },
+    {
+      "name": "existing Codev webview: the Codev Markdown preview (codev.markdownPreview) renders",
+      "ok": false,
+      "detail": "did not render. 1 webview(s): new cluesmith.codev-vscode [active-frame:visible]; content: fake.html loading root=0 text=0 scripts=[\"(inline)\",\"dist/webview/markdown-preview.js\"] resources=0; stylesheets not loaded: dist/webview/markdown-preview.css; webview requests 5: 2 pending (vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/dist/webview/markdown-preview.css, vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/dist/webview/markdown-preview.js), 0 failed; console errors 0: \"An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.\"; page errors 4: \"DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\" | \"DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\" | \"DataCloneError: Failed to execute 'postMessage' on 'ServiceWorker': A ReadableStream could not be cloned because it was not transferred.\" (screenshot /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-05-codev-markdown-preview.png)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-06-failure.png"
+      ],
+      "ms": 50188
+    },
+    {
+      "name": "this PR's Work panel renders",
+      "ok": true,
+      "detail": "1 webview(s): new cluesmith.codev-vscode [active-frame:visible]; content: fake.html complete root=1 text=508 scripts=[\"(inline)\",\"(inline)\"] resources=0; stylesheets not loaded: none; webview requests 3: 0 pending, 0 failed; console errors 0: \"An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.\"; page errors 0",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/webviews-07-work-panel.png"
+      ],
+      "ms": 5042
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "7 screenshots read"
+    }
+  ]
+}

@@ -1,0 +1,1879 @@
+{
+  "at": "2026-11-24T23:45:28.025Z",
+  "serviceWorkers": [
+    {
+      "at": 3124,
+      "url": "https://1l47lukib6jkhu5jp498n7bkn0pr31api0ik1vi2ge0rrqcrpimf.vscode-cdn.net/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765&platform=browser"
+    },
+    {
+      "at": 7464,
+      "url": "https://092b9ctqcqhgrtkmpk2kubacfndkighmvso5ju21deh8kgu1bch6.vscode-cdn.net/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765&platform=browser"
+    },
+    {
+      "at": 13628,
+      "url": "https://12tefoce6eiacsdq4ula252hnle52ccur49q62gtejdi0ou4f5fh.vscode-cdn.net/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765&platform=browser"
+    },
+    {
+      "at": 17683,
+      "url": "https://1tcv9kemuf7kubuabsetk54rih0a2rdtk05056huutdr2smmfo55.vscode-cdn.net/stable/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/out/vs/workbench/contrib/webview/browser/pre/service-worker.js?v=6&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&remoteAuthority=127.0.0.1:18765&platform=browser"
+    }
+  ],
+  "observations": [
+    {
+      "label": "the built-in Markdown preview",
+      "rendered": true,
+      "existing": [],
+      "openedAt": 5504,
+      "observedAt": 9894,
+      "webviews": [
+        {
+          "id": "53730701-7f28-411a-9ceb-93430ac489ed",
+          "extensionId": "vscode.markdown-language-features",
+          "purpose": "",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "complete",
+              "title": "",
+              "bodyClass": "vscode-body scrollBeyondLastLine wordWrap vscode-light",
+              "rootChildren": null,
+              "workView": false,
+              "markdownBody": true,
+              "textLength": 64,
+              "text": "Plan 401: fixture backlog feature\n\nCockpit-harness fixture plan.",
+              "scripts": [
+                "(inline)",
+                "markdown-language-features/media/pre.js",
+                "markdown-language-features/media/index.js",
+                "mermaid-markdown-features/markdown-preview-out/index.js"
+              ],
+              "stylesheets": [
+                {
+                  "href": "extensions/github/markdown.css",
+                  "loaded": true
+                },
+                {
+                  "href": "markdown-language-features/media/markdown.css",
+                  "loaded": true
+                },
+                {
+                  "href": "markdown-language-features/media/highlight.css",
+                  "loaded": true
+                },
+                {
+                  "href": "markdown-math/notebook-out/katex.min.css",
+                  "loaded": true
+                },
+                {
+                  "href": "markdown-math/preview-styles/index.css",
+                  "loaded": true
+                }
+              ],
+              "resources": [
+                {
+                  "name": "markdown-language-features/media/pre.js",
+                  "status": 200,
+                  "ms": 33
+                },
+                {
+                  "name": "extensions/github/markdown.css",
+                  "status": 200,
+                  "ms": 34
+                },
+                {
+                  "name": "markdown-language-features/media/markdown.css",
+                  "status": 200,
+                  "ms": 44
+                },
+                {
+                  "name": "markdown-language-features/media/highlight.css",
+                  "status": 200,
+                  "ms": 33
+                },
+                {
+                  "name": "markdown-math/notebook-out/katex.min.css",
+                  "status": 200,
+                  "ms": 44
+                },
+                {
+                  "name": "markdown-math/preview-styles/index.css",
+                  "status": 200,
+                  "ms": 33
+                },
+                {
+                  "name": "markdown-language-features/media/index.js",
+                  "status": 200,
+                  "ms": 33
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/index.js",
+                  "status": 200,
+                  "ms": 45
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-DNX5MYPV.js",
+                  "status": 200,
+                  "ms": 26
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-B3RMBCZZ.js",
+                  "status": 200,
+                  "ms": 28
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-AWAXRXK2.js",
+                  "status": 200,
+                  "ms": 31
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-XTSVSM5L.js",
+                  "status": 200,
+                  "ms": 31
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-5EKE2EL7.js",
+                  "status": 200,
+                  "ms": 31
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-5SATJLMV.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-AWK2BGRP.js",
+                  "status": 200,
+                  "ms": 44
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-FHOENX7W.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-EVWVH7MU.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-4QDE4SUK.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-VVFIYB6W.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-VXEAXXZ6.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-QYW4627R.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-EVQSG24W.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-4JUKYRAX.js",
+                  "status": 200,
+                  "ms": 43
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-ORX4A4BF.js",
+                  "status": 200,
+                  "ms": 51
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-425S7VZZ.js",
+                  "status": 200,
+                  "ms": 51
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-DUVH6GAX.js",
+                  "status": 200,
+                  "ms": 53
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-PHIRMXKP.js",
+                  "status": 200,
+                  "ms": 51
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-UW57BKGU.js",
+                  "status": 200,
+                  "ms": 51
+                },
+                {
+                  "name": "mermaid-markdown-features/markdown-preview-out/chunk-3RNHDNP5.js",
+                  "status": 200,
+                  "ms": 51
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "console": [
+        {
+          "at": 6690,
+          "type": "warning",
+          "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Failed to read runtime plugin inventory Error: Runtime plugin inventory is unavailable.\n    at zst._discoverPluginSources (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:17405)\n    at zst._discoverAndBuildPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6783)\n    at zst._refreshPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6597)\n    at Ct.runner (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:16878)\n    at Ct.doRun (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83088)\n    at Ct.onTimeout (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83059)",
+          "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+          "worker": null
+        },
+        {
+          "at": 6690,
+          "type": "warning",
+          "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Runtime plugin inventory retry limit reached.",
+          "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+          "worker": null
+        }
+      ],
+      "errors": [],
+      "requests": [
+        {
+          "n": 194,
+          "at": 7064,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/index.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 7386
+        },
+        {
+          "n": 196,
+          "at": 7465,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/service-worker.js",
+          "type": "script",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 7619
+        },
+        {
+          "n": 197,
+          "at": 7625,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 7770
+        },
+        {
+          "n": 198,
+          "at": 7773,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/pre.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7805
+        },
+        {
+          "n": 199,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/extensions/github/markdown.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7807
+        },
+        {
+          "n": 200,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/markdown.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7817
+        },
+        {
+          "n": 201,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/highlight.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7805
+        },
+        {
+          "n": 202,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-math/notebook-out/katex.min.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7817
+        },
+        {
+          "n": 203,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-math/preview-styles/index.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7807
+        },
+        {
+          "n": 204,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/markdown-language-features/media/index.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7807
+        },
+        {
+          "n": 205,
+          "at": 7774,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/index.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7823
+        },
+        {
+          "n": 206,
+          "at": 7822,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-DNX5MYPV.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7848
+        },
+        {
+          "n": 207,
+          "at": 7822,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-B3RMBCZZ.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7849
+        },
+        {
+          "n": 208,
+          "at": 7822,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-AWAXRXK2.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7853
+        },
+        {
+          "n": 209,
+          "at": 7822,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-XTSVSM5L.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7854
+        },
+        {
+          "n": 210,
+          "at": 7822,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-5EKE2EL7.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7853
+        },
+        {
+          "n": 211,
+          "at": 7823,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-AWK2BGRP.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 212,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-5SATJLMV.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 213,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-EVWVH7MU.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 214,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-FHOENX7W.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 215,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-VVFIYB6W.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 216,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-4QDE4SUK.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 217,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-VXEAXXZ6.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7868
+        },
+        {
+          "n": 218,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-EVQSG24W.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 219,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-QYW4627R.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 220,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-4JUKYRAX.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7869
+        },
+        {
+          "n": 221,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-ORX4A4BF.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7875
+        },
+        {
+          "n": 222,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-425S7VZZ.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7874
+        },
+        {
+          "n": 223,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-DUVH6GAX.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7878
+        },
+        {
+          "n": 224,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-UW57BKGU.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7877
+        },
+        {
+          "n": 225,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-PHIRMXKP.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7875
+        },
+        {
+          "n": 226,
+          "at": 7824,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/mermaid-markdown-features/markdown-preview-out/chunk-3RNHDNP5.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 7875
+        }
+      ]
+    },
+    {
+      "label": "the Codev contextual panel",
+      "rendered": true,
+      "existing": [
+        "dcd70221-59ec-4051-837a-e427c0987815"
+      ],
+      "openedAt": 9897,
+      "observedAt": 11975,
+      "webviews": [
+        {
+          "id": "dcd70221-59ec-4051-837a-e427c0987815",
+          "extensionId": "cluesmith.codev-vscode",
+          "purpose": "webviewView",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "complete",
+              "title": "Codev",
+              "bodyClass": "vscode-light",
+              "rootChildren": 1,
+              "workView": false,
+              "markdownBody": false,
+              "textLength": 167,
+              "text": "PENDING GATES\n1\n101\n101 · gated-spec\nspec review · just now\nWAITING ON INPUT\n2\n102\n102 · second-main",
+              "scripts": [
+                "(inline)",
+                "dist/webview/contextual-panel.js"
+              ],
+              "stylesheets": [
+                {
+                  "href": "dist/webview/contextual-panel.css",
+                  "loaded": true
+                }
+              ],
+              "resources": [
+                {
+                  "name": "dist/webview/contextual-panel.css",
+                  "status": 200,
+                  "ms": 21
+                },
+                {
+                  "name": "dist/webview/contextual-panel.js",
+                  "status": 200,
+                  "ms": 24
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "console": [],
+      "errors": [],
+      "requests": []
+    },
+    {
+      "label": "the Codev Markdown preview",
+      "rendered": true,
+      "existing": [],
+      "openedAt": 11981,
+      "observedAt": 16645,
+      "webviews": [
+        {
+          "id": "c93fba8c-1de7-4224-95d5-56432d29d194",
+          "extensionId": "cluesmith.codev-vscode",
+          "purpose": "",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "complete",
+              "title": "Codev Markdown Preview",
+              "bodyClass": "vscode-light",
+              "rootChildren": 1,
+              "workView": false,
+              "markdownBody": false,
+              "textLength": 64,
+              "text": "Plan 401: fixture backlog feature\n\nCockpit-harness fixture plan.",
+              "scripts": [
+                "(inline)",
+                "dist/webview/markdown-preview.js"
+              ],
+              "stylesheets": [
+                {
+                  "href": "dist/webview/markdown-preview.css",
+                  "loaded": true
+                }
+              ],
+              "resources": [
+                {
+                  "name": "dist/webview/markdown-preview.css",
+                  "status": 200,
+                  "ms": 29
+                },
+                {
+                  "name": "dist/webview/markdown-preview.js",
+                  "status": 200,
+                  "ms": 34
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "console": [],
+      "errors": [],
+      "requests": [
+        {
+          "n": 227,
+          "at": 13328,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/index.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 13563
+        },
+        {
+          "n": 228,
+          "at": 13629,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/service-worker.js",
+          "type": "script",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 13820
+        },
+        {
+          "n": 229,
+          "at": 13825,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 13976
+        },
+        {
+          "n": 230,
+          "at": 13979,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/dist/webview/markdown-preview.css",
+          "type": "stylesheet",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 14008
+        },
+        {
+          "n": 231,
+          "at": 13979,
+          "method": "GET",
+          "url": "vscode-remote+127-002e0-002e0-002e1-003a18765.vscode-resource.vscode-cdn.net/…/dist/webview/markdown-preview.js",
+          "type": "script",
+          "frame": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": true,
+          "doneAt": 14017
+        }
+      ]
+    },
+    {
+      "label": "the Work panel",
+      "rendered": true,
+      "existing": [],
+      "openedAt": 16648,
+      "observedAt": 21698,
+      "webviews": [
+        {
+          "id": "9ca0035d-3d4e-4740-9a63-6582daf6e7f0",
+          "extensionId": "cluesmith.codev-vscode",
+          "purpose": "",
+          "hostOrigin": "vscode-cdn.net",
+          "frames": [
+            {
+              "id": "active-frame",
+              "visibility": "visible"
+            }
+          ],
+          "content": [
+            {
+              "url": "fake.html",
+              "readyState": "complete",
+              "title": "Work",
+              "bodyClass": "vscode-light",
+              "rootChildren": 1,
+              "workView": true,
+              "markdownBody": false,
+              "textLength": 300,
+              "text": "Work\n+ Shell\nRefresh\nBUILDERS\nIssue\tTitle\tState\tProgress\t\n#101 · main\ngated-spec\nBlocked: spec revie",
+              "scripts": [
+                "(inline)",
+                "(inline)"
+              ],
+              "stylesheets": [],
+              "resources": []
+            }
+          ]
+        }
+      ],
+      "console": [],
+      "errors": [],
+      "requests": [
+        {
+          "n": 232,
+          "at": 17338,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/index.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 17634
+        },
+        {
+          "n": 233,
+          "at": 17683,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/service-worker.js",
+          "type": "script",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 17978
+        },
+        {
+          "n": 234,
+          "at": 17984,
+          "method": "GET",
+          "url": "<uuid>.vscode-cdn.net/…/browser/pre/fake.html",
+          "type": "document",
+          "frame": null,
+          "state": "finished",
+          "status": 200,
+          "fromServiceWorker": false,
+          "doneAt": 18151
+        }
+      ]
+    }
+  ],
+  "allConsole": [
+    {
+      "at": 1261,
+      "type": "log",
+      "text": "%c INFO color: #33f Resolving connection token (127.0.0.1:18765)...",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1262,
+      "type": "log",
+      "text": "%c INFO color: #33f Resolved connection token (127.0.0.1:18765) after 2 ms",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1267,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-Management-688e6cd3-1a63-4162-a2c8-ba999639015e)...",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1270,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-Management-688e6cd3-1a63-4162-a2c8-ba999639015e) was successful after 4 ms.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1284,
+      "type": "warning",
+      "text": "%c WARN color: #993 Via 'product.json#extensionEnabledApiProposals' extension 'ms-vscode.remote-repositories' wants API proposal 'timeline' but that proposal DOES NOT EXIST. Likely, the proposal has been finalized (check 'vscode.d.ts') or was abandoned.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1284,
+      "type": "warning",
+      "text": "%c WARN color: #993 Via 'product.json#extensionEnabledApiProposals' extension 'github.vscode-pull-request-github' wants API proposal 'agentsWindowActivation' but that proposal DOES NOT EXIST. Likely, the proposal has been finalized (check 'vscode.d.ts') or was abandoned.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1284,
+      "type": "warning",
+      "text": "%c WARN color: #993 Via 'product.json#extensionEnabledApiProposals' extension 'github.remotehub' wants API proposal 'timeline' but that proposal DOES NOT EXIST. Likely, the proposal has been finalized (check 'vscode.d.ts') or was abandoned.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1324,
+      "type": "log",
+      "text": "%c INFO color: #33f [RemoteAgentHost] Reconciling: desired=[], current=[]",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1328,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost:remote] Initializing (remoteAuthority=127.0.0.1:18765)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1329,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost:remote] Connecting to remote agent host...",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1443,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=undefined conversationKey=undefined modelTarget=undefined storageKey=\"chat.currentLanguageModel.panel\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1506,
+      "type": "warning",
+      "text": "The web worker extension host is started in a same-origin iframe!",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1509,
+      "type": "log",
+      "text": "%c INFO color: #33f Updating additional builtin extensions cache",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1510,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-ExtensionHost-a328e1a3-e305-4f50-af16-ae7f179f2881)...",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1535,
+      "type": "warning",
+      "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Failed to read runtime plugin inventory Error: Runtime plugin inventory is unavailable.\n    at zst._discoverPluginSources (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:17405)\n    at zst._discoverAndBuildPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6783)\n    at zst._refreshPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6597)\n    at Ct.runner (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:16972)\n    at Ct.doRun (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83088)\n    at Ct.onTimeout (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83059)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1540,
+      "type": "warning",
+      "text": "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html?&vscodeWebWorkerExtHostId=a015967c-2951-413f-b351-577750404642",
+      "worker": null
+    },
+    {
+      "at": 1555,
+      "type": "warning",
+      "text": "Did not receive a define call from script http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/node_modules/vsda/rust/web/vsda.js",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1559,
+      "type": "log",
+      "text": "%c INFO color: #33f Creating a socket (renderer-ExtensionHost-a328e1a3-e305-4f50-af16-ae7f179f2881) was successful after 50 ms.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1623,
+      "type": "log",
+      "text": "%c INFO color: #33f [reconnection-grace-time] Client received grace time from server: 10800000ms (10800s)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1651,
+      "type": "log",
+      "text": "%c INFO color: #33f [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1667,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=undefined conversationKey=undefined modelTarget=undefined storageKey=\"chat.currentLanguageModel.panel\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1745,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=undefined conversationKey=undefined modelTarget=undefined storageKey=\"chat.currentLanguageModel.panel\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1783,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=undefined conversationKey=undefined modelTarget=undefined storageKey=\"chat.currentLanguageModel.panel\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 1977,
+      "type": "error",
+      "text": "%c  ERR color: #f33 Extension 'github.copilot-chat' appears in product.json but enables LESS API proposals than the extension wants.\npackage.json (LOSES): agentSessionsWorkspace\nspeech\nstructuralDiff\nagentsWindowConfiguration\nchatDebug\nchatHooks\nenvIsConnectionMetered\nextensionsAny\nnewSymbolNamesProvider\ninteractive\ncodeActionAI\nactiveComment\ncommentReveal\ncontribCommentThreadAdditionalMenu\ncontribCommentsViewThreadMenus\ncontribChatEditorInlineGutterMenu\ndocumentFiltersExclusive\nembeddings\nfindTextInFiles\nfindTextInFiles2\nlanguageModelToolSupportsModel\nfindFiles2\ntextSearchProvider\nterminalDataWriteEvent\nterminalExecuteCommandEvent\nterminalSelection\nterminalQuickFixProvider\nmappedEditsProvider\naiRelatedInformation\naiSettingsSearch\nchatParticipantAdditions\ndefaultChatParticipant\ncontribSourceControlInputBoxMenu\nauthLearnMore\nauthIssuers\ntestObserver\naiTextSearchProvider\nchatParticipantPrivate\nchatProvider\ncontribDebugCreateConfiguration\nchatReferenceDiagnostic\ntextSearchProvider2\nchatReferenceBinaryData\nlanguageModelSystem\nlanguageModelCapabilities\nlanguageModelPricing\nlanguageModelRateLimit\ninlineCompletionsAdditions\nchatStatusItem\nchatInputNotification\ntaskProblemMatcherStatus\ncontribLanguageModelToolSets\ntextDocumentChangeReason\nresolvers\ntaskExecutionTerminal\ndataChannels\nlanguageModelThinkingPart\nchatSessionsProvider\ndevDeviceId\ncontribEditorContentMenu\nchatPromptFiles\nmcpServerDefinitions\ntabInputMultiDiff\nworkspaceTrust\nenvironmentPower\nterminalTitle\ntoolInvocationApproveCombination\nchatSessionCustomizationProvider\nproduct.json (WINS): agentSessionsWorkspace\nagentsWindowConfiguration\ninteractive\nterminalDataWriteEvent\nterminalExecuteCommandEvent\nterminalSelection\nterminalQuickFixProvider\nchatParticipantAdditions\ndefaultChatParticipant\nembeddings\nchatProvider\nmappedEditsProvider\naiRelatedInformation\naiSettingsSearch\ncodeActionAI\nfindTextInFiles\nfindTextInFiles2\ntextSearchProvider\ntextSearchProvider2\nactiveComment\ncommentReveal\ncontribSourceControlInputBoxMenu\ncontribCommentEditorActionsMenu\ncontribCommentThreadAdditionalMenu\ncontribCommentsViewThreadMenus\ncontribChatEditorInlineGutterMenu\nextensionAffinity\nnewSymbolNamesProvider\nfindFiles2\nchatReferenceDiagnostic\nextensionsAny\nauthLearnMore\nauthIssuers\ntestObserver\naiTextSearchProvider\ndocumentFiltersExclusive\nchatParticipantPrivate\ncontribDebugCreateConfiguration\ninlineCompletionsAdditions\nchatReferenceBinaryData\nlanguageModelSystem\nlanguageModelCapabilities\nlanguageModelThinkingPart\nlanguageModelToolSupportsModel\nchatStatusItem\ntaskProblemMatcherStatus\ncontribLanguageModelToolSets\ntextDocumentChangeReason\nresolvers\ntaskExecutionTerminal\ndataChannels\nchatSessionsProvider\nchatSessionCustomizationProvider\ndevDeviceId\ncontribEditorContentMenu\ntokenInformation\ntoolInvocationApproveCombination\nchatPromptFiles\nmcpServerDefinitions\ntabInputMultiDiff\nworkspaceTrust\nchatHooks\nchatDebug\nenvIsConnectionMetered\nenvironmentPower\nterminalTitle\nlanguageModelPricing\nlanguageModelRateLimit\nchatInputNotification\nspeech\nDELTA: structuralDiff",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2070,
+      "type": "log",
+      "text": "%c INFO color: #33f Settings Sync: Account status changed from uninitialized to unavailable",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2083,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=undefined conversationKey=undefined modelTarget=undefined storageKey=\"chat.currentLanguageModel.panel\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2294,
+      "type": "log",
+      "text": "%c INFO color: #33f [RemoteAgentHostProtocol] Sending initialize: address=vscode-remote://127.0.0.1:18765 clientId=c0b13038-6b35-455c-9a7b-8138f1eecaed requestId=1",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2353,
+      "type": "log",
+      "text": "%c INFO color: #33f [RemoteAgentHostProtocol] Initialized: address=vscode-remote://127.0.0.1:18765 clientId=c0b13038-6b35-455c-9a7b-8138f1eecaed durationMs=730",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2361,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost:remote] Connected; clientId=c0b13038-6b35-455c-9a7b-8138f1eecaed",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2374,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2375,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2375,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2395,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2418,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2418,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2418,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2455,
+      "type": "error",
+      "text": "Access to fetch at 'https://exp.enterprise.githubcopilot.com/api/v1/assignments' from origin 'http://127.0.0.1:18765' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.",
+      "source": "http://127.0.0.1:18765/?folder=%2Fprivate%2Fvar%2Ffolders%2Fdn%2Fwqcplnhn50bbp2gx1601dm040000gn%2FT%2Fcockpit-fixtures-vn1ezj%2Falpha",
+      "worker": null
+    },
+    {
+      "at": 2455,
+      "type": "error",
+      "text": "Failed to load resource: net::ERR_FAILED",
+      "source": "https://exp.enterprise.githubcopilot.com/api/v1/assignments",
+      "worker": null
+    },
+    {
+      "at": 2481,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2540,
+      "type": "warning",
+      "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Failed to read runtime plugin inventory Error: Runtime plugin inventory is unavailable.\n    at zst._discoverPluginSources (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:17405)\n    at zst._discoverAndBuildPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6783)\n    at zst._refreshPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6597)\n    at Ct.runner (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:16878)\n    at Ct.doRun (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83088)\n    at Ct.onTimeout (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83059)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2569,
+      "type": "log",
+      "text": "%c INFO color: #33f [RemoteAgentHostProtocol] Mirroring configuration to host root config from DEFAULT: overlapProviderPreparation=true (chat.agentHost.experimental.overlapProviderPreparation)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2589,
+      "type": "warning",
+      "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Failed to read runtime plugin inventory Error: Runtime plugin inventory is unavailable.\n    at zst._discoverPluginSources (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:17405)\n    at zst._discoverAndBuildPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6783)\n    at zst._refreshPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6597)\n    at Ct.runner (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:16972)\n    at Ct.doRun (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83088)\n    at Ct.onTimeout (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83059)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2718,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2718,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2718,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2718,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2723,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2723,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2723,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2731,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2731,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2731,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2731,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2731,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2731,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2732,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2732,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2732,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2732,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2732,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2734,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2735,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2749,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2801,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2814,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2821,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2821,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2824,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2825,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2825,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2825,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2825,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2827,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2827,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2827,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2829,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2829,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2830,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2833,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 2841,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4588,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4658,
+      "type": "error",
+      "text": "Extension `vscode.typescript-language-features` is already registered",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4713,
+      "type": "error",
+      "text": "%c  ERR color: #f33 [Extension Host] Extension `vscode.typescript-language-features` is already registered",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4713,
+      "type": "error",
+      "text": "%c[Extension Host] %cExtension `vscode.typescript-language-features` is already registered color: blue color: ",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4801,
+      "type": "error",
+      "text": "%c  ERR color: #f33 [Extension Host] Extension `vscode.typescript-language-features` is already registered",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4801,
+      "type": "error",
+      "text": "%c[Extension Host] %cExtension `vscode.typescript-language-features` is already registered color: blue color: ",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4834,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4927,
+      "type": "log",
+      "text": "%c INFO color: #33f Migrating global extension storage from typescriptteam.jsts-chat-features to TypeScriptTeam.jsts-chat-features...",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4927,
+      "type": "log",
+      "text": "%c INFO color: #33f Migrated global extension storage from typescriptteam.jsts-chat-features to TypeScriptTeam.jsts-chat-features",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4927,
+      "type": "log",
+      "text": "%c INFO color: #33f Migrating workspace extension storage from typescriptteam.jsts-chat-features to TypeScriptTeam.jsts-chat-features...",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4927,
+      "type": "log",
+      "text": "%c INFO color: #33f Migrated workspace extension storage from typescriptteam.jsts-chat-features to TypeScriptTeam.jsts-chat-features",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4929,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 4981,
+      "type": "log",
+      "text": "%c INFO color: #33f [AgentHost] No signed-in session resolved for resource: https://api.github.com/repos",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 6305,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 6690,
+      "type": "warning",
+      "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Failed to read runtime plugin inventory Error: Runtime plugin inventory is unavailable.\n    at zst._discoverPluginSources (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:17405)\n    at zst._discoverAndBuildPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6783)\n    at zst._refreshPlugins (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:6597)\n    at Ct.runner (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:3601:16878)\n    at Ct.doRun (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83088)\n    at Ct.onTimeout (http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js:31:83059)",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 6690,
+      "type": "warning",
+      "text": "%c WARN color: #993 [CopilotCliAgentPluginDiscovery] Runtime plugin inventory retry limit reached.",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 6704,
+      "type": "log",
+      "text": "%c INFO color: #33f [AccountPolicyGate] apply: state=inactive, reason=undefined, isRestricted=false",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 7167,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 12652,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    },
+    {
+      "at": 13408,
+      "type": "log",
+      "text": "%c INFO color: #33f [ChatModelSelection] event=no-model-at-toolbar-build surface=\"workbench\" sessionKey=\"agent-host-copilotcli\" conversationKey=\"agent-host-copilotcli:/untitled-4a357467-bf2f-4177-b61d-c8849be8ccc7\" modelTarget=\"agent-host-copilotcli\" storageKey=\"chat.currentLanguageModel.panel.agent-host-copilotcli\" widgetViewKind=\"view\"",
+      "source": "http://127.0.0.1:18765/stable-8a14f0cc1b08d531eb83255ea3764ae22aa932b5/static/out/vs/code/browser/workbench/workbench.js",
+      "worker": null
+    }
+  ],
+  "allErrors": []
+}

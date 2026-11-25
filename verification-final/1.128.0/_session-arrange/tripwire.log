@@ -1,0 +1,8 @@
+2026-11-24T23:56:29.688Z tripwire watching :4100 for pids in /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/pids (+ socket holders under /private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/run, /tmp/cckp-247e284a, /private/tmp/cckp-247e284a)
+2026-11-24T23:56:29.978Z sample 1: tree of 4, no connection on :4100
+2026-11-24T23:57:09.345Z sample 31: tree of 24, no connection on :4100
+2026-11-24T23:57:52.024Z sample 61: tree of 26, no connection on :4100
+2026-11-24T23:58:36.998Z sample 91: tree of 25, no connection on :4100
+2026-11-24T23:59:16.788Z sample 121: tree of 25, no connection on :4100
+2026-11-24T23:59:54.196Z sample 151: tree of 28, no connection on :4100
+2026-11-25T00:00:33.690Z sample 181: tree of 16, no connection on :4100

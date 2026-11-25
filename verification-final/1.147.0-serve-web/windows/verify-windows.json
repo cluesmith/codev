@@ -1,0 +1,40 @@
+{
+  "script": "windows",
+  "at": "2026-11-24T22:23:52.484Z",
+  "ownerPortRequests": [],
+  "popups": [],
+  "results": [
+    {
+      "name": "scenario 19: builder-worktree window — the parent row carries worktree-scoped actions only",
+      "ok": true,
+      "detail": "worktree spir-101; parent row \"current · spec review · just now\" inline [] menu [\"Codev: Open Web Interface\",\"Codev: Start Dev (this workspace)\",\"Codev: Open Dev URL\"]; builder rows navigate",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/windows-01-worktree-window.png"
+      ],
+      "ms": 11209
+    },
+    {
+      "name": "scenario 19: no-workspace window — the state row explains and offers Open Folder",
+      "ok": true,
+      "detail": "row \"Not connected to Tower\"; tooltip \"This window has no Codev workspace, so it does not connect to Tower. Click to open a folder containing a Codev project. To set up Codev in a project, run `codev init` in its root.\"",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/windows-02-no-workspace-window.png"
+      ],
+      "ms": 5555
+    },
+    {
+      "name": "scenario 19: Codev container hidden, Cockpit visible — a builder change appears within one refresh interval",
+      "ok": true,
+      "detail": "\"[specify] #102 second-main agent exited [1m]\" → \"[specify] #102 second-main blocked on spec review [<1m]\" after 52.2s (codev.overviewRefreshSeconds default 60)",
+      "shots": [
+        "/private/tmp/claude-501/-Users-mwk-Development-cluesmith-codev--builders-spir-1963/a0ca5bde-70fe-46ef-9657-ec625239425a/scratchpad/cockpit-harness/shots/windows-03-cockpit-only-fresh.png"
+      ],
+      "ms": 61894
+    },
+    {
+      "name": "no screenshot shows the machine's shell prompt (host:dir user$)",
+      "ok": true,
+      "detail": "3 screenshots read"
+    }
+  ]
+}
