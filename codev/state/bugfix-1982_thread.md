@@ -33,3 +33,27 @@ as a block refresh. Hot context is changed in `codev/resources/{arch,lessons}-cr
 Known limit, left as is: a doc an adopter never edited, written by an older release whose
 template has since changed outside the block, is still a conflict. There is no record of the
 installed version for root docs (skills have `SHIPPED_SKILL_HASHES`). Flagged to the architect.
+
+## 2026-11-24 — fix
+
+Architect accepted the root cause and decisions; asked that the known limit be pinned by a
+test (done) and given its own PR paragraph, and that the dry-run test compare dry and real
+reports on the same project (done, three scenarios).
+
+- `sameOutsideHotBlock` (managed-block.ts) compares two docs as the block refresh leaves
+  them (both upserted with the same empty block), so content inside the block, or a
+  missing block, never counts as an edit.
+- `copyRootFiles` uses it: up to date → no conflict, and a `.codev-new` holding exactly the
+  template is removed (the skills' `removeResolvedCodevNew` precedent; cleans up leftovers
+  this bug wrote in adopters' projects).
+- Hot-tier, cold-tier and block steps take `dryRun` and run one code path; a dry run counts
+  the hot files it would create as present when rendering the block. Real-run block line
+  is now `~ (hot-tier block refreshed)` so the two modes differ only by "would be".
+- Regression test `bugfix-1982-update-root-docs.test.ts` (real `init()` then `update()`,
+  execSync stubbed for git init / codev doctor): 10/10 fail on the pre-fix source, 10/10
+  pass with the fix.
+- Verified on an installed build: packed the four tarballs and `npm install -g --prefix`
+  into the scratchpad (no global install, no Tower restart). The issue's three commands
+  give "Already up to date!" in both modes and no `.codev-new`; edits outside the block and
+  to a skill are kept as conflicts; an in-block edit is a block refresh; missing
+  governance files print identical per-file lines in dry and real runs.
