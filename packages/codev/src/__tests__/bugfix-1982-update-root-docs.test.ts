@@ -152,11 +152,27 @@ describe('issue #1982 — codev update on root docs', () => {
     write('CLAUDE.md.codev-new', template);
     write('AGENTS.md.codev-new', 'an earlier version, not yet merged\n');
 
-    const { result } = await runUpdate();
+    const { result, report } = await runUpdate();
 
     expect(result.rootConflicts).toEqual([]);
     expect(codevNewFiles(projectDir)).toEqual(['AGENTS.md.codev-new']);
     expect(read('AGENTS.md.codev-new')).toBe('an earlier version, not yet merged\n');
+    expect(report).toContain('  - (removed, nothing left to merge) CLAUDE.md.codev-new');
+  });
+
+  it('a checkout whose directory is not the name init saw is still up to date', async () => {
+    const before = ROOT_DOCS.map(read);
+    process.chdir(baseDir);
+    const renamed = path.join(baseDir, 'cloned-elsewhere');
+    fs.renameSync(projectDir, renamed);
+    projectDir = renamed;
+    process.chdir(projectDir);
+
+    const { result } = await runUpdate();
+
+    expect(result.rootConflicts).toEqual([]);
+    expect(codevNewFiles(projectDir)).toEqual([]);
+    expect(ROOT_DOCS.map(read)).toEqual(before);
   });
 
   it('an edited skill is still kept, with its new version as .codev-new beside it', async () => {
@@ -209,6 +225,9 @@ describe('issue #1982 — codev update on root docs', () => {
       ['a project edited outside and inside the managed block', () => {
         write('CLAUDE.md', `${read('CLAUDE.md')}\nMY_RULE\n`);
         write('AGENTS.md', read('AGENTS.md').replace(HOT_BLOCK_END, `MY_LINE\n${HOT_BLOCK_END}`));
+      }],
+      ['a project with a leftover .codev-new beside an up-to-date doc', () => {
+        write('CLAUDE.md.codev-new', read('CLAUDE.md'));
       }],
       ['a project missing one hot file, the cold files and AGENTS.md', () => {
         fs.rmSync(path.join(projectDir, 'codev', 'resources', 'lessons-critical.md'));
