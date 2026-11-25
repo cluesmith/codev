@@ -1,0 +1,14 @@
+id: bugfix-1871
+title: tower-persists-the-typed-tower
+protocol: bugfix
+phase: investigate
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-25T20:39:58.461Z'
+updated_at: '2026-11-25T20:39:58.462Z'
