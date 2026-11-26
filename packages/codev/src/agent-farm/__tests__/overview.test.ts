@@ -1303,10 +1303,11 @@ describe('overview', () => {
       expect(worktreeNameToRoleId('worktree-a_-1')).toBe('worktree-a_-1');
     });
 
-    it('maps an all-digit task short id to what buildAgentName produces (#1992)', () => {
+    it('maps task and protocol short ids to what buildAgentName produces, leading zeros included (#1992)', () => {
       // buildAgentName strips leading zeros from an all-digit id (task-0123 → builder-task-123).
       for (const id of ['0123', '0000', '0', '1234', 'S0-L', '_-LM']) {
-        expect(worktreeNameToRoleId(`task-${id}`), id).toBe(buildAgentName('task', id));
+        expect(worktreeNameToRoleId(`task-${id}`), `task-${id}`).toBe(buildAgentName('task', id));
+        expect(worktreeNameToRoleId(`maintain-${id}`), `maintain-${id}`).toBe(buildAgentName('protocol', id, 'maintain'));
       }
     });
 

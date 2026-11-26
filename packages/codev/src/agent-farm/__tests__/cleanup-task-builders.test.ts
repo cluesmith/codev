@@ -8,17 +8,15 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Builder } from '../types.js';
+import { taskBuilderId } from '../commands/cleanup.js';
 
 /**
  * Re-implement the cleanup lookup logic for testing.
- * Mirrors the task lookup in cleanup.ts without requiring DB or git side effects.
+ * Mirrors the task lookup in cleanup.ts without requiring DB or git side effects;
+ * the id normalization is cleanup.ts's own taskBuilderId.
  */
 function findTaskBuilder(builders: Builder[], taskName: string): Builder | undefined {
-  // Task builder IDs are "builder-task-<lowercased shortId>" (via buildAgentName)
-  // Extract the shortId from the worktree name (e.g., "task-bEPd" → "bEPd" → "bepd")
-  const shortId = taskName.startsWith('task-') ? taskName.slice(5) : taskName;
-  const normalizedId = `builder-task-${shortId.toLowerCase()}`;
-  let builder = builders.find((b) => b.id === normalizedId);
+  let builder = builders.find((b) => b.id === taskBuilderId(taskName));
 
   if (!builder) {
     // Fallback: check by worktree path containing the task name
@@ -37,10 +35,7 @@ function findByProject(builders: Builder[], projectId: string): Builder | undefi
   let builder = builders.find((b) => b.id === projectId);
 
   if (!builder && projectId.startsWith('task-')) {
-    // Normalized task ID
-    const shortId = projectId.slice(5);
-    const normalizedId = `builder-task-${shortId.toLowerCase()}`;
-    builder = builders.find((b) => b.id === normalizedId);
+    builder = builders.find((b) => b.id === taskBuilderId(projectId));
   }
 
   if (!builder) {
@@ -141,6 +136,17 @@ describe('Cleanup — Task builder lookup (Bugfix #347)', () => {
     it('returns undefined for non-existent project', () => {
       const found = findByProject(builders, 'task-ZZZZ');
       expect(found).toBeUndefined();
+    });
+
+    it('finds an all-digit task builder via --project task-0123 (#1992)', () => {
+      // spawn names it buildAgentName('task', '0123') = builder-task-123: leading zeros stripped.
+      const digitBuilder = makeBuilder({
+        id: 'builder-task-123',
+        name: 'Task: Quick fix for auth',
+        worktree: '/workspace/.builders/task-0123',
+        type: 'task',
+      });
+      expect(findByProject([digitBuilder], 'task-0123')).toBe(digitBuilder);
     });
   });
 
