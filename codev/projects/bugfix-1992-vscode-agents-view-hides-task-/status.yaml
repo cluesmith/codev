@@ -1,7 +1,7 @@
 id: bugfix-1992
 title: vscode-agents-view-hides-task-
 protocol: bugfix
-phase: fix
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-25T23:44:29.723Z'
-updated_at: '2026-11-25T23:48:17.398Z'
+updated_at: '2026-11-26T00:00:04.238Z'
