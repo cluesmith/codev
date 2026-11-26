@@ -1309,6 +1309,8 @@ describe('overview', () => {
         expect(worktreeNameToRoleId(`task-${id}`), `task-${id}`).toBe(buildAgentName('task', id));
         expect(worktreeNameToRoleId(`maintain-${id}`), `maintain-${id}`).toBe(buildAgentName('protocol', id, 'maintain'));
       }
+      // spawnWorktree names its session `worktree-${shortId}` by hand, zeros kept.
+      expect(worktreeNameToRoleId('worktree-0123')).toBe('worktree-0123');
     });
 
     it('resolves every pre-#1740 numeric and short-id form exactly as before', () => {
