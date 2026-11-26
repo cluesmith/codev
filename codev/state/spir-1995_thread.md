@@ -86,3 +86,9 @@ Both valid; all applied.
   `CODEV_SINCE_DATE` presence (inverted meaning vs recently-merged); fork/multi-remote
   base-repo parity check; `# forge-executable: gh`; doctor projection labelled idle steady
   state; path selection must be cheap per poll; hybrid custom-override note.
+
+## 2026-11-26 — spec-approval
+Architect's own read (01:47 UTC) was explicitly NOT the human decision; held. Owner approved
+the spec as written at 22:12 UTC (relayed by architect porchless from main); I ran
+`porch approve 1995 spec-approval --a-human-explicitly-approved-this`. Entering plan.
+Plan must put the exact-final-query cost measurement FIRST (spec: a miss stops the work).
