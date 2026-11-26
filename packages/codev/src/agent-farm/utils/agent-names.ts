@@ -64,6 +64,14 @@ export function buildAgentName(type: BuilderType, id: string, protocol?: string)
 }
 
 /**
+ * A task builder's id from its worktree name or short id, as spawn names it:
+ * `task-bEPd` / `bEPd` → `builder-task-bepd`, `task-0123` → `builder-task-123`.
+ */
+export function taskBuilderId(taskName: string): string {
+  return buildAgentName('task', taskName.startsWith('task-') ? taskName.slice(5) : taskName);
+}
+
+/**
  * Parse a canonical agent name into its components.
  * Returns null if the name doesn't match the expected pattern.
  *

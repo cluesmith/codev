@@ -558,7 +558,9 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   const taskMatch = lower.match(SHORT_ID_NAME_TASK);
   if (taskMatch) return buildAgentName('task', taskMatch[1]);
 
-  // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
+  // Worktree: worktree-foIg → worktree-foig (no builder- prefix). spawnWorktree
+  // names it by hand and keeps leading zeros, so this branch must NOT go through
+  // buildAgentName (worktree-0123 stays worktree-0123; #1992).
   const worktreeMatch = lower.match(SHORT_ID_NAME_WORKTREE);
   if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
 

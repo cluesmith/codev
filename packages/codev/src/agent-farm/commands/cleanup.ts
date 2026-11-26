@@ -18,7 +18,7 @@ import { dismissHeldForAgent } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
 import { sameIssueId } from '../../lib/issue-id.js';
-import { buildAgentName } from '../utils/agent-names.js';
+import { taskBuilderId } from '../utils/agent-names.js';
 import { isWindows } from '../../lib/platform.js';
 import { killSessionTree, type KillSessionTreeOptions } from '../../lib/process-tree.js';
 import { removeWorktreeDirectory } from '../lib/worktree-links.js';
@@ -315,12 +315,23 @@ async function removeWorktree(worktreePath: string, config: Config): Promise<voi
 }
 
 /**
- * A task builder's id from its worktree name or short id, named by
- * buildAgentName as spawn names it: `task-bEPd` / `bEPd` → `builder-task-bepd`,
- * `task-0123` → `builder-task-123` (#1992).
+ * The builder `afx cleanup --task <name>` names (`task-bEPd` or `bEPd`): by its
+ * builder id, else by its worktree directory.
  */
-export function taskBuilderId(taskName: string): string {
-  return buildAgentName('task', taskName.startsWith('task-') ? taskName.slice(5) : taskName);
+export function findTaskBuilder(builders: Builder[], taskName: string): Builder | undefined {
+  const id = taskBuilderId(taskName);
+  return builders.find((b) => b.id === id)
+    ?? builders.find((b) => b.worktree.endsWith(`/${taskName}`) || b.worktree.endsWith(`/${taskName}/`));
+}
+
+/**
+ * The builder `afx cleanup --project <id>` names: by builder id, then (for a
+ * `task-…` name) by the task builder id, then by a builder name containing it.
+ */
+export function findProjectBuilder(builders: Builder[], projectId: string): Builder | undefined {
+  return builders.find((b) => b.id === projectId)
+    ?? (projectId.startsWith('task-') ? builders.find((b) => b.id === taskBuilderId(projectId)) : undefined)
+    ?? builders.find((b) => b.name.includes(projectId));
 }
 
 /**
@@ -349,38 +360,16 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
       fatal(`Bugfix builder not found for issue #${options.issue}`);
     }
   } else if (options.task) {
-    // Find task builder by worktree name (e.g., "task-bEPd")
-    const taskName = options.task;
-    const normalizedId = taskBuilderId(taskName);
-    builder = state.builders.find((b) => b.id === normalizedId);
+    builder = findTaskBuilder(state.builders, options.task);
 
     if (!builder) {
-      // Fallback: check by worktree path containing the task name
-      builder = state.builders.find((b) => b.worktree.endsWith(`/${taskName}`) || b.worktree.endsWith(`/${taskName}/`));
-    }
-
-    if (!builder) {
-      fatal(`Task builder not found for: ${taskName}`);
+      fatal(`Task builder not found for: ${options.task}`);
     }
   } else if (options.project) {
-    const projectId = options.project;
-    builder = state.builders.find((b) => b.id === projectId);
+    builder = findProjectBuilder(state.builders, options.project);
 
     if (!builder) {
-      // Try normalized task ID (e.g., "task-bEPd" → "builder-task-bepd")
-      if (projectId.startsWith('task-')) {
-        const normalizedId = taskBuilderId(projectId);
-        builder = state.builders.find((b) => b.id === normalizedId);
-      }
-    }
-
-    if (!builder) {
-      // Try to find by name pattern
-      const byName = state.builders.find((b) => b.name.includes(projectId));
-      if (byName) {
-        return cleanupBuilder(byName, options.force, options.issue, options.keepIgnored);
-      }
-      fatal(`Builder not found for project: ${projectId}`);
+      fatal(`Builder not found for project: ${options.project}`);
     }
   } else {
     fatal('Must specify either --project, --issue, or --task');
