@@ -34,3 +34,21 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - D3 static eligibility (bundle overridden, or no constituent overridden or disabled;
   non-GitHub presets disable it); never fall back to four calls at runtime.
 - #1995 is a deliberate copy of #1647. I work #1647 only and leave both issues to the architect.
+
+### Spec review (2-way: codex, claude): three rounds, then force-advanced to the gate
+- iter 1: both REQUEST_CHANGES. Exact contract, search-local error classification (resolving
+  a contradiction with "preserve gh's exit status"), per-constituent projection, 60 s / 40 MB
+  limits, security constraints, named doc surfaces. All accepted.
+- iter 2: codex APPROVE; claude REQUEST_CHANGES because "spawns" conflated concept invocations
+  with `gh` processes. On this repo (424 open issues) the bundle is 2 `gh` processes per
+  invocation, so processes go 52 → 40 (−23%), not 52 → 20. Tables now split invocations,
+  processes, requests and points. Also: search qualifiers, nested caps, `forgeStatus` flip on
+  issues-disabled repos.
+- iter 3: both REQUEST_CHANGES on the same contradiction: "stale-within-TTL served" vs.
+  `dispatch()` nulling the failed entry. Made explicit: blank on failure (the per-entry
+  mechanism is unchanged; one entry now holds four sections). Named the regression (today the
+  searches survive a list failure on their 600 s entries) and the alternatives (stale-if-error,
+  Approach 3). Also: the 60 s limit recast as a sizing rationale, and the `gh` 200+errors
+  behaviour recorded as verified.
+- Porch force-advanced at the 3-iteration ceiling. The iter-3 fixes (18b1d18fa) are **not
+  re-reviewed**.
