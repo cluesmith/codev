@@ -97,3 +97,18 @@ Architect chose option B: the small hardening PR.
 - No comment on #1992 from the builder; the note to the reporter (upgrade to ≥3.3.6) is with
   the owner.
 - Merge decision is with the owner and not yet made; holding at the `pr` gate.
+
+## 2026-11-26 — reduced after PR #1993
+
+The owner ruled: PR #1993 (bugfix-1844, same bug, closes #1844) merges first, and this PR is
+reduced to what main lacks. #1993 merged at 22:24 UTC (eb8c60a49).
+
+- #1993 did the same `overview.ts` work: task and generic branches through `buildAgentName`,
+  plus the `worktree-` carve-out, with equivalent tests. Merged `origin/main` (no rebase, no
+  force-push). The conflicts were only my versions of those branches; I resolved them to
+  main's. A separate commit dropped my duplicate `getOverview` test, which had merged in cleanly
+  beside main's. `overview.ts` / `overview.test.ts` are now identical to main.
+- Remaining: the `afx cleanup` fix (`findTaskBuilder` / `findProjectBuilder` via
+  `taskBuilderId`) and its tests, plus the direct `taskBuilderId` test.
+- Full suite on the reduced branch: 10,002 passed, 0 failed.
+- Short-id redraw is tracked in #1998. The pr gate is still pending; the owner decides the merge.
