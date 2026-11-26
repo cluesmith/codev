@@ -101,7 +101,7 @@ function makeCtx(getShellperManager: RouteContext['getShellperManager']): RouteC
     version: '3.4.0',
     startedAt: '2026-11-26T00:00:00.000Z',
     templatePath: null,
-    reactDashboardPath: '/tmp/dash',
+    reactDashboardPath: '/nonexistent/dash',
     hasReactDashboard: false,
     getShellperManager,
     broadcastNotification: vi.fn(),
@@ -143,7 +143,7 @@ describe('GET /api/liveness (#1999)', () => {
     heavy.db.exec(GLOBAL_SCHEMA);
     heavy.getGlobalDb.mockImplementation(() => heavy.db);
     heavy.getDb.mockImplementation(() => heavy.db);
-    getShellperManager = vi.fn(() => ({ socketDir: '/tmp/shellper-sockets' }));
+    getShellperManager = vi.fn(() => ({ socketDir: '/nonexistent/shellper-sockets' }));
   });
 
   it('control: /health calls the instance list, the census and global.db, so the spies are live', async () => {
