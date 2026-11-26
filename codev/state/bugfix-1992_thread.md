@@ -76,3 +76,16 @@ Architect chose option B: the small hardening PR.
   wrong).
 - New cleanup tests (`--task 0123`, `-p task-0123`) fail with the old normalization through the
   real lookups and pass with the fix. Full suite: 10,000 passed, 0 failed.
+
+## 2026-11-25 — CMAP round 3
+
+- claude: APPROVE. Minor suggestions taken (test-only): literal `builder-task-123` /
+  `builder-maintain-123` expectations, and a direct `taskBuilderId` test in
+  `agent-names.test.ts` (with the issue's ids). Not taken (outward-facing, the architect's call):
+  commenting on #1992 that the reporter needs ≥3.3.6.
+- codex: REQUEST_CHANGES, **only** for commit-message format: the `chore(porch):` commits and
+  the merge-from-main commit lack `[Bugfix #1992]`. It found no code, security, scope or test
+  issues. **Rebutted, not acted on:** porch generates those commits (127 of the last 300 commits
+  on main are `chore(porch):`; 15 are this same merge-from-main message). The merge exists
+  because Codex asked for the sync in round 1. Rewriting would force-push over porch's state
+  commits for no gain.
