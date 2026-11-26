@@ -615,6 +615,12 @@ expected `not-verified`.
   account ids and emails. If a record does not fit, C answers `500 cloud-error` without
   forwarding.
 - The encoded statement header is at most 4 096 bytes.
+- **Strict base64url applies to the values R decodes**: the statement header and the MAC (and the
+  session secret from `auth_ok`), with no padding, only the base64url alphabet and the one
+  canonical spelling. `statementId` is never decoded: R checks it by its shape alone (22
+  characters of the alphabet) and uses it as a string key in its step 8 memory. That it is the
+  canonical encoding of 16 bytes, random, and new for every statement are C's obligations. (A
+  clarification ruled on the shared vectors; no change of behaviour.)
 
 **What R checks, in this order, before storing anything.** Any failure in steps 1, 2 and 4 to 6
 and 8 is `not-verified`; it stores nothing and is recorded under the aggregation rule (section 8).

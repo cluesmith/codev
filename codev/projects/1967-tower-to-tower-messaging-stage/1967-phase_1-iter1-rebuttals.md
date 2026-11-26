@@ -32,13 +32,30 @@ after the colon as how C makes the value, not as a further check R can make, for
 3. **The shared vectors are agreed with the cloud as they stand.** The cloud architect reviewed
    the file at acaf1f178 and 979c4a9e0 and confirmed every verified case with the primitives C
    issues with (codev-cloud #22, comments 7204918145 and later). Tightening the rule would
-   flip six cases of that file: the one the review names, and five verified cases whose
-   hand-written ids are not canonical spellings (the pretty-printed statement, both padded-header
-   cases, `v` as 1.0, `issuedAt` as 1.7641e12). That is a contract change for no security gain.
+   flip five verified cases of that file whose hand-written ids are not canonical spellings: the
+   one the review names, the pretty-printed statement, the 4096-byte header, `v` as 1.0 and
+   `issuedAt` as 1.7641e12. (Three more cases have non-canonical ids, but step 1 or step 4 decides
+   them first, so their verdict is the same under either reading.) That is a contract change for
+   no security gain.
 
-The point has been put to the architect, who relays contract readings to the cloud; if the owner
-or the cloud reads the rule the other way, it comes back as a contract correction and the six
-cases change together.
+**Ruling (architect, main, 2026-11-26T22:52Z), quoted:** "your rebuttal stands; keep the shape
+check. I checked it against the contract and contract.ts: the field rule's checkable part is '22
+characters of the alphabet'; R uses the id only as a string key in the step 8 memory and never
+decodes it, so a non-canonical id cannot alias another; and the id is inside the MAC'd statement,
+so only C can choose it. A decode-and-length check would add code and reject nothing an attacker
+could send."
+
+As the ruling also directs, so that the text and the file cannot be read two ways:
+
+- the contract now says, under the statement's field table, that strict base64url applies to the
+  values R decodes (the statement header, the MAC and the session secret), that `statementId` is
+  checked by shape only, and that its canonical 16-byte encoding, randomness and freshness are C's
+  obligations;
+- the names of the five verified vectors that rely on it now say that the shape rule decides
+  them. No verdict changes, and no statement or MAC bytes change.
+
+Per the ruling, if this point is raised again after reading the above, it goes to the architect
+rather than to a third round.
 
 ## Claude's polish — ACCEPTED, changed
 

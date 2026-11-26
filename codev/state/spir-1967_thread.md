@@ -156,3 +156,10 @@
   the accepted reason; R's unsupported-version refusal requires supported). Rebutted, and put to
   the architect: statementId stays a 22-character shape check, not a canonical-16-bytes decode
   (R never decodes it; the cloud agreed the vectors as they are; tightening flips six cases).
+- Architect ruling (2026-11-26T22:52Z) on codex point 1: the rebuttal stands, statementId keeps the
+  shape check. Folded in: a contract sentence (strict base64url applies to what R decodes: the
+  statement header, the MAC, the session secret; statementId is shape-only and its canonical
+  16-byte form, randomness and freshness are C's), and the five verified vectors that rely on it
+  renamed to say so (names only; bytes and verdicts unchanged). Correction to my earlier count:
+  five cases depend on the reading, not six; three more have non-canonical ids but step 1 or 4
+  decides them first. If codex raises the point again: to the architect, not a third round.
