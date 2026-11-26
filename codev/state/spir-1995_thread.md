@@ -118,3 +118,10 @@ codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-rebuttals.md)
   sharing global.db.
 - Raising the failed-refresh divergence (bundle keeps serving still-fresh open lists, four-call
   blanks them) to the architect at the plan gate as an explicit question.
+
+## 2026-11-26 — plan: CMAP iter 2 (codex COMMENT, claude APPROVE)
+All 7 notes applied (disposition: 1995-plan-iter2-rebuttals.md). The plan is now four phases:
+the config.ts forge-null fix is split out as Phase 2 (`deepMerge` itself unchanged; it is also
+used at commands/update.ts:131). Also: a read-only `isFailureWindowOpen` gate (the existing
+`failureWindow()` escalates on read), search strings always sent (`String!` coerced before
+`@include`), explicit 40 MB maxBuffer beside the 60 s timeout.

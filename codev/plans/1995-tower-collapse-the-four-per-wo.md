@@ -9,7 +9,7 @@ issues and (only when due) the two 24 h windows from one `gh api graphql` query 
 Tower uses it only when the bundle resolves and none of the four constituent concepts is
 overridden or disabled. Everything else keeps today's four-call path, unchanged.
 
-The work goes in three phases, ordered by risk:
+The work goes in four phases, ordered by risk:
 
 1. **The concept, starting with the cost gate.** Write the exact final query first and measure its
    `rateLimit { cost }` before anything is built on it. Over the ceiling (> 2 open-only, > 3 with
@@ -17,13 +17,17 @@ The work goes in three phases, ordered by risk:
    script, the contract type, the explicit disable in every non-GitHub preset, and the TS-side
    fetch with conformance checks. Tower is not wired to it yet, so the phase changes no runtime
    behaviour.
-2. **The cache.** Path selection, plus the bundle path in `OverviewCache`: two freshness groups,
+2. **Concept disables that survive config layering.** A pre-existing bug, fixed in place:
+   `deepMerge` deletes a `null`, so a project's `"<concept>": null` is lost when another layer
+   carries a `forge` object. The bundle's fallback rule depends on those disables, so the fix
+   comes first. It is its own commit because it is independent and needs its own review.
+3. **The cache.** Path selection, plus the bundle path in `OverviewCache`: two freshness groups,
    windows that ride along, failure gates, single-flight. The existing tests move to the bundle
    path or keep their four-call coverage on a fallback workspace.
-3. **Visibility.** The dependency-free module that owns the overview TTLs and
+4. **Visibility.** The dependency-free module that owns the overview TTLs and
    `projectHourlyForgeCalls`, the `codev doctor` line, and the docs.
 
-Each phase is one commit on `builder/spir-1995`, and all three ship as one PR opened in the Review
+Each phase is one commit on `builder/spir-1995`, and all four ship as one PR opened in the Review
 phase.
 
 **What I re-checked against the code while planning**
@@ -41,7 +45,7 @@ phase.
   The bundle path then resolves only two backends (`overview-bundle` and `user-identity`), so a
   poll costs less than it does today.
 - `codev-skeleton/` has no forge scripts and no `forge.md` (re-grepped). The only skeleton file this
-  work touches is the `codev.md` mirror (Phase 3).
+  work touches is the `codev.md` mirror (Phase 4).
 
 ## Phases (Machine Readable)
 
@@ -49,6 +53,7 @@ phase.
 {
   "phases": [
     {"id": "overview_bundle_concept", "title": "overview-bundle forge concept, behind a cost gate"},
+    {"id": "forge_config_null_disables", "title": "Forge concept disables survive config layering"},
     {"id": "bundle_cache_path", "title": "OverviewCache bundle path with ride-along windows"},
     {"id": "projection_doctor_docs", "title": "Overview spend projection, doctor line and docs"}
   ]
@@ -88,6 +93,10 @@ building anything, prove that the exact final query is within the points ceiling
        builds it.
 
      Without `is:issue`, PRs would leak into `recentlyClosed`.
+
+     Both search strings are **always sent**, even with `windows: false`. `search(query:)` takes
+     a `String!`, and variables are coerced before `@include(if: false)` is applied, so a
+     missing variable fails validation. The open-only measurement in item 2 exercises this.
 2. Capture the exact query text the script sends: run it once through a pass-through `gh`
    wrapper in a scratch directory, not committed. Then measure that text with `rateLimit { cost }`
    added as a sibling field, which is free, on this repository:
@@ -217,6 +226,12 @@ building anything, prove that the exact final query is within the points ceiling
       endpoint.
     - A timeout is a whole-call failure, so all four sections degrade together. The budget is
       sized so that only a genuinely stuck forge hits it.
+  - [ ] **Output budget.** Passes an explicit `maxBuffer` of 40 MB, a named constant beside the
+        timeout, in place of the dispatcher's 10 MB default.
+    - Today each concept has its own 10 MB, `recently-merged` alone for up to 1000 PR bodies. The
+      bundle carries all four sections in one stdout.
+    - An overflow (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`) is a whole-call failure, so the budget
+      is the sum of today's four.
   - [ ] Validates the output. Anything non-conforming becomes an error result: `data: null`, and
         a message naming the section, item index and field. Non-conforming means any of:
     - [ ] not an object;
@@ -281,9 +296,12 @@ request's variables (`windows`, cursor) and by which connection the query names.
     stderr reaches `executeForgeCommandDetailed`, and `isRateLimitError` matches it.
   - Non-JSON stdout → exit 1.
   - A failing window follow-up page → `windowsError`. A failing issues follow-up page → exit 1.
+  - Combined: the first response carries a window-only error **and** an issues connection with
+    `hasNextPage`. Issue paging still completes, giving 200 issues, and the windows come back
+    as `windowsError`, exit 0. Salvaging the windows never cuts the open-list paging short.
 - **Time budget.** A stub that sleeps on the second page, run with a short `timeoutMs`, gives
   `timedOut: true` and `data: null`, never a partial result. A separate assertion checks that
-  the bundle fetch passes the named 60 s constant.
+  the bundle fetch passes the named 60 s and 40 MB constants.
 - **Fetch validation:**
   - `issues` missing → error;
   - windows requested and missing → error;
@@ -307,9 +325,67 @@ request's variables (`windows`, cursor) and by which connection the query names.
 
 ---
 
-### Phase 2: OverviewCache bundle path with ride-along windows
+### Phase 2: Forge concept disables survive config layering
 
-**Dependencies**: Phase 1
+**Dependencies**: None (ordered before the cache phase, whose fallback rule relies on it)
+
+#### Objective
+
+Make a documented concept disable (`"<concept>": null` in the `forge` section) hold whichever
+config layers are present. This is a pre-existing bug, found in plan review, fixed in place,
+and named in the PR body.
+
+#### The bug
+
+- `deepMerge` (`packages/codev/src/lib/config.ts`) treats `null` as "delete this key".
+- When no lower layer has a `forge` object, the project's `forge` section is assigned wholesale
+  and its nulls survive. That is why disables work on most machines today.
+- But once a lower layer carries a `forge` object (`~/.codev/config.json`, or the framework
+  cache config), or a `.codev/config.local.json` sets one, the merge recurses into `forge` and
+  the null is **deleted**. The concept then falls through to its default and runs.
+- This affects every concept disable. For this project, it is the spec's fallback criteria for
+  a project that disables `overview-bundle` or `recently-merged`. The provider presets' nulls
+  live in code and are unaffected.
+
+#### Files to Create / Modify
+
+- **Modify** `packages/codev/src/lib/config.ts`. In `loadConfig`'s layering, the `forge` section
+  merges across layers key by key, with `null` kept as a value meaning "disabled", as `forge.md`
+  documents. A higher layer's string or null replaces a lower layer's value.
+  - `deepMerge` itself is **unchanged**. It is exported, and `commands/update.ts:131` uses it for
+    settings merges.
+  - Every other config key keeps its semantics.
+  - `ForgeConfig` is flat (`Record<string, string | null>`), so a key-wise merge is complete.
+- **Modify** `packages/codev/src/__tests__/config.test.ts`.
+
+#### Deliverables
+
+- [ ] The `forge`-section layering in `loadConfig`.
+- [ ] Tests.
+
+#### Acceptance Criteria
+
+- [ ] A global `forge` object plus a project `"overview-bundle": null` → the concept resolves to
+      disabled.
+- [ ] A `config.local.json` null over a project string → disabled.
+- [ ] A project string over a global null → that string.
+- [ ] A key present in only one layer is kept.
+- [ ] A non-`forge` key with a null still deletes, as before, so `deepMerge`'s tests are
+      untouched.
+- [ ] Build passes and the full suite passes.
+
+#### Test Plan
+
+- `config.test.ts` cases for each criterion above, each with `HOME` pointed at a temporary
+  directory so the global layer is controlled.
+- One end-to-end case through `getForgeCommand` on the loaded config, showing the disabled
+  concept returns null.
+
+---
+
+### Phase 3: OverviewCache bundle path with ride-along windows
+
+**Dependencies**: Phase 1, Phase 2
 
 #### Objective
 
@@ -326,7 +402,7 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
     - the project disables it;
     - `<concept>` is overridden in the project config;
     - `<concept>` is disabled in the project config.
-  - It is the one Decision 1 rule, shared with doctor in Phase 3.
+  - It is the one Decision 1 rule, shared with doctor in Phase 4.
   - It reads only the config object and the cached presets. No script reads, and no resolution
     of every concept.
 - **Modify** `packages/codev/src/lib/github.ts`: add `overviewPath(cwd)`, which loads the forge
@@ -335,23 +411,6 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
   - Today each of the four calls fails the same way, so the result is still visible and
     fail-fast.
   - It is mockable the way `overviewBackend` is.
-- **Modify** `packages/codev/src/lib/config.ts`. **Fix in place**, named in the PR body:
-  - **The bug.** `deepMerge` treats `null` as "delete this key". The `forge` section is
-    replaced wholesale when no lower layer has one, so a project's `"<concept>": null`
-    survives today. But once any lower layer carries a `forge` object (`~/.codev/config.json`,
-    the framework cache config), or a `.codev/config.local.json` sets one, the merge recurses
-    and the null is **deleted**. The concept then falls through to its default.
-  - **What breaks.** Every documented concept disable fails for those users. Here it is the
-    spec's "a project that disables `overview-bundle`" and "disables `recently-merged`"
-    fallback criteria. (The provider presets' nulls live in code and are unaffected.)
-  - **The fix.** The `forge` section merges across layers key by key, with `null` kept as a
-    value meaning "disabled", as `forge.md` documents. A higher layer's string or null replaces
-    a lower layer's value.
-  - **Blast radius.** Every other config key keeps `deepMerge`'s semantics. `ForgeConfig` is
-    flat, so a key-wise merge is complete.
-- **Modify** `packages/codev/src/__tests__/config.test.ts`. A global `forge` object plus a
-  project `"overview-bundle": null` → disabled. Same for a `config.local.json` null over a
-  project string. A project string over a global null → that string.
 - **Modify** `packages/codev/src/agent-farm/servers/overview.ts`:
   - `getOverview` picks the path per call;
   - the four-call path's code is untouched;
@@ -402,8 +461,14 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
   never make a call due.
 - **Gates.** There is no dispatch while any of these holds:
   - the budget is suspended;
-  - the whole-call failure window `<ws>:<budget>` is running (escalating 60 s → 15 min, via the
-    existing `failureWindow` helper);
+  - the whole-call failure window `<ws>:<budget>` is running (escalating 60 s → 15 min).
+    - The gate is a new **read-only** predicate, `isFailureWindowOpen(key, now)`
+      (`w && now < w.startedAt + w.ttl`).
+    - The existing `failureWindow()` helper both reads **and** escalates: past an elapsed window
+      it raises the level and opens a new one. Calling it on every 2.5 s poll would open windows
+      out of nothing and reach 15 min within seconds. So it is called only from the failure
+      branch, as on the four-call path.
+    - A cadence test fails if a poll alone ever escalates a window.
   - the backend resolves to null.
 - **Carry rule.** A dispatched call requests the windows iff
   (no windows entry **or** age at dispatch ≥ `SEARCH_TTL − LIST_TTL` = 420 s)
@@ -441,7 +506,6 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
 #### Deliverables
 
 - [ ] `resolveOverviewPath` and `overviewPath`, with each four-call reason.
-- [ ] The forge-section null-merge fix in `config.ts`, with its tests.
 - [ ] The bundle path in `OverviewCache`, implementing the contract above.
 - [ ] The existing tests migrated as listed, with no behavioural assertion dropped.
 - [ ] The new cache tests and the real-`gh` harness.
@@ -498,6 +562,9 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
     (14).
   - `overview-bundle: null` (15).
   - A custom `overview-bundle` command with no constituent overrides is used (16).
+  - The same on linear and on jira (16): a project `overview-bundle` override supersedes the
+    preset's disable, and the bundle path is selected. The preset's own constituent scripts (the
+    tracker's `issue-list` and `recently-closed`) are not counted as project overrides.
 - **Real `gh` harness (20):**
   - A ≤ 100-issue fixture: one `gh` per refresh.
   - A 250-issue fixture: two `gh` per refresh.
@@ -505,9 +572,9 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
 
 ---
 
-### Phase 3: Overview spend projection, doctor line and docs
+### Phase 4: Overview spend projection, doctor line and docs
 
-**Dependencies**: Phase 2
+**Dependencies**: Phase 3
 
 #### Objective
 
@@ -533,6 +600,8 @@ adopters.
     `projectHourlyForgeCalls`.
   - Labelling: the projection is the idle steady state, a floor that invalidation can raise.
   - It does not probe `rate_limit` and does not project across workspaces.
+  - The stale "all 18 concepts" comments at `doctor.ts:1695` and `:1713` are corrected in the
+    same edit.
 - **Create** `packages/codev/src/agent-farm/__tests__/spec-1995-overview-budget.test.ts`.
 - **Modify** `packages/codev/src/__tests__/doctor.test.ts`: the forge mock gains
   `resolveOverviewPath`, and three cases are added.
@@ -596,7 +665,7 @@ merged build (`local-install`, with the `CLAUDE_CODE_*` scrub):
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | The final query costs more than measured during specify | Low | High | Phase 1 Step 0 measures the exact shipped text first. Over the ceiling, stop and report to the architect |
-| gh renders a field differently from raw GraphQL (bot logins, ghost authors, null `reviewDecision`) | Medium | Medium | Step 1 diffs real `gh` output field by field. Fixture tests pin each rendering. Phase 2 has a payload deep-equality check on real data |
+| gh renders a field differently from raw GraphQL (bot logins, ghost authors, null `reviewDecision`) | Medium | Medium | Step 1 diffs real `gh` output field by field. Fixture tests pin each rendering. Phase 3 has a payload deep-equality check on real data |
 | A migrated test quietly loses an assertion | Medium | Medium | Change only call-unit counts and per-concept mocks. Run the rate-limit suite on both paths. Move isolation tests to a fallback workspace rather than deleting them. Reviewers read the test diff |
 | Ride-along off-by-one at the 420 s boundary | Medium | Low | Boundary tests on both sides. The cadence tests assert window age < 600 s |
 | Window-only salvage misclassifies an error | Low | High | Salvage requires every error path in a window **and** both open connections present. Tests for top-level, open-path and window-path errors, and a failing follow-up page |
