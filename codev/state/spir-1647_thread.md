@@ -75,3 +75,18 @@ SPIR, soft mode. Spawned by architect `porchless`.
   existing Spec 1951 dispatcher test already proves that `timeoutMs` kills a hanging tool.
   There is no 60 s wait in the suite.
 - Running the plan review: 2-way, codex and claude.
+
+### Plan review (2-way: codex, claude): both COMMENT, every finding folded in (8934609f3)
+- The one design change: the 60 s timeout. Node's `exec` sends SIGTERM to the shell only, and
+  POSIX `sh` defers a trapped signal until the foreground `gh` returns. So every `gh` now runs
+  in the background with `wait`, which returns at once on a trapped signal. The trap then kills
+  `gh` and cleans up. A test asserts a prompt settle, a dead `gh` and an empty `TMPDIR`.
+- The malformed-output reason now travels through `FetchOutcome` on every cache path.
+- The plan states plainly that a fake `gh` cannot test search qualifiers. Coverage is the
+  exact-string argument test, a recording made by real GitHub, and the live check.
+- The issues-disabled divergence is tested and documented.
+- The budget module moved to `src/lib/overview-budget.ts` so that it owns `OverviewPlan` once
+  (a `lib` → `servers` import would run backwards).
+- Dispositions: `codev/projects/1647-…/1647-plan-iter1-rebuttals.md`.
+
+## 2026-11-26: plan-approval gate reached
