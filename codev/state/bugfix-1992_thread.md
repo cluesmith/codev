@@ -63,3 +63,16 @@ Architect chose option B: the small hardening PR.
   lookups now share `taskBuilderId()` built on `buildAgentName`. The mirror tests in
   `cleanup-task-builders.test.ts` now use the real helper.
 - Verified the new tests fail without the fix (`builder-maintain-0123`; `-p task-0123` not found).
+
+## 2026-11-25 — CMAP round 2
+
+- codex: COMMENT. The cleanup test mirrored the lookup, so removing the call-site change would
+  leave it green. Fixed: `cleanup()`'s `--task` / `--project` lookups are now exported
+  `findTaskBuilder` / `findProjectBuilder`, and the tests import them (the mirror is gone). It
+  also flagged the `chore(porch)` commit prefixes, which porch generates, so no action.
+- claude: APPROVE. Suggestions taken: `taskBuilderId` moved to `utils/agent-names.ts`; the
+  `worktree-` branch now has a comment and a `worktree-0123` assertion, because `spawnWorktree`
+  keeps zeros and must NOT go through `buildAgentName` (an easy "consistency" refactor to get
+  wrong).
+- New cleanup tests (`--task 0123`, `-p task-0123`) fail with the old normalization through the
+  real lookups and pass with the fix. Full suite: 10,000 passed, 0 failed.
