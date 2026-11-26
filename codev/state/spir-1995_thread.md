@@ -92,3 +92,13 @@ Architect's own read (01:47 UTC) was explicitly NOT the human decision; held. Ow
 the spec as written at 22:12 UTC (relayed by architect porchless from main); I ran
 `porch approve 1995 spec-approval --a-human-explicitly-approved-this`. Entering plan.
 Plan must put the exact-final-query cost measurement FIRST (spec: a miss stops the work).
+
+## 2026-11-26 — plan: initial draft committed (93d52b4b5)
+Three phases, ordered by risk: (1) `overview-bundle` concept, Step 0 = exact-final-query
+`rateLimit{cost}` gate (≤2 open-only / ≤3 with windows, else STOP → architect), then real-gh
+rendering / base-repo / old-gh checks; (2) OverviewCache bundle path (two freshness groups,
+ride-along carry rule, separate whole-call and windows failure gates, positive entries never
+overwritten by a failure — the spec's "positive entry inside TTL is served"; four-call path code
+untouched); (3) dependency-free `overview-budget.ts` (TTLs + `projectHourlyForgeCalls`), doctor
+line, docs. Flagged in the plan: on the bundle path a failed invalidation-driven refresh keeps the
+still-valid open lists serving, where the four-call path blanks them — reviewers may push back.
