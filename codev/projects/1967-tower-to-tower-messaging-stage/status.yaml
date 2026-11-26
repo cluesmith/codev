@@ -57,10 +57,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: false
+build_complete: true
 history: []
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-26T22:16:29.099Z'
+updated_at: '2026-11-26T22:44:15.122Z'
 force_advanced:
   phase: plan
   iteration: 3
