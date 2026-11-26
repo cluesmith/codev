@@ -52,3 +52,8 @@ SPIR, soft mode. Spawned by architect `porchless`.
   behaviour recorded as verified.
 - Porch force-advanced at the 3-iteration ceiling. The iter-3 fixes (18b1d18fa) are **not
   re-reviewed**.
+
+## 2026-11-26: spec approved
+- The owner approved spec-approval as written (82d206702), ruled at 22:12 UTC and relayed by
+  the architect. I ran `porch approve` (ffd94d2ce). On to Plan; porch requested a context
+  refresh at `enter:plan`.
