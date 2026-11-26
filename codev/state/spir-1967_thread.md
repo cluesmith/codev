@@ -103,3 +103,9 @@
   mailbox row; the peers Playwright config creates and removes its own temp dirs and refuses live
   paths; the 1313 held-count suite stays in the default run (it is route-mocked); grant mode flags
   `--deliver|--hold` named; peer record/outbox prune (never under 30 days).
+- Plan review round 3: codex REQUEST_CHANGES (2), claude REQUEST_CHANGES (2 + 6 minor); all taken.
+  Notable: the first mailbox insert and the accepted-once insert are one transaction (PK decides a
+  race); a tunnel-client audit hook gives the record and the clock surface every request that dies
+  at steps 1–8; `dismissHeldForAgent` (afx cleanup) is set-based, so the accepted-once mirror covers
+  set-based writers too; the Windows three-shell `afx://` check had no home (windows.yml is all
+  bash) — phase 5 adds `windows-probe.mjs --argv` and bash/pwsh/cmd steps.

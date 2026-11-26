@@ -76,7 +76,7 @@ plan uses that boundary:
 
 | Layer | Files | Runs | What it may do |
 |---|---|---|---|
-| **A. Unit and in-process** | `*.test.ts` | **Inside porch's tests check** (3 workers, 15 minutes) | No Tower process, no socket other than loopback, an injected clock for every time-dependent rule. Includes the stand-in relay talking to an in-process tunnel client, as `tunnel-e2e.test.ts` already does with `mock-tunnel-server.ts`, and the sender and receiver pipelines over temporary SQLite files |
+| **A. Unit and in-process** | `*.test.ts` | **Inside porch's tests check** (3 workers, 15 minutes) | No Tower process, no socket other than loopback, an injected clock for every time-dependent rule. Includes the stand-in relay talking to an in-process tunnel client, as `tunnel-integration.test.ts` and `tunnel-client.test.ts` already do inside porch's check, and the sender and receiver pipelines over temporary SQLite files |
 | **B. Two-Tower end to end** | `*.e2e.test.ts` | **On demand**, after `pnpm build`, with `vitest.e2e.config.ts` and at most 3 workers, at the end of each phase that adds one | Two real Tower processes, each with its own port, database, agent-farm directory, socket directory and `HOME`, both connected to the stand-in over loopback |
 | **C. Browser** | `__tests__/e2e/peers-panel.test.ts` (Playwright, only through `playwright.peers.config.ts`), and the held-count suite extended in place (route-mocked, in the default run as today) | **On demand**, in phase 12 and again in phase 13 | Tower's home page and the dashboard, rendered; the peers suite on a throwaway Tower its config starts (never port 4100, never reused) |
 | **D. Platform** | The Windows workflow | **On demand**, dispatched on the branch in phases 5 and 13 | The tunnel client and the CLI's argument handling on Windows |
@@ -187,7 +187,7 @@ says so in its commit message.
 | Mailbox first, render gate, per-agent then per-terminal locks | 6 | A, B |
 | Secret in memory only; no statements, MACs or bodies in logs | 5 (unit), 13 (whole walkthrough) | A, B |
 | Stage 1 carry-overs (the `afx://devvm/…` hint; explicitly named workspaces) | 9 | A, B |
-| Windows: `afx://` unquoted in Git Bash, PowerShell, cmd | 13 (and 5's run) | D |
+| Windows: `afx://` unquoted in Git Bash, PowerShell, cmd | 5 (the probe, first run), 13 (again) | D |
 | Docs, skills and role files in both trees | 13 | — |
 | Gaps G10, G12, G15 (runs shown in `afx peer list`, panel, record) | 8 (state), 11 (CLI), 12 (panel) | A, C |
 
@@ -369,19 +369,33 @@ current database with held rows).
       workspace path and agent, state, last outcome, attempt count, next attempt time, and the time
       it was resolved;
     - `peer_accepted`: peer Tower id plus message id as the key, the payload hash, the mailbox row
-      id, the message's current state and reason, and the expiry (`sentAt` plus 30 days). The state
-      is written in the same transaction as every change to the remote mailbox row it names (held,
-      delivered, dismissed, released), in `db/mailbox.ts`, where every status write lives. A
-      duplicate is answered from this row alone, so it still answers correctly after the mailbox
-      row has been pruned. The row itself is pruned only after its expiry;
+      id, the message's current state and reason, and the expiry (`sentAt` plus 30 days).
+      - **The states** are delivered, held with its reason (`busy`, `no-profile`, `no-live-pty`,
+        `held-for-release`), and dismissed. `superseded` cannot happen to a remote row: remote
+        inserts always leave `supersede_key` NULL, and only rows with a key are superseded. A test
+        asserts this.
+      - **The mirror.** The state is written in the same transaction as every status change to the
+        remote mailbox row it names, in `db/mailbox.ts`, where every status write lives. That
+        covers every status-writing statement in the file, single-row and set-based. The set-based
+        ones mirror with a statement that joins `peer_accepted` to the rows they actually changed;
+        `dismissHeldForAgent`, which `afx cleanup` calls, is the one remote mail reaches today.
+      - **Only real changes are mirrored.** A guarded update (`AND status = 'held'`) that changes
+        nothing rewrites no accepted-once state.
+      - A duplicate is answered from this row alone, so it still answers correctly after the mailbox
+        row has been pruned. The row itself is pruned only after its expiry;
     - `peer_records`: one row per attempt, with the aggregate rows of C5 (sender, reason, minute,
       count, first and last time).
 - `packages/codev/src/agent-farm/db/mailbox.ts`. Every query that reads held mail lives in this file
   (the only other `mailbox` statement, in `db/canonicalize-workspace-paths.ts`, updates
   `workspace_path` and reads no status). Each one the local drainer, the escalation and the held
   counts use excludes `release_hold = 1`, and a mapping reports such a row's reason as
-  `held-for-release`. The phase's test greps every `mailbox` statement in the source and fails on
-  one outside these two files, so the claim is checked, not assumed.
+  `held-for-release`.
+  - **The claim is checked.** The phase's test greps every `mailbox` statement in non-test source
+    files under `packages/*/src` (the scope phase 1's structural test uses; one-off scripts under
+    `packages/codev/scripts/` are outside it) and fails on one outside these two files.
+  - **`release_hold = 1` only ever goes with `status = 'held'`.** Release clears it, making the row
+    ordinary held mail that the gate then drains. A dismissal clears it in the same statement that
+    sets `dismissed`. So a delivered or dismissed row never carries it.
 - `packages/types/src/api.ts`: `held-for-release` joins the held-mail reason union.
 - `packages/sdk/src/hold-verdict.ts`: renders `held-for-release` by name, rather than falling back to
   a bare `held`.
@@ -430,6 +444,15 @@ current database with held rows).
   counted as waiting for a local agent.
 - [ ] Every status change of a remote mailbox row updates its `peer_accepted` state in the same
   transaction. A failure injected after the mailbox write rolls both back.
+- [ ] Each status-writing statement in `db/mailbox.ts`, single-row and set-based, has a test that
+  applies it to a remote row and checks `peer_accepted`. A test that lists those statements fails
+  when a new one is added without such a test.
+- [ ] `afx cleanup` of a builder with remote mail held for it (through `dismissHeldForAgent`) leaves
+  each `peer_accepted` row reporting `dismissed`, and a duplicate of one is answered `refused`,
+  `dismissed`.
+- [ ] A guarded update that changes no row leaves `peer_accepted` unchanged.
+- [ ] No row with `status` other than `held` has `release_hold = 1` after release, delivery or
+  dismissal. A remote row never has a `supersede_key`.
 - [ ] `pruneTerminal`, with retention set to 1 day, removes a delivered remote row after a day and
   leaves its `peer_accepted` row, with its state, until 30 days after `sentAt`.
 - [ ] The peer prune, asked for 1 day, uses 30. It removes records and resolved outbox rows older
@@ -480,8 +503,11 @@ yet, but the rules arrivals will be checked against are in place and tested.
     per peer, 50 waiting at the sender per peer);
   - `peer.recordRetentionDays`, default 30. A smaller value is raised to 30, since the spec requires
     at least 30 days.
-- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts`: the existing prune pass also runs phase
-  3's peer prune with that setting.
+- `packages/codev/src/agent-farm/servers/mailbox-wiring.ts` resolves `peer.recordRetentionDays`,
+  as it resolves `mailbox.retentionDays` today.
+- `packages/codev/src/agent-farm/servers/mailbox-delivery.ts`: the existing prune pass, where
+  `pruneTerminal` runs at boot and periodically, also runs phase 3's peer prune with that setting,
+  threaded through the same way as `retentionDays`.
 - `packages/sdk/src/tower-client.ts` and `packages/types/src/api.ts`: the client calls and request
   and response types for the new local routes.
 - Tests: `__tests__/peer-grants.test.ts` and `__tests__/peer-commands.test.ts` (new).
@@ -541,14 +567,38 @@ This is the code the architect will read, so it is kept to the interception and 
     stored.
   - **Handing on.** A verified request goes to a handler injected by the Tower, which phase 6
     supplies; until then the handler answers `refused`, `remote-off`.
+  - **An audit hook for everything that stops before the handler.** Every request that reaches the
+    entry point produces exactly one structured event through a second injected hook, whatever its
+    fate. The event carries:
+    - the time and the tunnel session's id;
+    - the step that ended it (1 to 8) and the outcome (`not-verified`, `unsupported-version` or
+      `clock-skew`), or "handed on";
+    - the verified sending Tower id, only once step 2 has passed;
+    - the request id and kind, only once step 4 has passed.
+
+    It never carries the secret, the statement bytes, the MAC or the body. Phase 6 wires this hook to
+    the record and to the clock-skew surface. Until then the Tower supplies a no-op.
   - **The local listener.** It gains no route for the path.
   - **Removals.** The dead `POST /api/tower/metadata` push is removed (issue #1986, C14), and the
     issue is closed by the PR.
 - `packages/codev/src/agent-farm/servers/tower-tunnel.ts`: passes the switch state in and the
   handler; re-announces the switch on reconnect; exposes the session's slug and relay state to the
   rest of Tower (never the secret).
-- `packages/codev/src/agent-farm/__tests__/helpers/mock-tunnel-server.ts`: unchanged, apart from
-  what existing tests need to keep passing.
+- `packages/codev/src/agent-farm/__tests__/helpers/mock-tunnel-server.ts`: its `lastMetadata` and
+  its `POST /api/tower/metadata` handler lose their only writer with the push and are removed.
+  Nothing reads them; the `GET /__tower/metadata` serving path the tunnel tests exercise stays.
+- **A probe for `afx://` on Windows shells.** Today `windows.yml` runs every step under
+  `shell: bash`, and nothing probes the address. The spec's criterion that an address typed
+  unquoted in Git Bash, PowerShell and cmd arrives unchanged therefore needs its own check, built
+  here so a shell that mangles the form is found before any doc teaches it:
+  - `scripts/windows-probe.mjs` gains an `--argv` section. It reports, as JSON, the arguments a
+    Node child receives, so the shell under test is the only thing between the typed text and the
+    process.
+  - The `probe` job in `.github/workflows/windows.yml` gains three steps, one each with
+    `shell: bash`, `shell: pwsh` and `shell: cmd`. Each types
+    `afx://devvm/codev:architect:local` and `afx://devvm/codev:builder-spir-7` unquoted and fails
+    unless both arrive byte for byte.
+  - The workflow's header lists the new section.
 - Tests: `__tests__/peer-entry-point.test.ts` (new, layer A, an in-process tunnel client against the
   stand-in) and `__tests__/peer-entry-point.e2e.test.ts` (new, layer B).
 
@@ -557,8 +607,8 @@ This is the code the architect will read, so it is kept to the interception and 
 - [ ] The handshake fields, the TLS rule, the secret's home, the interception with steps 1 to 8, and
   the statement-id memory.
 - [ ] The metadata push removed.
-- [ ] The Windows workflow is dispatched on the branch (the tunnel client is platform code) and
-  linked in the thread:
+- [ ] The Windows workflow is dispatched on the branch (the tunnel client is platform code, and the
+  new three-shell probe runs in its `probe` job) and linked in the thread:
   `gh workflow run windows.yml --ref builder/spir-1967 -f purpose='Spec 1967 tunnel peer entry point' -f suites=true`.
 - [ ] Tests for this phase.
 
@@ -576,6 +626,11 @@ This is the code the architect will read, so it is kept to the interception and 
   non-loopback host, leaves the Tower with no secret and reporting no relay.
 - [ ] The secret never reaches a log: a test spies on the logger through a session, a forwarded
   request and a reconnect, and searches every line for it.
+- [ ] In the Windows run, the three-shell probe passes, or its failure is reported to the
+  architect.
+- [ ] For a failure at each of steps 1 to 8, the audit hook receives exactly one event. Each event
+  names that step and outcome, and carries a sender only after step 2 and a request id only after
+  step 4. No event contains the secret, the statement, the MAC or the body.
 - [ ] Build and porch's tests check pass.
 
 #### Test Plan
@@ -613,7 +668,11 @@ per-agent then per-terminal locks.
   is handed to phase 10's discovery; until that phase lands it is refused, a state no shipped build
   ever has, since all phases land in one PR.
 - `packages/codev/src/agent-farm/peer/records.ts` (new): inbound records, with the aggregation rule
-  for floods, unverified requests recorded against the session, and no body anywhere.
+  for floods and no body anywhere. It is fed from two places:
+  - phase 5's audit hook, for every request that stopped at steps 1 to 8. A request that failed
+    before step 2 is recorded against the tunnel session with the sender `unverified`, aggregated
+    per session, reason and minute; after step 2 it is recorded under the verified sending Tower;
+  - the receiver, for every request handed on.
 - `packages/codev/src/agent-farm/servers/mailbox-delivery.ts`: when the drainer is about to deliver a
   remote row, it checks the switch and the grant again. If either no longer allows it, the row moves
   to held for release instead (criterion 15, and the approved spec's "switched off while held busy"
@@ -623,9 +682,19 @@ per-agent then per-terminal locks.
   - Decision 7's normalisation applied to remote bodies only. Local frames stay byte-identical, which
     the tests assert.
 - `packages/codev/src/agent-farm/servers/tower-tunnel.ts`: supplies the receiver as the tunnel
-  client's handler.
-- R's clock surface (G12). While any relayed request in the last 10 minutes was refused as
-  `clock-skew`, the Tower carries that state for phases 11 and 12.
+  client's handler, and the record and the clock surface as its audit hook.
+- R's clock surface (G12), fed by both the audit hook (step 7) and the receiver (a `sentAt` ahead of
+  the clock). While any relayed request in the last 10 minutes was refused as `clock-skew`, the
+  Tower carries that state for phases 11 and 12.
+- **Persisting is one transaction** (in `peer/store.ts` and `db/mailbox.ts`). The `peer_accepted`
+  row and the mailbox row are inserted in one SQLite transaction, `peer_accepted` first:
+  - its primary key (peer Tower id, message id) is what decides a race between two arrivals of one
+    message;
+  - an insert that conflicts rolls back, and the arrival is answered as a duplicate (the existing
+    row's state) or a `mismatch` (a different payload hash).
+
+  The gate attempt is made only after the transaction commits. So no mailbox row can exist without
+  its accepted-once record, and no record can exist without its row.
 - Tests:
   - `__tests__/peer-receiver.test.ts` and `__tests__/peer-frame-invariant.test.ts` (new, layer A;
     the property test runs on the seeded generator);
@@ -647,6 +716,16 @@ per-agent then per-terminal locks.
   30-day lifetime is refused as `expired` (the approved spec's short-retention scenario). A different payload under the same id is `mismatch`,
   is recorded, and changes nothing. A retry after the switch or the grant changed still gets the
   true state (the ordering the owner adopted).
+- [ ] **Atomic acceptance.**
+  - A failure injected before the first insert, between the two inserts, and after both but before
+    the commit leaves neither row. A retry of the same message is then accepted once.
+  - A failure injected after the commit leaves both rows, and a retry is answered as a duplicate.
+  - Two arrivals of one message processed concurrently produce one mailbox row; one is answered as
+    the duplicate of the other.
+- [ ] **Unverified requests are recorded.** A failure at each of steps 1 to 8 is recorded with the
+  right attribution (the session and `unverified` before step 2, the sending Tower after it), and
+  floods are aggregated per minute. None leaves a mailbox row or an accepted-once record. A step 7
+  refusal sets the clock surface.
 - [ ] **No grant.** The answer is `refused`, `no-grant`, and there is no mailbox row and no
   accepted-once record. The same statement presented again is `not-verified` (used up), and a
   retry under a new statement after the grant is added is accepted.
@@ -1026,9 +1105,12 @@ three counts, with mail held for release putting it in its attention state.
   - **The port.** It refuses unless `TOWER_TEST_PORT` is set and is not 4100.
   - **The directories are the config's own**, not taken from the caller. In Playwright's main
     process it creates an agent-farm directory, a socket directory and a `HOME` with `mkdtemp`
-    under the system temp directory. It records them in the environment, which Playwright's workers
-    inherit, so a worker never creates a second set. It passes them to the Tower through
-    `webServer.env`.
+    under the system temp directory. It passes them to the Tower through `webServer.env`.
+  - **Workers reuse them.** Playwright evaluates the config again in every worker process. So the
+    config first looks for paths already recorded in its own environment variables, and calls
+    `mkdtemp` only when there are none, which is true only in the main process. Workers inherit the
+    variables, reuse the same three paths, and pass the same path check. A test of the config
+    module, loaded twice with the variables set by the first load, finds one set of directories.
   - **A check before the Tower starts.** It resolves each path with `realpath` and refuses if any is
     not under the system temp directory, or is or contains the live agent-farm directory
     (`~/.agent-farm`), the default socket directory or the real home. The database lives in the
@@ -1116,8 +1198,9 @@ Tests and checks:
     holds bodies there by design);
   - neither Tower's logs, `cloud-config.json` nor records contain the secret, a statement, a MAC or
     any body text.
-- [ ] **Windows**: the workflow, with the suites on, checking that an `afx://` address typed unquoted
-  in Git Bash, PowerShell and cmd arrives unchanged; linked in the PR:
+- [ ] **Windows**: the workflow again on the finished branch, with the suites on. Its `probe` job
+  runs phase 5's three-shell check that an `afx://` address typed unquoted in Git Bash, PowerShell
+  and cmd arrives unchanged. Linked in the PR:
   `gh workflow run windows.yml --ref builder/spir-1967 -f purpose='Spec 1967 stage 2 remote addressing' -f suites=true`.
 - [ ] The full layer B and C suites run once more on the finished branch (on demand, load 20 or
   less), with the results in the review.
@@ -1185,7 +1268,7 @@ Every scenario in the spec's Test Scenarios, and the inherited stage 2 scenarios
 | Inherited: discovery limited to the grant; `afx peer show` offline refused | 10 | A, B |
 | Inherited: exceeding the per-peer limit, at the Tower with the cloud's raised | 6, 8 | A |
 | Inherited: the walkthrough and its skipped-step table | 13 | B |
-| Inherited: `afx://` unquoted on Windows shells | 13 | D |
+| Inherited: `afx://` unquoted on Windows shells | 5, 13 | D |
 | Waits for the real cloud: same name on another account; `/t/` refusal at the cloud; the cloud's per-peer limit; behind NAT | — | at `verify-approval` |
 
 **Budget for porch's check.** Layer A adds no Tower process and no real wait. The pipeline test
@@ -1208,7 +1291,7 @@ next phase rather than moving tests silently.
 | Issue #1871 has not merged by phase 13 | Medium | Low | Tower's name while connected comes from `auth_ok.slug`, and `not-registered` works from the cloud's `401`. Only the disconnected display and the pre-call deregistered check depend on #1871. If it has not merged, those two are named in the review and the architect is told; nothing reads the typed name instead |
 | A test Tower reads the owner's own config or home | Low | Medium | Every test Tower runs with a throwaway `HOME`, agent-farm and socket directory (phase 2); the peers Playwright config creates its own and refuses any path that is not a throwaway one (phase 12) |
 | Two Tower processes in one test are flaky on a loaded machine | Medium | Medium | Layer B runs only on demand at load 20 or less, at most 3 workers; a failure is reported, not rerun |
-| The Windows run finds a shell that mangles `afx://` | Low | Medium | Found in phase 5's run, before the docs teach the form; reported to the architect |
+| The Windows run finds a shell that mangles `afx://` | Low | Medium | Phase 5 adds the three-shell probe (`scripts/windows-probe.mjs --argv`, one step per shell in `windows.yml`) and runs it before any doc teaches the form; a failure is reported to the architect |
 
 ## Documentation Updates
 
