@@ -75,10 +75,10 @@ const ctx: RouteContext = {
   version: '9.8.7',
   startedAt: '2026-11-26T00:00:00.000Z',
   templatePath: null,
-  reactDashboardPath: '/tmp/dashboard/dist',
+  reactDashboardPath: '/nonexistent/dashboard/dist',
   hasReactDashboard: false,
   // A live shellper manager, so `/health` takes its full path (census and DB read included).
-  getShellperManager: () => ({ socketDir: '/tmp/air-1977-sockets' }) as unknown as ReturnType<RouteContext['getShellperManager']>,
+  getShellperManager: () => ({ socketDir: '/nonexistent/air-1977-sockets' }) as unknown as ReturnType<RouteContext['getShellperManager']>,
   broadcastNotification: vi.fn(),
   addSseClient: vi.fn(() => true),
   removeSseClient: vi.fn(),
