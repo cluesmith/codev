@@ -60,3 +60,29 @@ Decisions 2–4 are written into the spec with the alternative named, overrulabl
 Decision 1 (mine): bundle only when `overview-bundle` resolves AND none of the four
 constituents is overridden/disabled in project config; every non-GitHub preset disables the
 bundle explicitly (an omitted concept falls through to the GitHub script).
+
+## 2026-11-25 — specify: CMAP iter 1 (codex REQUEST_CHANGES, claude REQUEST_CHANGES)
+Both valid; all applied.
+- codex + claude: the ride-along cadence was under-defined ("at most once per 600 s" vs a
+  540 s prefetch). Now exact: only the open lists make a call due; a call carries the
+  windows iff no positive entry or age ≥ 420 s (600 − 180), except inside their own failure
+  window. Consequence: max age < 600 s (today's max age), re-queries ≥ 420 s apart, every 3rd
+  refresh idle, 7th–8th under 60 s churn, never a call of their own. Churn model 127 → 128.
+- claude: "one spawn whatever the pages" was false. A cursor page is a second `gh api
+  graphql` process (`--paginate` would re-cost the whole query). Unit is now forge calls
+  (20/h); `gh` processes = 1 + extra pages (codev 40/h vs 52).
+- claude: partial GraphQL errors. **Verified** gh 2.102.0 on a partial error: exit 1,
+  stdout = full `{data, errors[path]}`, stderr = `gh: <msg>`. Decided: an error confined to
+  the window sections fails only the windows (own failure window, `windowsError` in the
+  output); any other error, top-level rate limit included, fails the whole call. Keeps
+  today's isolation during a GitHub search outage.
+- claude: "existing tests pass unchanged" was false. The default-GitHub tests become the
+  bundle path; the spec now lists the fixtures to update (gh-quota counts,
+  rate-limit fake, concept count 20→21) and requires behaviour parity instead.
+- claude: points measurement now records the nested connections (reviewRequests, labels,
+  assignees at first:100); the exact final query is re-measured BEFORE the cache work,
+  and a miss stops the work and goes to the architect.
+- smaller (claude): explicit `CODEV_INCLUDE_WINDOWS=1` instead of reusing
+  `CODEV_SINCE_DATE` presence (inverted meaning vs recently-merged); fork/multi-remote
+  base-repo parity check; `# forge-executable: gh`; doctor projection labelled idle steady
+  state; path selection must be cheap per poll; hybrid custom-override note.

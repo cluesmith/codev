@@ -66,12 +66,22 @@ last 24 h):
 | query | points |
 |---|---|
 | open PRs (first 30) alone | 1 |
-| one open-issues page (first 100, with labels + assignees) | 2 |
-| both 24 h searches together | 1 |
+| one open-issues page (first 100) | 2 |
+| both 24 h searches together (first 100 each) | 1 |
 | open PRs (30) + open issues (100), one query | 2 |
 | same, plus both 24 h searches, one query | 3 |
 | same query with the searches switched off by `@include(if: false)` | 2 |
 | open PRs (first 100) + issues + searches (for reference) | 4 |
+
+Every measured query carried the nested connections the item contracts need:
+
+- `reviewRequests(first: 100)` on PRs;
+- `labels(first: 100)` and `assignees(first: 100)` on open issues;
+- `labels(first: 100)` on closed issues.
+
+Scalar fields (title, body, dates, author) do not change a query's cost, so these are the
+costs of the final field set. The plan re-measures the exact final query before building
+on it.
 
 GitHub costs a query by its **node counts**, and the labels and assignees nested on 100
 issues dominate. Request count matters far less. Folding the minimum-1-point floors of
@@ -81,10 +91,13 @@ they are not due. What remains is data volume, which cannot be collapsed away.
 Points/h per watched workspace, steady state (idle = no invalidations; churn = open lists
 invalidated every 60 s, the debounce ceiling):
 
-| | spawns/h | GraphQL req/h | pts/h idle | pts/h churn |
-|---|---|---|---|---|
-| **today**, small repo (≤100 open issues) | 52 | 52 | 72 | 192 |
-| **today**, codev (424 open issues, 2 issue pages) | 52 | 72 | 112 | 312 |
+| | forge calls/h | `gh` processes/h | GraphQL req/h | pts/h idle | pts/h churn |
+|---|---|---|---|---|---|
+| **today**, small repo (≤100 open issues) | 52 | 52 | 52 | 72 | 192 |
+| **today**, codev (424 open issues, 2 issue pages) | 52 | 52 | 72 | 112 | 312 |
+
+(`gh issue list --limit 200` pages inside one `gh` process, so today `gh` processes equal
+forge calls.)
 
 Other facts that bound the design:
 
@@ -114,15 +127,20 @@ forge concept call**, `overview-bundle`. One `gh api graphql` query returns:
 Everything downstream of the cache is unchanged. The dashboard, VS Code and the cloud UI
 receive the same `/api/overview` payload they receive today for the same repository state.
 
-| | spawns/h | GraphQL req/h | pts/h idle | pts/h churn |
-|---|---|---|---|---|
-| **bundle**, small repo | **20** | 20 | **≈47** | **≈127** |
-| **bundle**, codev | **20** | 40 | **≈87** | **≈247** |
+| | forge calls/h | `gh` processes/h | GraphQL req/h | pts/h idle | pts/h churn |
+|---|---|---|---|---|---|
+| **bundle**, small repo | **20** | **20** | 20 | **≈47** | **≈128** |
+| **bundle**, codev | **20** | **40** | 40 | **≈87** | **≈248** |
 
-(Ride-along model: an open-only refresh costs 2 pts; one that also carries the 24 h windows
-costs 3. The windows ride along about every third refresh at idle and about every seventh
-under churn. Codev adds a 2-point second issues page to every refresh. These are model
-figures built from the measured per-query costs. Verification re-measures the real
+(Paging a cursor needs a second `gh api graphql` request, which is a second `gh` process
+inside the same forge call. `gh api graphql --paginate` cannot be used: it re-sends, and
+re-costs, the whole query for every page.)
+
+(Ride-along model, using the rule in Decision 3: an open-only refresh costs 2 pts, and one
+that also carries the 24 h windows costs 3. At idle the windows ride on every third refresh
+(every 540 s, 6.7/h). Under 60 s churn they ride on every seventh or eighth (every
+420–480 s, about 8/h). Codev adds a 2-point second issues page to every refresh. These are
+model figures built from the measured per-query costs. Verification re-measures the real
 per-query cost.)
 
 Non-GitHub forges (gitlab, gitea, linear, jira), and any project whose configuration makes
@@ -137,15 +155,20 @@ constants the cache runs on.
 
 - [ ] **One call per refresh.** On a GitHub workspace with default config, a continuously
       polled workspace makes exactly one forge concept call (`overview-bundle`) per open-list
-      refresh window. That is 20 overview calls/h at steady state with no invalidations (52
-      today), not counting the hourly `user-identity` REST call. Each call is one process
-      spawn, whatever number of GraphQL pages it needs.
+      refresh window. That is 20 overview forge calls/h at steady state with no
+      invalidations (52 today), not counting the hourly `user-identity` REST call. Inside a
+      call, each GraphQL request is one `gh` process. That is one per call when every
+      section fits a single page (≤100 open issues, ≤100 per window), plus one per extra
+      page. On codev that is 2 per call, so 40 `gh` processes/h against 52 today.
 - [ ] **Open-list semantics preserved.** Open PRs and issues keep the 180 s TTL. They
       honour `invalidate()` with the 60 s per-workspace debounce, for positive entries
       only, as today.
-- [ ] **24 h windows ride along.** The two 24 h windows refresh at most once per 600 s and
-      are never refetched because of `invalidate()`. They travel inside an open-list
-      refresh. Under continuous polling they never cause a call of their own (Decision 3).
+- [ ] **24 h windows ride along** (rule in Decision 3). 600 s is a **maximum data age**, as
+      today. In a continuously polled workspace the windows' data is never older than
+      600 s (plus the poll interval). They are re-queried no more often than every 420 s
+      (600 − 180). They never make a call due on their own, and `invalidate()` never
+      expires them. An invalidation-driven refresh carries them only if they are already
+      past 420 s.
 - [ ] **Payload parity.** For the same repository state, `/api/overview` from the bundle
       path equals the four-call path's payload: `pendingPRs`, `backlog`, `recentlyClosed`,
       `forgeStatus`, `errors`, and builder title/area enrichment. Parity is proven by
@@ -153,8 +176,7 @@ constants the cache runs on.
 - [ ] **Cap parity.** The bundle returns up to the same caps as today: 30 open PRs, 200 open
       issues, and 1000 items per 24 h window. A section with more results than one page is
       paged **inside the same forge call** (Decision 4).
-- [ ] **Fallback.** These use the four-call path, with behaviour and existing tests
-      unchanged:
+- [ ] **Fallback.** These use the four-call path, with behaviour unchanged:
       - the gitlab, gitea, linear and jira presets;
       - a project that overrides or disables any of `pr-list`, `issue-list`,
         `recently-closed` or `recently-merged`;
@@ -163,8 +185,20 @@ constants the cache runs on.
       preset. It never runs `gh` on a non-GitHub workspace.
 - [ ] **Failure behaviour unchanged.** A failed bundle call is cached as a failure with the
       existing escalating window. A rate-limit failure suspends the `gh` budget exactly as a
-      failed `pr-list` does today. A failure **never** triggers the four concepts as a
-      runtime fallback. Malformed or non-conforming bundle output counts as a failure.
+      failed `pr-list` does today. While a failed call's failure window runs, no further
+      bundle call is made. A section whose positive entry is still inside its TTL (or, for
+      the windows, under 600 s old) is served. A section past that is empty, with the
+      error text. A failure **never** triggers the four concepts as a runtime fallback.
+      Malformed or non-conforming bundle output counts as a failure.
+- [ ] **A window-only error fails only the windows.** Sometimes the windows were requested
+      and GitHub returns `data` plus `errors`, every one of whose paths lies in a 24 h
+      window section, with the open-list sections intact. A GitHub search timeout or search
+      outage is the common case. Then the call delivers the open lists as a success and
+      records the windows as a failure, with their own escalating failure window, during
+      which calls do not request them. Any other error fails the whole call: a top-level
+      error (rate limit included), an error in an open-list section, or an open-list section
+      missing. This is not a second call. It is honest partial output from the one call, and
+      it keeps today's isolation, where a failing search blanks only its own panel.
 - [ ] **Single-flight.** Concurrent overview requests for one workspace share one
       in-flight bundle call.
 - [ ] **Projection.** `projectHourlyForgeCalls` exists in a small dependency-free module
@@ -174,12 +208,16 @@ constants the cache runs on.
 - [ ] **Doctor.** `codev doctor` lists `overview-bundle` with its resolution source
       (`disabled` on non-GitHub presets). It prints one informational line for this
       workspace: the overview path (bundled / four calls), the reason when it is four calls,
-      and the projected calls/h per watched workspace from `projectHourlyForgeCalls`. It
-      does not probe the rate-limit API and does not project across workspaces.
-- [ ] **Points do not regress.** Measured with `rateLimit { cost }` against a real repo
-      during verification, an open-only bundle refresh with one issues page costs ≤ 2
-      points, and a refresh carrying the 24 h windows costs ≤ 3. The steady-state pts/h
-      model for this repo is no higher than today's.
+      and the projected forge calls/h per watched workspace from `projectHourlyForgeCalls`.
+      The projection is labelled as the idle steady state, a floor that invalidation can
+      raise. It does not probe the rate-limit API and does not project across workspaces.
+- [ ] **Points do not regress.** Measured with `rateLimit { cost }` on the exact final
+      query against a real repo, an open-only bundle refresh with one issues page costs
+      ≤ 2 points, and a refresh carrying the 24 h windows costs ≤ 3. The steady-state pts/h
+      model for this repo is no higher than today's. The measurement is taken **before**
+      the cache work is built. If it exceeds these ceilings, the builder stops and reports
+      the numbers to the architect rather than proceeding. The ride-along points saving is
+      the case for Decision 3, so a miss reopens that decision.
 - [ ] **Docs.** The forge concept reference documents `overview-bundle`: its inputs, output
       shape, when Tower uses it, and how to override or disable it.
 - [ ] Full test suite green. Both the bundle path and the fallback path have tests.
@@ -204,7 +242,14 @@ constants the cache runs on.
   a configuration decision made before any call. It never retries after a failure.
 - **Script runtime.** GitHub concept scripts are POSIX `sh` run through the platform shell
   launcher (Git Bash on native Windows), using `gh` and `jq`. `jq` is already required by
-  `pr-list`, so the bundle adds no new dependency.
+  `pr-list`, so the bundle adds no new dependency. The script declares
+  `# forge-executable: gh`, so doctor and backend keying resolve `gh` and not a shell
+  builtin (the #1455 trap). POSIX `sh` has no `pipefail`, so the script's exit status must
+  stay honest, as `pr-list`'s does after #1645.
+- **Path selection is cheap.** Deciding between the bundle and the four-call path runs on
+  every poll (2.5 s × every watched workspace). It may not cost materially more than
+  today's per-poll concept resolution. In particular, it must not resolve every known
+  concept or read script files on each poll.
 - **Server/client isolation.** The change is server-side (`codev-core` side of the
   boundary). The `OverviewData` type is unchanged, so `codev-types` and the clients are
   untouched.
@@ -219,10 +264,17 @@ constants the cache runs on.
   2.102.0. The bundle therefore needs no extra `gh repo view` call.
 - GitHub costs a query honouring `@include(if:)`, so switched-off sections cost nothing.
   Verified: 3 points with the searches on, 2 with them off.
-- `gh api graphql` exits non-zero when the response carries GraphQL `errors`, so the
-  existing failure path (stderr + exit code into `ForgeRateLimiter`) sees a rate-limit
-  error from the bundle just as it does from `gh pr list`. The plan verifies this against
-  real `gh` behaviour, rate-limit message included.
+- `gh api graphql` exits non-zero when the response carries GraphQL `errors`. **Verified**
+  (gh 2.102.0) with one good and one bad field: exit 1, stdout carries the full response
+  (`data` with the good section intact, and `errors[]` each with a `path`), and stderr
+  carries `gh: <message>`. Two things follow. The window-only salvage rule is implementable
+  from the one response. And on a whole-call failure, the script passes stderr through so
+  `ForgeRateLimiter` sees a rate-limit message just as it does from `gh pr list`. The plan
+  verifies the rate-limit message itself.
+- `gh api graphql`'s `{owner}/{repo}` resolves to the same repository `gh pr list` /
+  `gh issue list` pick: the same base-repo resolution, honouring `gh repo set-default` on
+  forks and multi-remote clones. The plan verifies this on a fork-shaped clone, because a
+  silent fork/parent swap would change the whole payload.
 - GraphQL `search` inside the bundle spends GraphQL points, not the REST search resource.
   This is how `gh … --search` already works today, so it is no change.
 - The overview's consumers depend only on the fields the four concepts emit today. Raw
@@ -246,13 +298,19 @@ override honoured. A project that rewrote `issue-list` to filter by label, or di
 `recently-merged`, keeps getting precisely that. The gitlab, gitea, linear and jira presets
 disable `overview-bundle` explicitly. Omitting it would fall through to the GitHub script.
 
+A project may supply its own `overview-bundle` command. On a hybrid provider (linear,
+jira) that passes rule 2, because the tracker's issue concepts come from the preset, not
+from project config. That is a legitimate adopter choice. The forge doc states that such
+an override is then responsible for every section, issues from the tracker and PRs from
+GitHub alike.
+
 ### Decision 2: projection and doctor — build a minimal version here
 
 *Chosen (architect, 2026-11-26):* one small, dependency-free module owns the overview TTL
 constants and `projectHourlyForgeCalls`. It is shared by `OverviewCache` and `codev doctor`,
 so the projection cannot drift from the cache. Doctor adds one informational line for the
-current workspace: the path, the reason for four calls, and projected calls/h per watched
-workspace.
+current workspace: the path, the reason for four calls, and projected forge calls/h per
+watched workspace (idle steady state).
 
 *Alternative (overrulable at the spec gate):* drop the projection/doctor acceptance line,
 since neither exists on `main`, and ship only the concept. Cheaper, but the issue's
@@ -265,13 +323,32 @@ takes.
 ### Decision 3: one call per refresh, 24 h windows ride along only when due
 
 *Chosen (architect, 2026-11-26):* each refresh is one bundle call. The open lists are
-always in it. The 24 h windows are switched on in the same query (`@include`) only when
-due: stale, or due to go stale before the next open-list refresh would carry them. They
-are never switched on by `invalidate()`. Preserves #1645's per-section semantics exactly
-(180 s + invalidation for open lists; 600 s, never invalidated, for the windows).
-Model: small repo ≈47 pts/h idle and ≈127 under churn, against 72 and 192 today. Cost: the
-cache tracks two freshness groups inside one call, and the contract's 24 h sections are
-present only when requested.
+always in it, and the 24 h windows are switched on in the same query (`@include`) only when
+due. The rule, exactly:
+
+- **Only the open lists make a call due.** That happens when their TTL expires, when a
+  debounced `invalidate()` lands, on a cold cache, or when a failed call's failure window
+  has elapsed.
+- **Each call carries the windows iff** they have no positive entry, or their age at
+  dispatch is at least `SEARCH_TTL − LIST_TTL` (600 − 180 = 420 s). The one exception:
+  while the windows are inside their own failure window, after a window-only error,
+  calls do not carry them.
+
+Consequences:
+
+- A continuously polled workspace refreshes its open lists at most 180 s apart. The first
+  refresh at which the windows' age is ≥ 420 s therefore comes before they reach 600 s.
+  So 600 s stays a *maximum age*, as today, and window queries are at least 420 s apart.
+- At idle the windows ride on every third refresh (540 s). Under 60 s churn they ride on
+  every seventh or eighth (420–480 s).
+- The windows never make a call of their own, and `invalidate()` never expires them.
+
+This keeps #1645's per-section semantics: 180 s plus invalidation for the open lists; for
+the windows, a 600 s maximum age that invalidation never touches.
+
+Model: small repo ≈47 pts/h idle and ≈128 under churn, against 72 and 192 today. The cost
+is complexity: the cache tracks two freshness groups inside one call, and the contract's
+24 h sections are present only when requested.
 
 *Alternative A — always-full query, single 180 s TTL (overrulable):* every refresh fetches
 all four sections. Simpler: one cache entry, one TTL, every section always present.
@@ -287,9 +364,10 @@ call per refresh window" acceptance.
 
 *Chosen (architect, 2026-11-26):* keep today's caps: 30 open PRs, 200 open issues, and
 1000 per 24 h window. When a connection reports more results than one 100-node page, the
-bundle pages just that connection inside the same forge call. That is still one spawn. On
-codev (424 open issues) an open refresh is 2 GraphQL requests. Most repos (≤100 open issues)
-stay at one.
+bundle pages just that connection inside the same forge call. It is still one forge
+call, with one extra `gh api graphql` request, and so one extra `gh` process, per extra
+page, costing only that connection. On codev (424 open issues) an open refresh is 2
+requests. Most repos (≤100 open issues) stay at one.
 
 *Alternative (overrulable):* hard-cap every section at one page (100 issues). That saves
 2 pts and one request per refresh on big repos. But the backlog on codev, and on any repo
@@ -309,14 +387,19 @@ regression.
 architect on 2026-11-26 (duplicate handling; Decisions 2–4).
 
 **Important** (shapes design), decided here and open to override at the gate:
-- Input for "include the 24 h windows": the bundle reuses `CODEV_SINCE_DATE`. When it is
-  set, the windows are requested with that cutoff. When it is unset, the call returns the
-  open lists only. This keeps one input with one meaning across the 24 h concepts.
-- Output shape: one JSON object with `prs`, `issues`, and, only when requested,
-  `recentlyClosed` and `recentlyMerged`. Each section is an array conforming to the existing
-  item contract (`PrListItem`, `IssueListItem`, `IssueListItem`, `MergedPrItem`). A missing
-  or non-array requested section makes the whole response non-conforming, and therefore a
-  failure.
+- Inputs: an explicit `CODEV_INCLUDE_WINDOWS=1` requests the 24 h windows. It is set
+  together with `CODEV_SINCE_DATE`, the cutoff, which keeps its existing meaning. Without
+  it, the call returns the open lists only. An explicit flag is used, not the presence of
+  `CODEV_SINCE_DATE`. For `recently-closed`/`recently-merged` an unset `CODEV_SINCE_DATE`
+  means "no cutoff", so reusing its presence as a switch would invert its meaning for
+  adopters writing their own `overview-bundle`.
+- Output shape: one JSON object with `prs` and `issues`. When the windows were requested,
+  it carries either `recentlyClosed` and `recentlyMerged`, or a `windowsError` string (the
+  window-only salvage case). Each section is an array conforming to the existing item
+  contract (`PrListItem`, `IssueListItem`, `IssueListItem`, `MergedPrItem`). The response
+  is non-conforming, and therefore a failure, when `prs` or `issues` is missing or not an
+  array, or when the windows were requested and neither both arrays nor `windowsError` is
+  present.
 
 **Nice-to-know** (out of scope, candidates for follow-up):
 - The 30-open-PR cap is gh's silent default. A repo with more than 30 open PRs loses some
@@ -334,15 +417,18 @@ Bundle path (GitHub, default config):
 1. Cold cache, continuously polled: the first poll makes one `overview-bundle` call with the
    24 h windows requested, and populates all four sections.
 2. With an injected clock over one simulated hour of 2.5 s polls and no invalidations:
-   exactly 20 bundle calls, the windows requested in about every third, and zero calls to
-   the four constituent concepts.
-3. Repeated `invalidate()` calls: the open lists refetch at most once per 60 s, those calls
-   do not request the windows unless the windows are due anyway, and the windows' 600 s
-   cadence is unaffected.
-4. The windows never trigger a call of their own while the open lists are being refreshed.
+   exactly 20 bundle calls, and zero calls to the four constituent concepts. The windows
+   are requested on every third call (every 540 s), and their age never reaches 600 s.
+3. Invalidation every few seconds for an hour: the open lists refetch at most once per
+   60 s. A call requests the windows only when their age is ≥ 420 s, so successive window
+   queries are 420–480 s apart and their age never reaches 600 s.
+4. The windows never make a call due. With the open lists fresh, polling never dispatches
+   a call, whatever the windows' age. That includes a window entry past its age while a
+   failure window is running.
 5. Concurrent `getOverview` calls for one workspace share a single in-flight bundle.
-6. Paging: a fixture with 250 open issues returns the newest 200 in one forge call. A
-   fixture with 120 merged PRs in 24 h returns all 120.
+6. Paging: a fixture with 250 open issues returns the newest 200 in one forge call, as two
+   `gh` requests, the second asking for the issues connection only. A fixture with 120
+   merged PRs in 24 h returns all 120.
 7. Payload parity: equivalent forge data through the bundle and through the four-call path
    produces equal `OverviewData`. That covers draft PRs, team reviewers dropped,
    null/empty `reviewDecision`, bot authors, issues with no labels or assignees, and the
@@ -356,44 +442,66 @@ Failure and rate limit:
    calls, and per-section `errors` text naming `gh`.
 10. Malformed output (non-JSON, missing `issues`, a requested window missing) is treated
     as a failure.
-11. A failure in an open-only call leaves still-fresh 24 h entries served.
+11. A failure in an open-only call leaves still-fresh 24 h entries served. During the
+    failure window no call is made. A 24 h entry that crosses 600 s inside that window is
+    then served empty. The first call after the window carries the windows.
+12. Window-only error: a response with intact `prs`/`issues` and `errors` whose paths all
+    lie in the window sections (gh exit 1). The open lists are delivered and cached as a
+    success, with `pendingPRs`/`backlog` populated. The windows are recorded as failed;
+    the next calls inside their failure window do not request them, and the first call
+    after it does. An error path in an open-list section, or a top-level error, fails
+    the whole call.
 
 Fallback:
-12. The gitlab, gitea, linear and jira presets: `overview-bundle` resolves to disabled, and
+13. The gitlab, gitea, linear and jira presets: `overview-bundle` resolves to disabled, and
     the overview runs the four concepts as today.
-13. A project overriding `issue-list` (and, separately, disabling `recently-merged`) on
+14. A project overriding `issue-list` (and, separately, disabling `recently-merged`) on
     GitHub gets the four-call path, and the override is honoured.
-14. A project setting `overview-bundle: null` gets the four-call path.
-15. A project overriding `overview-bundle` with its own command, with no constituent
+15. A project setting `overview-bundle: null` gets the four-call path.
+16. A project overriding `overview-bundle` with its own command, with no constituent
     overrides, uses that command.
-16. Existing overview, rate-limit and #1645 quota tests pass unchanged on the fallback path.
+17. The existing overview, rate-limit and #1645 quota tests keep their behavioural
+    assertions. Parity is proven by behaviour, not by test files staying untouched.
+    Several existing tests run on a default GitHub workspace, which becomes the bundle
+    path, so their call-count fixtures and per-concept mocks are updated to the bundle,
+    each keeping what it asserts:
+    - `bugfix-1645-gh-quota.test.ts`: expected batch and spawn counts;
+    - `overview-rate-limit.test.ts`: its per-concept `fetchForOverview` fake gains an
+      `overview-bundle` behaviour;
+    - `forge.test.ts` and `doctor.test.ts`: the known-concept count goes from 20 to 21.
+
+    The four-call behaviour those tests pinned keeps its coverage by running them, or
+    equivalents, on a fallback-path workspace.
 
 Projection and doctor:
-17. `projectHourlyForgeCalls` returns 20 for bundled and 52 for four calls, and changing a
+18. `projectHourlyForgeCalls` returns 20 for bundled and 52 for four calls, and changing a
     TTL constant changes the result.
-18. Doctor on a default GitHub workspace lists `overview-bundle` as `default` and prints the
-    bundled line with 20 calls/h. On a gitlab workspace it lists it as `disabled` and prints
-    four calls with the reason (provider) and 52 calls/h. With an `issue-list` override, it
-    prints four calls with that reason.
+19. Doctor on a default GitHub workspace lists `overview-bundle` as `default` and prints the
+    bundled line with 20 calls/h, labelled as the idle steady state. On a gitlab workspace
+    it lists it as `disabled` and prints four calls with the reason (provider) and
+    52 calls/h. With an `issue-list` override, it prints four calls with that reason.
 
 Real `gh`:
-19. Harness with a `gh` stub on PATH (the #1645 harness pattern): a watched workspace spawns
-    one `gh` per refresh window.
-20. Verification on a real repo: per-query `rateLimit { cost }` within the Success Criteria
-    bounds, and the dashboard renders PRs, backlog and recently-closed identically to
-    `main`.
+20. Harness with a `gh` stub on PATH (the #1645 harness pattern). A watched workspace makes
+    one forge call per refresh window: one `gh` per refresh on a ≤100-issue fixture, two
+    on a 250-issue fixture.
+21. Verification on a real repo. The exact final query's `rateLimit { cost }` is measured
+    first, before the cache work, and must sit within the Success Criteria bounds. The
+    dashboard then renders PRs, backlog and recently-closed identically to `main`. On a
+    fork-shaped clone the bundle resolves the same repository as `gh pr list`.
 
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | Raw GraphQL fields differ from gh's `--json` rendering (bot `app/` logins, null `reviewDecision`, team reviewers), so the payload drifts | Medium | Medium | The bundle reproduces gh's rendering. A parity test feeds both paths equivalent data, and the plan checks each field against real `gh` output |
-| An adopter's constituent override is silently bypassed | Low (with Decision 1) | High | Decision 1 rule 2, tests 13–15, and docs |
-| A non-GitHub preset falls through to the GitHub bundle and runs `gh` on a GitLab/Linear workspace | Medium if forgotten | High | Explicit disable in every non-GitHub preset; test 12 asserts it for each provider |
-| Coupling: one failing section now blanks all sections of that refresh (today they fail independently) | Low | Medium | It is one request, so partial GraphQL failure is rare. Failure is cached, and fresh entries from earlier calls are still served (test 11). Accepted as the price of one call |
+| An adopter's constituent override is silently bypassed | Low (with Decision 1) | High | Decision 1 rule 2, tests 14–16, and docs |
+| A non-GitHub preset falls through to the GitHub bundle and runs `gh` on a GitLab/Linear workspace | Medium if forgotten | High | Explicit disable in every non-GitHub preset; test 13 asserts it for each provider |
+| Coupling: a failing GitHub search (timeout or search outage) blanks the open lists too, where today it blanks only its own panel | Medium | High | Window-only salvage (Success Criteria, test 12): an error confined to the window sections fails only the windows. A whole-call failure still serves fresh entries from earlier calls (test 11) |
+| The salvage misclassifies an error, for example treating a rate limit as window-only and hiding a suspension | Low | High | Salvage applies only when every error has a path inside a window section **and** both open sections are present. A top-level error, which is what a rate limit is, always fails the whole call. Test 12 covers both sides |
 | Paging logic in a POSIX `sh` script is fragile (cursor handling, no `pipefail`) | Medium | Medium | Keep the script's exit status honest, as `pr-list` already does post-#1645. Fixture tests cover 1 page, 2 pages, and the cap |
 | Ride-along scheduling bug leaves the 24 h windows stale or makes them fire separately | Medium | Low | Injected-clock tests 2–4 pin the cadence |
-| Points estimate wrong on another repo shape (many labels, many PRs) | Low | Low | Points depend on node counts, and the bundle requests the same nodes as today. Verification measures real cost |
+| Points estimate wrong on another repo shape, or the final query costs more than measured | Low | Medium | Points depend on requested node counts, which are fixed by the query shape (measured with the final nested connections), not by repo contents. The exact final query is re-measured before the cache work. A miss stops the work and goes to the architect (Success Criteria) |
 | `gh` versions without in-string placeholder substitution | Low | Medium | Doctor already checks `gh`. The plan confirms the minimum gh version and documents it |
 
 ## References
