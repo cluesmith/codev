@@ -45,7 +45,11 @@ const SPEC_WORKED = {
   receiverNow: 1764100000500,
 };
 
-/** What node:crypto says of a case, independently of contract.ts. */
+/**
+ * What node:crypto says of a case, independently of contract.ts. The statement is read as
+ * base64url after mapping `+` and `/`, so for the one case written in the standard alphabet
+ * the MAC is of the mapped bytes; contract.ts alone decides that case (step 2).
+ */
 function independently(c: VectorCase): { macMatches: boolean; hashMatches: boolean } {
   const statement = bytesOf(c.statement.replace(/\+/g, '-').replace(/\//g, '_'));
   const mac = createHmac('sha256', bytesOf(c.secret)).update(statement).digest('base64url');
@@ -82,6 +86,22 @@ describe('peer contract vectors: the shared file', () => {
     expect(worked.receiverTowerId).toBe(SPEC_WORKED.receiverTowerId);
     expect(worked.receiverNow).toBe(SPEC_WORKED.receiverNow);
     expect(worked.verdict).toBe('verified');
+  });
+
+  it('gives every case its own statementId, so step 8 never decides one when they run in one session', () => {
+    const ids: string[] = [];
+    for (const c of vectors.cases) {
+      let statement: unknown;
+      try {
+        statement = JSON.parse(bytesOf(c.statement.replace(/\+/g, '-').replace(/\//g, '_')).toString('utf8'));
+      } catch {
+        continue;
+      }
+      const id = (statement as { statementId?: unknown } | null)?.statementId;
+      if (typeof id === 'string') ids.push(id);
+    }
+    expect(ids.length).toBeGreaterThan(130);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('has a 32-byte secret in every case', () => {

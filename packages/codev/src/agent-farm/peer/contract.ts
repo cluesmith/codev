@@ -399,7 +399,7 @@ export function verifyRelayedRequest(request: RelayedRequest): RelayVerification
   if (
     statementHeader === null ||
     macHeader === null ||
-    statementHeader.length > PEER_MAX_STATEMENT_HEADER_BYTES ||
+    utf8ByteLength(statementHeader) > PEER_MAX_STATEMENT_HEADER_BYTES ||
     request.body.length > PEER_MAX_PAYLOAD_BYTES
   ) {
     return { verdict: 'not-verified', step: 1 };
@@ -673,11 +673,16 @@ export type ReceiverAnswer =
   | { outcome: 'held'; reason: PeerHeldReason; duplicate?: boolean; detail?: string }
   | {
       outcome: 'refused';
-      reason: Exclude<PeerReceiverRefusalReason, 'unsupported-version'>;
+      reason: Exclude<PeerReceiverRefusalReason, 'unsupported-version' | 'rate-limited'>;
       detail?: string;
-      /** Only with `rate-limited`, and only when the per-peer minute tripped. */
-      retryAfterSec?: number;
       duplicate?: boolean;
+    }
+  | {
+      outcome: 'refused';
+      reason: 'rate-limited';
+      /** The seconds left in the per-peer minute; omitted when the undelivered cap tripped. */
+      retryAfterSec?: number;
+      detail?: string;
     }
   | { outcome: 'refused'; reason: 'unsupported-version'; supported: readonly number[]; detail?: string }
   | { outcome: 'not-verified' };
@@ -718,7 +723,9 @@ export function encodeDiscoveryAnswer(addresses: readonly PeerDiscoveredAddress[
 
   let json = answerWith(false, entries);
   if (utf8ByteLength(json) > PEER_MAX_ANSWER_BYTES) {
-    let budget = PEER_MAX_ANSWER_BYTES - utf8ByteLength(answerWith(true, []));
+    // Budgeted against the untruncated envelope: then not every address can fit, so
+    // `truncated: true` always means at least one was left out.
+    let budget = PEER_MAX_ANSWER_BYTES - utf8ByteLength(answerWith(false, []));
     const kept: string[] = [];
     for (const entry of entries) {
       const cost = utf8ByteLength(entry) + (kept.length > 0 ? 1 : 0);

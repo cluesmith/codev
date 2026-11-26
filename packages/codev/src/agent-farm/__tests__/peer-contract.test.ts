@@ -281,6 +281,12 @@ describe("R's checks, steps 1 to 7", () => {
       step: 1,
     });
 
+    // The cap is in bytes: 2 049 two-byte characters are 4 098 bytes, over it.
+    expect(verifyRelayedRequest({ ...request, statementHeader: 'é'.repeat(2_049) })).toEqual({
+      verdict: 'not-verified',
+      step: 1,
+    });
+
     const atCap = new Uint8Array(102_400).fill(0x20);
     expect(verifyRelayedRequest(forwarded(atCap, JSON.stringify(statementFor(atCap)))).verdict).toBe('verified');
     const overCap = new Uint8Array(102_401).fill(0x20);
@@ -642,6 +648,38 @@ describe("answers as R writes them", () => {
     });
   });
 
+  it('marks a discovery answer truncated only when an address was left out, at the exact cap', () => {
+    const entry = (i: number, nameLength: number): PeerDiscoveredAddress => ({
+      address: { workspace: 'w', kind: 'id', name: `b${i}-`.padEnd(nameLength, 'x') },
+      live: true,
+    });
+    const untruncatedSize = (list: PeerDiscoveredAddress[]) =>
+      byteLength(JSON.stringify({ v: 1, outcome: 'answered', truncated: false, addresses: list }));
+    /** Addresses whose untruncated answer is exactly `target` bytes. */
+    const exactly = (target: number) => {
+      const list: PeerDiscoveredAddress[] = [];
+      while (untruncatedSize([...list, entry(list.length, 100)]) <= target - 200) list.push(entry(list.length, 100));
+      // A name no longer than its `b<i>-` prefix is the prefix; each character past it adds one byte.
+      const prefix = `b${list.length}-`.length;
+      const last = prefix + target - untruncatedSize([...list, entry(list.length, prefix)]);
+      list.push(entry(list.length, last));
+      expect(untruncatedSize(list)).toBe(target);
+      return list;
+    };
+
+    const fits = exactly(65_536);
+    const atCap = JSON.parse(Buffer.from(encodeDiscoveryAnswer(fits).body).toString('utf8')) as { truncated: boolean; addresses: unknown[] };
+    expect(atCap).toMatchObject({ truncated: false });
+    expect(atCap.addresses).toHaveLength(fits.length);
+
+    const over = exactly(65_537);
+    const encoded = encodeDiscoveryAnswer(over);
+    const trimmed = JSON.parse(Buffer.from(encoded.body).toString('utf8')) as { truncated: boolean; addresses: unknown[] };
+    expect(trimmed.truncated).toBe(true);
+    expect(trimmed.addresses.length).toBeLessThan(over.length);
+    expect(encoded.body.length).toBeLessThanOrEqual(65_536);
+  });
+
   it('trims discovery addresses to the 65 536-byte answer, keeping as many as fit, in order', () => {
     const addresses: PeerDiscoveredAddress[] = Array.from({ length: 2_000 }, (_, i) => ({
       address: { workspace: `workspace-${i}`, kind: 'id', name: `builder-spir-${i}-${'x'.repeat(i % 7)}` },
@@ -821,6 +859,9 @@ describe('answers as S reads them: who decided, and what', () => {
     // @ts-expect-error `supported` is required with `unsupported-version`
     const typeCheckOnly: Parameters<typeof encodeReceiverAnswer>[0] = { outcome: 'refused', reason: 'unsupported-version' };
     expect(typeCheckOnly.outcome).toBe('refused');
+    // @ts-expect-error `retryAfterSec` goes only with `rate-limited`
+    const rateOnly: Parameters<typeof encodeReceiverAnswer>[0] = { outcome: 'refused', reason: 'no-grant', retryAfterSec: 3 };
+    expect(rateOnly.outcome).toBe('refused');
     const encoded = encodeReceiverAnswer({ outcome: 'refused', reason: 'unsupported-version', supported: [1] });
     expect(classifyRelayAnswer(encodedAsCall(encoded), message)).toMatchObject({
       decidedBy: 'receiver',

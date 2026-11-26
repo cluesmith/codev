@@ -163,3 +163,11 @@
   renamed to say so (names only; bytes and verdicts unchanged). Correction to my earlier count:
   five cases depend on the reading, not six; three more have non-canonical ids but step 1 or 4
   decides them first. If codex raises the point again: to the architect, not a third round.
+- Phase 1 review, iteration 2: codex COMMENT (HIGH), claude APPROVE (HIGH); statementId not
+  raised again. Taken as polish: R's rate-limited refusal is its own ReceiverAnswer variant (only
+  it may carry retryAfterSec; codex); the statement-header cap is measured in UTF-8 bytes; a
+  discovery answer says truncated only when an address was left out (budget against the
+  untruncated envelope; tested at exactly 65 536 and 65 537); the vectors test asserts every
+  case's statementId is unique (the file's comment promises it and the cloud relies on it).
+  For phases 6 and 10 (claude): encodeAnswerJson throws above 65 536 bytes; R's answer path must
+  catch that and answer, not kill the stream.
