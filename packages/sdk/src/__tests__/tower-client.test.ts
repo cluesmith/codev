@@ -227,6 +227,15 @@ describe('TowerClient.probeHealth against /api/liveness (#1999)', () => {
     expect(tower.asked).toEqual(['/api/liveness']);
   });
 
+  it('takes only a whole liveness body: one missing a field is not an answer', async () => {
+    const { schemaVersion: _dropped, ...partial } = LIVENESS;
+    const tower = towerAt({ '/api/liveness': () => json(200, partial) });
+    expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({
+      state: 'unresponsive',
+      error: 'answered /api/liveness without a liveness body',
+    });
+  });
+
   it('reports a 200 that is not a liveness body as unresponsive (something else is on the port)', async () => {
     const tower = towerAt({ '/api/liveness': () => json(200, { hello: 'world' }) });
     expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({

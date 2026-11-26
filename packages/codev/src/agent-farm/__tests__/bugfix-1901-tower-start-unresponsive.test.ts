@@ -3,9 +3,9 @@
  *
  * The old start probed `/api/status` with a 2 s timeout and, when that missed, decided "port in
  * use but not responding", SIGTERMed every PID on the port and started a new Tower. Under load
- * that PID is the live Tower. Start now probes `/health` through `checkTower`: a refused port is
- * started on as before; a holder that accepted the connection but did not answer is left alone,
- * named, and the command exits non-zero. Replacing it is `afx tower stop`, which must still work.
+ * that PID is the live Tower. Start now probes Tower through `checkTower` (`/api/liveness`,
+ * #1999): a refused port is started on as before; a holder that accepted the connection but did
+ * not answer is left alone, named, and the command exits non-zero. Replacing it is `afx tower stop`, which must still work.
  *
  * The stalled holder is a real child process listening on an ephemeral port that never answers,
  * so these tests cannot reach the developer's Tower on 4100. Only the client's request timeout is

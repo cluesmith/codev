@@ -140,8 +140,9 @@ export function keysMatch(presented: string, expected: string): boolean {
  *
  * The entries here are the paths a *browser navigation* reaches — a top-level
  * redirect, an iframe load, a `<script>`/`<link>` tag — none of which can
- * attach the `codev-tower-key` header. Each one therefore carries either no
- * secret or its own credential; adding a route here means proving that.
+ * attach the `codev-tower-key` header, plus the liveness/version probes, which a
+ * client without the key must still be able to ask. Each one therefore carries
+ * either no secret or its own credential; adding a route here means proving that.
  *
  * The privileged workspace `file` reader and every `api/` or `ws/` subpath are
  * explicitly excluded so a static-asset carve-out never exposes a data route.

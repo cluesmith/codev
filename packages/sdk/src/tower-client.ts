@@ -197,9 +197,15 @@ export type TowerHealthProbe =
   | { state: 'not-running' }
   | { state: 'unresponsive'; error: string };
 
-/** Whether `body` is a `GET /api/liveness` answer, as far as a client relies on it. */
+/** Whether `body` is a whole `GET /api/liveness` answer: every field the type promises. */
 function isTowerLiveness(body: unknown): body is TowerLiveness {
-  return isRecord(body) && body.status === 'alive' && typeof body.version === 'string';
+  return (
+    isRecord(body) &&
+    body.status === 'alive' &&
+    typeof body.version === 'string' &&
+    typeof body.schemaVersion === 'number' &&
+    typeof body.startedAt === 'string'
+  );
 }
 
 /** Issue #1227: a shellper the husk sweep would reap (or has reaped). */
