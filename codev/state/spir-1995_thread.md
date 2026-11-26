@@ -1,0 +1,62 @@
+# spir-1995 — builder thread
+
+Issue #1995: collapse the four per-workspace overview forge calls into one GraphQL query.
+Follow-up to #1645 (fix merged as PR #1652).
+
+## 2026-11-25 — specify: investigation
+
+### Findings that change the issue's premise
+- **#1995 is a verbatim re-filing of #1647** (still open; same body plus one blank line).
+  #1647 has an architect correction comment: the body describes the *archived* #1646 design,
+  not `main`.
+- **`servers/overview-budget.ts`, `projectHourlyForgeCalls` and the doctor GraphQL budget
+  check do not exist on `main`.** They live only on `origin/archive/bugfix-1645-attempt1`
+  (superseded PR #1646). The #1652 rebuild scoped the doctor check out. The acceptance line
+  "projectHourlyForgeCalls reflects the new call count, and codev doctor reports it" therefore
+  targets code that has to be (re)built here, or dropped.
+- The "52 calls/h per watched workspace" figure does hold on `main`: `LIST_TTL_MS` 180 s ×
+  2 lists (40/h) + `SEARCH_TTL_MS` 600 s × 2 searches (12/h).
+
+### Measured (gh 2.102.0, this repo, `rateLimit { cost }`)
+| query | points |
+|---|---|
+| combined: open PRs(100) + open issues(100) + both 24 h searches | 4 |
+| open PRs(100) + open issues(100) | 3 |
+| one open-issues page (100, labels+assignees) | 2 |
+| both 24 h searches | 1 |
+| open PRs(30) alone | 1 |
+
+- codev has **424 open issues**; `issue-list` today returns the newest 200 (2 pages).
+  A single GraphQL page holds 100.
+- Points are driven by nested node counts (labels/assignees × 100 issues), not by request
+  count. A bundle that re-runs the searches on every 180 s refresh cuts spawns 52 → 20/h
+  but *raises* points (small repo: 72 → 80 pts/h idle, 192 → 240 under 60 s invalidation
+  churn) and breaks #1645's "searches 600 s, never invalidated" rule.
+- `{owner}/{repo}` placeholders are substituted inside a `-F` search string by `gh api
+  graphql` (verified), so the script needs no `gh repo view` call.
+
+Questions sent to the architect before finalizing the spec (see below).
+
+### Correction sent
+My first question 3 costed a 100-PR query. At today's 30-PR cap (gh default, kept for parity),
+measured: open lists = 2 pts, plus both 24 h searches = 3 pts, `@include(if:false)` drops back
+to 2 pts (GitHub honours `@include` when costing). Corrected model, small repo: today 72 pts/h
+idle / 192 churn; always-full bundle 60 / 180; ride-along ≈47 / ≈127. Codev: today 112;
+always-full 100; ride-along ≈87.
+
+### Architect answers (2026-11-26, porchless)
+1. #1995 is a deliberate copy of #1647. Treat #1995 as mine; do not read any other branch or
+   PR for #1647; closing either issue is the architect's call. (Note: before this answer I had
+   already read the archived branch's `overview-budget.ts` and doctor budget section to confirm
+   they were not on main. Nothing from it is carried into the spec beyond that fact; no further
+   reads.)
+2. Build a minimal shared module (overview TTLs + `projectHourlyForgeCalls`) and a doctor
+   line for this workspace. No rate_limit probe, no cross-workspace projection.
+3. Ride-along: one call per refresh, 24 h windows only when due, never forced by invalidation.
+4. Parity: page the issues inside the one forge call.
+Decisions 2–4 are written into the spec with the alternative named, overrulable at the gate.
+
+## 2026-11-25 — specify: draft committed
+Decision 1 (mine): bundle only when `overview-bundle` resolves AND none of the four
+constituents is overridden/disabled in project config; every non-GitHub preset disables the
+bundle explicitly (an omitted concept falls through to the GitHub script).
