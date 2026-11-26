@@ -32,6 +32,8 @@ const {
   mockGetUptime,
   mockSendMetadata,
   mockOnStateChange,
+  mockOnAuthOk,
+  mockUpdateCloudConfig,
   mockResetCircuitBreaker,
   mockFsWatch,
   mockFsWatcherClose,
@@ -53,6 +55,8 @@ const {
   mockGetUptime: vi.fn().mockReturnValue(null),
   mockSendMetadata: vi.fn(),
   mockOnStateChange: vi.fn(),
+  mockOnAuthOk: vi.fn(),
+  mockUpdateCloudConfig: vi.fn().mockReturnValue(true),
   mockResetCircuitBreaker: vi.fn(),
   mockFsWatch: vi.fn(),
   mockFsWatcherClose: vi.fn(),
@@ -66,6 +70,7 @@ const {
 vi.mock('../lib/cloud-config.js', () => ({
   readCloudConfig: (...args: unknown[]) => mockReadCloudConfig(...args),
   writeCloudConfig: (...args: unknown[]) => mockWriteCloudConfig(...args),
+  updateCloudConfig: (...args: unknown[]) => mockUpdateCloudConfig(...args),
   deleteCloudConfig: (...args: unknown[]) => mockDeleteCloudConfig(...args),
   getCloudConfigPath: (...args: unknown[]) => mockGetCloudConfigPath(...args),
   getOrCreateMachineId: (...args: unknown[]) => mockGetOrCreateMachineId(...args),
@@ -83,6 +88,7 @@ vi.mock('../lib/tunnel-client.js', () => ({
     getUptime = mockGetUptime;
     sendMetadata = mockSendMetadata;
     onStateChange = mockOnStateChange;
+    onAuthOk = mockOnAuthOk;
     resetCircuitBreaker = mockResetCircuitBreaker;
   },
 }));
@@ -495,7 +501,7 @@ describe('tower-tunnel', () => {
           serverUrl: 'https://cloud.codevos.ai',
           createdAt: Date.now(),
         });
-        mockRedeemToken.mockResolvedValue({ towerId: 'tower-123', apiKey: 'ctk_NewKey' });
+        mockRedeemToken.mockResolvedValue({ towerId: 'tower-123', apiKey: 'ctk_NewKey', slug: 'my-tower', name: 'my-tower' });
         mockReadCloudConfig.mockReturnValue({
           tower_id: 'tower-123',
           tower_name: 'my-tower',
@@ -517,9 +523,11 @@ describe('tower-tunnel', () => {
         expect(mockWriteCloudConfig).toHaveBeenCalledWith({
           tower_id: 'tower-123',
           tower_name: 'my-tower',
+          display_name: 'my-tower',
           api_key: 'ctk_NewKey',
           server_url: 'https://cloud.codevos.ai',
         });
+        expect(body()).not.toContain('was taken');
         expect(mockConnect).toHaveBeenCalled();
       });
 

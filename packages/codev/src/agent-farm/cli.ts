@@ -1156,9 +1156,9 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   // Connect/disconnect handlers (shared with hidden backward-compat aliases)
-  const connectAction = async (options: { reauth?: boolean; service?: string; port?: string }) => {
+  const connectAction = async (options: { reauth?: boolean; claim?: boolean; service?: string; port?: string }) => {
     try {
-      await towerRegister({ reauth: options.reauth, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
+      await towerRegister({ reauth: options.reauth, claim: options.claim, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
       process.exit(0);
     } catch (error) {
       logger.error(error instanceof Error ? error.message : String(error));
@@ -1178,6 +1178,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
 
   const connectOptions = (cmd: Command) => cmd
     .option('--reauth', 'Update API key without changing tower name')
+    .option('--claim', 'Take the name back from a disconnected tower you own, instead of registering as <name>-2')
     .option('--service <url>', 'CodevOS service URL (default: https://cloud.codevos.ai)')
     .option('-p, --port <port>', 'Tower port to signal after connection (default: 4100)');
 
