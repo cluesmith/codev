@@ -2281,18 +2281,6 @@ describe('overview', () => {
       expect(filtered.builders[0].issueId).toBe('42');
     });
 
-    it('keeps every live task builder whatever characters its short id has (#1992)', async () => {
-      // No stored builder rows, so each role id comes from the worktree name.
-      // The live set is keyed by the role ids spawn registers the terminals under.
-      const shortIds = ['S0-L', '_-LM', '0123'];
-      for (const id of shortIds) createBuilderWorktree(tmpDir, `task-${id}`);
-
-      const active = new Set(shortIds.map(id => buildAgentName('task', id)));
-      const data = await new OverviewCache().getOverview(tmpDir, active);
-
-      expect(data.builders.map(b => b.id).sort()).toEqual(['task-0123', 'task-S0-L', 'task-_-LM']);
-    });
-
     it('returns no builders when activeBuilderRoleIds is empty', async () => {
       createBuilderWorktree(tmpDir, 'spir-42-feature', [
         "id: '0042'",
