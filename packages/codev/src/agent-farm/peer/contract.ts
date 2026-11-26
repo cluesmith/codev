@@ -187,6 +187,11 @@ export function printableDetail(detail: string): string {
   return capCodePoints(detail.replace(EXCLUDED_PATTERN_GLOBAL, ''), PEER_MAX_DETAIL_CHARS);
 }
 
+/** Characters, as the contract counts them for `detail`, are code points. */
+function codePointLength(text: string): number {
+  return Array.from(text).length;
+}
+
 function capCodePoints(text: string, max: number): string {
   const codePoints = Array.from(text);
   return codePoints.length <= max ? text : codePoints.slice(0, max).join('');
@@ -668,12 +673,13 @@ export type ReceiverAnswer =
   | { outcome: 'held'; reason: PeerHeldReason; duplicate?: boolean; detail?: string }
   | {
       outcome: 'refused';
-      reason: PeerReceiverRefusalReason;
+      reason: Exclude<PeerReceiverRefusalReason, 'unsupported-version'>;
       detail?: string;
+      /** Only with `rate-limited`, and only when the per-peer minute tripped. */
       retryAfterSec?: number;
-      supported?: readonly number[];
       duplicate?: boolean;
     }
+  | { outcome: 'refused'; reason: 'unsupported-version'; supported: readonly number[]; detail?: string }
   | { outcome: 'not-verified' };
 
 function encodeAnswerJson(outcome: PeerOutcome, json: string): EncodedAnswer {
@@ -826,9 +832,10 @@ function allowedOutcomes(source: AnswerSource): readonly PeerOutcome[] {
 /**
  * The body of an answer if it fits section 6's shape for its source, else `null`: the
  * media type, the cap, `v`, an outcome the source may give that matches the outcome
- * header, a reason where the outcome needs one, and the type of every known field present.
- * Unknown fields, and fields only a 200 carries (`detail`, `duplicate`) when C answered,
- * are dropped.
+ * header, a reason where the outcome needs one, and the type (and, for `detail`, the
+ * 500-character limit) of every known field present. Unknown fields, fields that go with
+ * a reason the outcome does not have, and fields only a 200 carries (`detail`,
+ * `duplicate`) when C answered, are dropped.
  */
 function readAnswerBody(call: Extract<RelayCallResult, { answered: true }>, source: AnswerSource): PeerAnswer | null {
   if (!isMediaTypeJson(call.contentType) || call.body.length > PEER_MAX_ANSWER_BYTES) return null;
@@ -847,18 +854,19 @@ function readAnswerBody(call: Extract<RelayCallResult, { answered: true }>, sour
     if (!reasons.includes(body.reason as string)) return null;
     out.reason = body.reason;
   }
-  if (body.reason === 'rate-limited' && body.retryAfterSec !== undefined) {
+  // Fields that go with a reason are read only with the reason the outcome accepted.
+  if (out.reason === 'rate-limited' && body.retryAfterSec !== undefined) {
     if (!isJsonInteger(body.retryAfterSec, 0)) return null;
     out.retryAfterSec = body.retryAfterSec;
   }
-  if (body.reason === 'unsupported-version') {
+  if (out.reason === 'unsupported-version') {
     const supported = body.supported;
     if (!Array.isArray(supported) || !supported.every((v) => isJsonInteger(v, 1))) return null;
     out.supported = [...supported];
   }
   if (source.decidedBy === 'receiver') {
     if (body.detail !== undefined) {
-      if (typeof body.detail !== 'string') return null;
+      if (typeof body.detail !== 'string' || codePointLength(body.detail) > PEER_MAX_DETAIL_CHARS) return null;
       out.detail = body.detail;
     }
     if (body.duplicate !== undefined) {

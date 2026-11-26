@@ -796,6 +796,39 @@ describe('answers as S reads them: who decided, and what', () => {
     expect(classifyRelayAnswer(call, message).decidedBy).toBe('receiver');
   });
 
+  it('takes a detail of at most 500 characters (code points) and treats a longer one as tower-error', () => {
+    const at = classifyRelayAnswer(answered(200, { v: 1, outcome: 'delivered', detail: cp(0x1f600).repeat(500) }), message);
+    expect(at).toMatchObject({ decidedBy: 'receiver', outcome: 'delivered' });
+    const over = classifyRelayAnswer(answered(200, { v: 1, outcome: 'delivered', detail: 'a'.repeat(501) }), message);
+    expect(over).toMatchObject({ decidedBy: 'none', status: 200, outcome: 'unavailable', reason: 'tower-error' });
+    // What R encodes always fits what S reads.
+    const encoded = encodeReceiverAnswer({ outcome: 'refused', reason: 'no-grant', detail: cp(0x1f600).repeat(501) });
+    expect(classifyRelayAnswer(encodedAsCall(encoded), message)).toMatchObject({ decidedBy: 'receiver', reason: 'no-grant' });
+  });
+
+  it('reads the fields that go with a reason only with the reason the outcome accepted', () => {
+    const strayRate = classifyRelayAnswer(
+      answered(200, { v: 1, outcome: 'delivered', reason: 'rate-limited', retryAfterSec: 60 }),
+      message,
+    );
+    expect(strayRate).toMatchObject({ decidedBy: 'receiver', outcome: 'delivered', reason: null });
+    expect(strayRate.answer).toEqual({ v: 1, outcome: 'delivered' });
+    const strayVersion = classifyRelayAnswer(answered(200, { v: 1, outcome: 'delivered', reason: 'unsupported-version' }), message);
+    expect(strayVersion).toMatchObject({ decidedBy: 'receiver', outcome: 'delivered', answer: { v: 1, outcome: 'delivered' } });
+  });
+
+  it("requires supported in R's unsupported-version refusal, and S reads it back", () => {
+    // @ts-expect-error `supported` is required with `unsupported-version`
+    const typeCheckOnly: Parameters<typeof encodeReceiverAnswer>[0] = { outcome: 'refused', reason: 'unsupported-version' };
+    expect(typeCheckOnly.outcome).toBe('refused');
+    const encoded = encodeReceiverAnswer({ outcome: 'refused', reason: 'unsupported-version', supported: [1] });
+    expect(classifyRelayAnswer(encodedAsCall(encoded), message)).toMatchObject({
+      decidedBy: 'receiver',
+      reason: 'unsupported-version',
+      answer: { supported: [1] },
+    });
+  });
+
   it('drops unknown fields, and fields only a 200 carries when C answered', () => {
     const fromR = classifyRelayAnswer(answered(200, { v: 1, outcome: 'delivered', later: { x: 1 } }), message);
     expect(fromR.answer).toEqual({ v: 1, outcome: 'delivered' });

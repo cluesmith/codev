@@ -149,3 +149,10 @@
   verified) appended after the unchanged 140. Python cross-check rerun on all 142: agrees.
   For phase 8: the cloud notes that a statement that is not a JSON object at all ends a send as
   refused (unsupported-version), not held.
+- Phase 1 review, iteration 1: claude APPROVE (HIGH); codex REQUEST_CHANGES (2). The first codex
+  run crashed twice on a literal line-separator character in this thread (consult bug #1818);
+  fixed at 519d01159 and rerun. Taken: an answer's detail over 500 characters (code points) is now
+  tower-error at S, as section 6's shape says; claude's polish (reason-linked fields read only with
+  the accepted reason; R's unsupported-version refusal requires supported). Rebutted, and put to
+  the architect: statementId stays a 22-character shape check, not a canonical-16-bytes decode
+  (R never decodes it; the cloud agreed the vectors as they are; tightening flips six cases).
