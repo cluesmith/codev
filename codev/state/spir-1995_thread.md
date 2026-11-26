@@ -102,3 +102,19 @@ overwritten by a failure — the spec's "positive entry inside TTL is served"; f
 untouched); (3) dependency-free `overview-budget.ts` (TTLs + `projectHourlyForgeCalls`), doctor
 line, docs. Flagged in the plan: on the bundle path a failed invalidation-driven refresh keeps the
 still-valid open lists serving, where the four-call path blanks them — reviewers may push back.
+
+## 2026-11-26 — plan: CMAP iter 1 (codex REQUEST_CHANGES, claude REQUEST_CHANGES)
+All 11 findings checked against the code and accepted (disposition:
+codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-rebuttals.md). Notable:
+- Found a pre-existing bug via claude: `deepMerge` deletes `null`, so a project's
+  `"<concept>": null` disable is lost whenever a lower layer (`~/.codev/config.json`, framework
+  cache) or `config.local.json` carries a `forge` object. Fixed in place in Phase 2 (forge
+  section merges key-wise, null kept as "disabled"); will be named in the PR body.
+- Bundle gets an explicit 60 s time budget (it serialises every page that four parallel 30 s
+  processes ran today); output printed only after the last page.
+- Full per-contract item validation; windows require closedAt/mergedAt; arrays XOR windowsError.
+- Spec test 21's dashboard render moved to the verify phase: the e2e suite defaults to the live
+  Tower (installed build), so a pre-merge render would need a Tower restart or a second Tower
+  sharing global.db.
+- Raising the failed-refresh divergence (bundle keeps serving still-fresh open lists, four-call
+  blanks them) to the architect at the plan gate as an explicit question.

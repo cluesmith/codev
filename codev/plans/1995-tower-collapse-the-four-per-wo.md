@@ -71,13 +71,23 @@ building anything, prove that the exact final query is within the points ceiling
 
 1. Write the query, the real one this phase ships, into
    `packages/codev/scripts/forge/github/overview-bundle.sh`:
-   - `repository.pullRequests(states: OPEN, first: 30, orderBy: CREATED_AT DESC)`, with
-     `reviewRequests(first: 100)`;
-   - `repository.issues(states: OPEN, first: 100, orderBy: CREATED_AT DESC)`, with
-     `labels(first: 100)`, `assignees(first: 100)` and `pageInfo`;
+   - `repository.pullRequests(states: OPEN, first: 30, orderBy: {field: CREATED_AT, direction: DESC})`,
+     with `reviewRequests(first: 100)`;
+   - `repository.issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC})`,
+     with `labels(first: 100)`, `assignees(first: 100)` and `pageInfo`;
+   - Step 1 confirms that this ordering is the one `gh pr list` and `gh issue list` use, so the
+     30 and 200 caps keep the same items;
    - two aliased `search(type: ISSUE, first: 100)` connections, `closed` and `merged`, each with
-     `@include(if: $windows)`, `pageInfo`, and `labels(first: 100)` on closed issues;
-   - the search strings passed as `-F` fields carrying `repo:{owner}/{repo}`.
+     `@include(if: $windows)` and `pageInfo`. The `SearchResultItem` union needs inline
+     fragments: `... on Issue` (with `labels(first: 100)` and `closedAt`) for `closed`, and
+     `... on PullRequest` (with `mergedAt` and `headRefName`) for `merged`;
+   - the search strings passed as `-F` fields, with the same qualifiers gh generates today:
+     - `repo:{owner}/{repo} is:issue is:closed closed:>T`, as `gh issue list --state closed --search`
+       builds it;
+     - `repo:{owner}/{repo} is:pr is:merged merged:>T`, as `gh pr list --state merged --search`
+       builds it.
+
+     Without `is:issue`, PRs would leak into `recentlyClosed`.
 2. Capture the exact query text the script sends: run it once through a pass-through `gh`
    wrapper in a scratch directory, not committed. Then measure that text with `rateLimit { cost }`
    added as a sibling field, which is free, on this repository:
@@ -104,7 +114,9 @@ building anything, prove that the exact final query is within the points ceiling
   - issues: `labels[].name`, `assignees[].login`, `closedAt`;
   - merged PRs: `mergedAt`, `headRefName`.
 
-  Also diff the order of the two open lists. This settles gh's rendering of:
+  Also diff the order of the two open lists, and assert that each section holds **the same item
+  set by number**. A field diff compares only items present in both, so it cannot catch a PR
+  leaking into `recentlyClosed` or an item missing. This settles gh's rendering of:
   - a null `reviewDecision` (gh emits `""`);
   - team reviewers (dropped);
   - bot authors (gh's `app/<login>` form, to be confirmed);
@@ -137,6 +149,11 @@ building anything, prove that the exact final query is within the points ceiling
     comment on why: an omitted concept would run `gh` there;
   - add it to `ISSUE_CONCEPTS`, because an override of the bundle replaces the issue source, so
     `resolveIssueIdKind` must stop vouching for the id shape.
+    - Known side effect: a project override of the bundle on a linear or jira workspace drops
+      `issueIdKind` from the payload, although that provider's ids are keys. This is the
+      existing rule for any hand-written issue-concept override.
+    - Preset disables are unaffected: `resolveIssueIdKind` tests for a string.
+    - A code comment and a test pin both behaviours.
 - **Modify** `packages/codev/src/lib/forge-contracts.ts`: add `OverviewBundleResult`:
   - `prs: PrListItem[]`;
   - `issues: IssueListItem[]`;
@@ -174,6 +191,8 @@ building anything, prove that the exact final query is within the points ceiling
   - [ ] Exit status is honest (POSIX `sh`, no `pipefail`):
     - [ ] only stdout is captured, so gh's stderr reaches the caller unchanged;
     - [ ] every `gh` and `jq` step is checked.
+  - [ ] Output is printed once, after every page has been fetched. A process killed mid-paging
+        therefore prints nothing and is a failure, never a truncated success.
   - [ ] **Window-only salvage.** gh exits non-zero, and all of the following hold:
     - [ ] the windows were requested;
     - [ ] both open connections are present in `data`;
@@ -190,13 +209,36 @@ building anything, prove that the exact final query is within the points ceiling
 - [ ] **TS fetch (`fetchForOverview('overview-bundle', …)`):**
   - [ ] Sets `CODEV_INCLUDE_WINDOWS=1` and `CODEV_SINCE_DATE` (`sinceTimestamp24h()`) only when
         `includeWindows`.
+  - [ ] **Time budget.** Passes an explicit `timeoutMs` of 60 s, a named constant in
+        `github.ts`, in place of the dispatcher's 30 s default.
+    - Today each of the four concepts has its own 30 s, and the four run in parallel. The bundle
+      runs every page of every section in series in one process. That is one request in the
+      common case and two on codev, but up to 21 at the caps, mostly GitHub search, the slowest
+      endpoint.
+    - A timeout is a whole-call failure, so all four sections degrade together. The budget is
+      sized so that only a genuinely stuck forge hits it.
   - [ ] Validates the output. Anything non-conforming becomes an error result: `data: null`, and
-        a message naming the violation. Non-conforming means any of:
+        a message naming the section, item index and field. Non-conforming means any of:
     - [ ] not an object;
     - [ ] `prs` or `issues` missing or not an array;
-    - [ ] the windows requested, but neither both arrays nor a non-empty `windowsError` string
-          present;
-    - [ ] an element that is not an object carrying `number` and a string `title`.
+    - [ ] the windows requested, and not exactly one of these present: both window arrays, or
+          a non-empty `windowsError` string. Arrays together with `windowsError` is
+          non-conforming too;
+    - [ ] an item that breaks its section's existing contract:
+      - [ ] a required field missing or of the wrong type: `PrListItem` for `prs`,
+            `IssueListItem` for `issues` and `recentlyClosed`, `MergedPrItem` for
+            `recentlyMerged`;
+      - [ ] an optional field present with the wrong type;
+      - [ ] nested shapes included: `labels[].name` and `assignees[].login` strings,
+            `reviewRequests` a string array, `author.login` a string;
+      - [ ] the window date fields required as parseable dates: `closedAt` on `recentlyClosed`
+            (optional in `IssueListItem`, but the 24 h filter, the `closedAt!` assertion and the
+            sort in `overview.ts` all depend on it) and `mergedAt` on `recentlyMerged`. An item
+            missing one is reported, not silently filtered out by `withinLast24h`.
+
+      One small validator per contract, in `github.ts` next to the fetch. The contract types in
+      `forge-contracts.ts` stay the single statement of each shape, and the validators follow
+      them field by field.
   - [ ] Applies `withinLast24h` to the window arrays, as the four-call path does.
   - [ ] Ignores window sections that were not requested.
 - [ ] **Presets.**
@@ -239,17 +281,29 @@ request's variables (`windows`, cursor) and by which connection the query names.
     stderr reaches `executeForgeCommandDetailed`, and `isRateLimitError` matches it.
   - Non-JSON stdout → exit 1.
   - A failing window follow-up page → `windowsError`. A failing issues follow-up page → exit 1.
+- **Time budget.** A stub that sleeps on the second page, run with a short `timeoutMs`, gives
+  `timedOut: true` and `data: null`, never a partial result. A separate assertion checks that
+  the bundle fetch passes the named 60 s constant.
 - **Fetch validation:**
   - `issues` missing → error;
   - windows requested and missing → error;
-  - `windowsError` → passes;
+  - `windowsError` alone → passes; `windowsError` together with the window arrays → error;
+  - one case per contract for a missing required field (for example a PR without `isDraft`, an
+    issue without `url`, a merged PR without `headRefName`), plus a wrong nested type
+    (`labels: [{}]`, `reviewRequests: [{login: 'x'}]`) → error, naming section, index and field;
+  - a `recentlyClosed` item without `closedAt`, or a `recentlyMerged` item with an unparseable
+    `mergedAt` → error, not silently filtered out;
+  - the GitHub script's own fixture output passes the validator, so the shipped script and the
+    contract are tested together;
   - unrequested windows dropped;
   - items older than 24 h filtered out.
 - **Presets and backend:**
   - disabled on all four non-GitHub presets;
   - default on github and with no config;
   - `resolveAllConcepts` has 21 entries;
-  - the backend and budget key are `gh`.
+  - the backend and budget key are `gh`;
+  - `resolveIssueIdKind`: an `overview-bundle` override reports no id kind, including on
+    linear; the preset's disable still reports `key` on linear and jira.
 
 ---
 
@@ -281,6 +335,23 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
   - Today each of the four calls fails the same way, so the result is still visible and
     fail-fast.
   - It is mockable the way `overviewBackend` is.
+- **Modify** `packages/codev/src/lib/config.ts`. **Fix in place**, named in the PR body:
+  - **The bug.** `deepMerge` treats `null` as "delete this key". The `forge` section is
+    replaced wholesale when no lower layer has one, so a project's `"<concept>": null`
+    survives today. But once any lower layer carries a `forge` object (`~/.codev/config.json`,
+    the framework cache config), or a `.codev/config.local.json` sets one, the merge recurses
+    and the null is **deleted**. The concept then falls through to its default.
+  - **What breaks.** Every documented concept disable fails for those users. Here it is the
+    spec's "a project that disables `overview-bundle`" and "disables `recently-merged`"
+    fallback criteria. (The provider presets' nulls live in code and are unaffected.)
+  - **The fix.** The `forge` section merges across layers key by key, with `null` kept as a
+    value meaning "disabled", as `forge.md` documents. A higher layer's string or null replaces
+    a lower layer's value.
+  - **Blast radius.** Every other config key keeps `deepMerge`'s semantics. `ForgeConfig` is
+    flat, so a key-wise merge is complete.
+- **Modify** `packages/codev/src/__tests__/config.test.ts`. A global `forge` object plus a
+  project `"overview-bundle": null` → disabled. Same for a `config.local.json` null over a
+  project string. A project string over a global null → that string.
 - **Modify** `packages/codev/src/agent-farm/servers/overview.ts`:
   - `getOverview` picks the path per call;
   - the four-call path's code is untouched;
@@ -309,6 +380,14 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
     - on the bundle path: 1 `api graphql` + 1 `api user` per batch;
     - one more bundle after the suspension lifts;
     - the original four-call harness kept on a fallback workspace.
+- **No test trusts on-disk config to pick its path.** Real `loadConfig` also reads
+  `~/.codev/config.json`, so a fixture's `.codev/config.json` alone does not prove which path
+  runs on another machine.
+  - Cache-level tests pin the path by mocking `overviewPath`.
+  - Tests that do read config from disk (the real-`gh` harnesses, the Linear test, the
+    `overview.test.ts` fallback workspaces) assert the resolved path first, with the real
+    `overviewPath`. A stray user config then fails the test loudly instead of silently testing
+    the other path.
 
 #### Bundle cache semantics (the contract this phase implements)
 
@@ -340,6 +419,11 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
     - escalate the windows failure window;
     - pass the text through `limiter.noteFailure`, where only a rate-limit message suspends;
     - leave the windows entry as it is.
+
+    The GitHub script cannot produce a rate limit here: a rate limit is a top-level error, and
+    salvage requires every error to sit on a window path. The `noteFailure` call is defence in
+    depth for an adopter's own bundle. It is tested at the contract level, with a fake bundle
+    emitting such a `windowsError`, and not claimed as GitHub coverage.
 - **Whole-call failure** (non-zero exit, timeout, non-conforming output, throw):
   - escalate the whole-call failure window and run `limiter.noteFailure`;
   - touch **neither** group's entry: positive entries keep serving until their own expiry;
@@ -348,12 +432,16 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
   settles.
 - **The one observable difference from the four-call path** is deliberate, per the spec's
   failure criterion ("a section whose positive entry is still inside its TTL … is served"). An
-  invalidation-driven refresh that fails leaves the still-valid open lists serving. On the
-  four-call path the failed refetch overwrites them with a cached failure.
+  invalidation-driven refresh that fails leaves the still-valid open lists serving, with
+  `forgeStatus: 'ok'` and no `errors` text until they expire, at most 180 s after their fetch.
+  On the four-call path the failed refetch overwrites them with a cached failure, so the error
+  shows at once. This changes when a human sees the error, so it goes to the architect at the
+  plan gate as an explicit question rather than living only here.
 
 #### Deliverables
 
 - [ ] `resolveOverviewPath` and `overviewPath`, with each four-call reason.
+- [ ] The forge-section null-merge fix in `config.ts`, with its tests.
 - [ ] The bundle path in `OverviewCache`, implementing the contract above.
 - [ ] The existing tests migrated as listed, with no behavioural assertion dropped.
 - [ ] The new cache tests and the real-`gh` harness.
@@ -370,7 +458,9 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
 - [ ] **Real data, run once by hand and not committed:** `getOverview` on this repository with
       real `gh`, bundle path against a forced four-call path (`"overview-bundle": null`). The two
       payloads are deep-equal, ignoring time-derived fields. This is the parity check on real
-      data, and costs a few points.
+      data, and costs a few points. The dashboard and VS Code render only from this payload, so
+      equal payloads mean an identical render. The rendered check itself (spec test 21) runs in
+      the verify phase; see Verification below.
 - [ ] Build passes and the full suite passes.
 
 #### Test Plan
@@ -479,6 +569,28 @@ adopters.
 - **By hand:** run `codev doctor` from the worktree build on this repo (default GitHub) and on a
   scratch repo with `provider: gitlab`, and check the line.
 
+## Verification (verify phase, after the PR merges)
+
+Spec test 21 asks that the dashboard render PRs, backlog and recently-closed identically to
+`main`. That needs a Tower serving this code, and it cannot be done before the merge without
+risk:
+
+- The live Tower on port 4100 runs the installed build, not this worktree.
+- The Playwright suite (`playwright.config.ts`) defaults to that port and reuses the server it
+  finds there. Its global setup activates a workspace and starts an architect shell in the
+  live Tower.
+- A second Tower from the worktree build would share the user-global `~/.agent-farm/global.db`.
+
+So in verify, after the architect relays a human go-ahead for the Tower restart onto the
+merged build (`local-install`, with the `CLAUDE_CODE_*` scrub):
+
+1. A read-only Playwright check, testing-guide style, of this workspace's Work view. It
+   navigates only, with no workspace activation. It checks that the PR rows, the backlog and
+   the `.recently-closed-row` entries render and match `/api/overview`.
+2. `codev doctor` on this workspace shows the bundled line with 20 calls/h.
+3. A one-hour look at Tower's `gh` spawns for this workspace: about one bundle call per 180 s
+   refresh, two `gh` processes each on codev.
+
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
@@ -492,6 +604,9 @@ adopters.
 | Path selection adds per-poll cost | Low | Low | One config load and no script reads. The bundle path resolves 2 backends against today's 5, a net reduction |
 | The forge script misbehaves under Git Bash on native Windows | Low | Medium | Same constructs as `pr-list.sh`. Dispatch the on-demand Windows workflow on the branch in Review and link it in the PR |
 | The verification runs drain the shared GitHub budget | Low | Low | A handful of read-only queries, a few points each. Never trigger a real rate limit |
+| One slow page times out the whole bundle and degrades all four sections at once | Low | Medium | An explicit 60 s budget, in place of the per-concept 30 s. Output is printed only after the last page, so a timeout is an honest failure, never a truncated success. Stub test |
+| A `"overview-bundle": null` disable is deleted by `deepMerge` when a lower config layer has a `forge` object, so the bundle runs anyway | Medium for users with a global `forge` config | High | Fix in place: the `forge` section merges key by key with null kept (Phase 2). Tests never trust on-disk config to pick their path |
+| A bundle item missing a field the payload depends on is cached as a success | Low | Medium | Full per-contract validation, `closedAt`/`mergedAt` required on the windows. Tests for each contract |
 
 ## Documentation Updates
 
