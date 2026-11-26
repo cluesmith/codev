@@ -218,9 +218,13 @@ export interface TowerTunnelStatus {
   state: string;
   uptime: number | null;
   towerId: string | null;
+  /** The cloud's slug: the routing identity in `/t/<slug>/` (Issue #1871). */
   towerName: string | null;
+  displayName?: string | null;
   serverUrl: string | null;
   accessUrl: string | null;
+  /** Set when the cloud rejected the key after it had connected (Issue #1871). */
+  deregisteredAt?: string;
 }
 
 export interface TowerStatus {

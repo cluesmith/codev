@@ -11,7 +11,8 @@
  * B. AI-assistant file refresh (runs every time):
  *    1. Update CLAUDE.md, AGENTS.md, and provider skill trees from package. A skill the
  *       user never edited is replaced; an edited one gets `.codev-new` copies (#1811).
- *       A root doc edited outside its managed block gets a `.codev-new` too (#1982).
+ *       A root doc edited outside its managed block gets a `.codev-new` too (#1982); one
+ *       that is an older shipped version, never edited, is replaced (#1985).
  */
 
 import * as fs from 'node:fs';
@@ -275,6 +276,7 @@ export async function update(options: UpdateOptions = {}, overrides: Partial<Upd
     // Update root files (CLAUDE.md, AGENTS.md). A dry run reports the same outcome and
     // writes nothing.
     const projectName = path.basename(targetDir);
+    let pendingRootDocs: Record<string, string> = {};
     const reportIrregularRootFiles = (files: string[]): void => {
       for (const file of files) {
         result.skipped.push(file);
@@ -283,17 +285,28 @@ export async function update(options: UpdateOptions = {}, overrides: Partial<Upd
     };
     if (force) {
       const rootResult = copyRootFiles(targetDir, templatesDir, projectName, { dryRun });
+      pendingRootDocs = rootResult.written;
       reportIrregularRootFiles(rootResult.notRegular);
       for (const file of rootResult.copied) {
         result.updated.push(file);
         log(chalk.blue(`  ~ (${previewVerb}updated)`), file);
       }
     } else {
-      const rootResult = copyRootFiles(targetDir, templatesDir, projectName, { handleConflicts: true, dryRun });
+      const rootResult = copyRootFiles(targetDir, templatesDir, projectName, {
+        handleConflicts: true,
+        replaceShipped: true,
+        dryRun,
+      });
+      pendingRootDocs = rootResult.written;
       reportIrregularRootFiles(rootResult.notRegular);
       for (const file of rootResult.copied) {
         result.newFiles.push(file);
         log(chalk.green(`  + (${previewVerb}new)`), file);
+      }
+      // An older release's doc, never edited, is replaced like an unedited skill (#1985).
+      for (const file of rootResult.replaced) {
+        result.updated.push(file);
+        log(chalk.blue(`  ~ (${previewVerb}updated)`), file);
       }
       for (const file of rootResult.conflicts) {
         result.rootConflicts.push({
@@ -341,8 +354,8 @@ export async function update(options: UpdateOptions = {}, overrides: Partial<Upd
     // Refresh the always-on hot-tier managed block in CLAUDE.md / AGENTS.md (Spec 987).
     // Non-clobbering: only the marked block is replaced; user content is preserved.
     // Logged as a side effect (not added to result.updated, which tracks template copies).
-    // A dry run counts the hot files it would have created as present.
-    for (const file of syncHotContextBlock(targetDir, targetDir, { dryRun, pendingHotFiles })) {
+    // A dry run counts the hot files and root docs it would have written as present.
+    for (const file of syncHotContextBlock(targetDir, targetDir, { dryRun, pendingHotFiles, pendingRootDocs })) {
       log(chalk.blue(`  ~ (hot-tier block ${previewVerb}refreshed)`), file);
     }
 

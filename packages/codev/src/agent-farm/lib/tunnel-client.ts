@@ -32,7 +32,22 @@ export interface TunnelClientOptions {
   usePlainTcp?: boolean;
 }
 
-export type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
+/**
+ * `deregistered` (Issue #1871) is terminal: the cloud rejected a key that had
+ * already connected in this client's lifetime, which means the tower was
+ * deleted in the cloud or its key replaced. Unlike `auth_failed`, it never
+ * half-opens.
+ */
+export type TunnelState = 'disconnected' | 'connecting' | 'connected' | 'auth_failed' | 'deregistered';
+
+/** The identity the cloud confirms in `auth_ok` (Issue #1871). */
+export interface TunnelIdentity {
+  towerId: string;
+  /** The routing slug; absent from a cloud that predates codev-cloud#17. */
+  slug?: string;
+  /** The display name; absent from a cloud that predates codev-cloud#17. */
+  name?: string;
+}
 
 export interface TowerMetadata {
   workspaces: Array<{ path: string; name: string }>;
@@ -44,6 +59,8 @@ type StateChangeCallback = (
   previousState: TunnelState,
   reason?: string
 ) => void;
+
+type AuthOkCallback = (identity: TunnelIdentity) => void;
 
 /** Headers that must be stripped when proxying between HTTP/2 and HTTP/1.1 */
 const HOP_BY_HOP_HEADERS = new Set([
@@ -287,6 +304,9 @@ export class TunnelClient {
   private state: TunnelState = 'disconnected';
   private connectedAt: number | null = null;
   private stateListeners: StateChangeCallback[] = [];
+  private authOkListeners: AuthOkCallback[] = [];
+  /** Set once this client reaches `connected`: its key was good (Issue #1871) */
+  private hasConnected = false;
   private ws: WebSocket | null = null;
   private wsStream: Duplex | null = null;
   private h2Server: http2.Http2Server | null = null;
@@ -320,6 +340,11 @@ export class TunnelClient {
     this.stateListeners.push(callback);
   }
 
+  /** Called on every successful auth with the identity the cloud confirmed. */
+  onAuthOk(callback: AuthOkCallback): void {
+    this.authOkListeners.push(callback);
+  }
+
   private setState(newState: TunnelState, reason?: string): void {
     if (this.state === newState) return;
     const prev = this.state;
@@ -327,6 +352,7 @@ export class TunnelClient {
     // Leaving `connecting` — the attempt resolved, so disarm its watchdog (#1372)
     if (newState !== 'connecting') this.clearConnectTimeout();
     if (newState === 'connected') {
+      this.hasConnected = true;
       this.connectedAt = Date.now();
       this.consecutiveFailures = 0;
       this.rateLimitCount = 0;
@@ -335,7 +361,7 @@ export class TunnelClient {
       if (this._pendingMetadata) {
         this.pushMetadataViaHttp(this._pendingMetadata);
       }
-    } else if (newState === 'disconnected' || newState === 'auth_failed') {
+    } else if (newState === 'disconnected' || newState === 'auth_failed' || newState === 'deregistered') {
       this.connectedAt = null;
     }
     for (const listener of this.stateListeners) {
@@ -459,15 +485,20 @@ export class TunnelClient {
    * did); the error path's first retry moves ~1.5s → ~2.5s.
    */
   private scheduleReconnect(): void {
-    if (this.destroyed || this.state === 'auth_failed') return;
+    if (this.destroyed || this.isParked()) return;
     this.clearReconnectTimer();
     const delay = calculateBackoff(this.consecutiveFailures);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      if (!this.destroyed && this.state !== 'auth_failed') {
+      if (!this.destroyed && !this.isParked()) {
         this.doConnect();
       }
     }, delay);
+  }
+
+  /** Auth parked the client: only the breaker's half-open (or nothing) may reconnect. */
+  private isParked(): boolean {
+    return this.state === 'auth_failed' || this.state === 'deregistered';
   }
 
   private clearConnectTimeout(): void {
@@ -651,6 +682,11 @@ export class TunnelClient {
 
         if (msg.type === 'auth_ok') {
           this.options.towerId = msg.towerId;
+          this.emitAuthOk({
+            towerId: msg.towerId,
+            slug: typeof msg.slug === 'string' && msg.slug ? msg.slug : undefined,
+            name: typeof msg.name === 'string' && msg.name ? msg.name : undefined,
+          });
           this.startH2Server(ws);
         } else if (msg.type === 'auth_error') {
           this.handleAuthError(msg.reason || 'unknown');
@@ -669,9 +705,28 @@ export class TunnelClient {
     ws.on('message', onMessage);
   }
 
+  private emitAuthOk(identity: TunnelIdentity): void {
+    for (const listener of this.authOkListeners) {
+      try {
+        listener(identity);
+      } catch {
+        // Ignore listener errors
+      }
+    }
+  }
+
   private handleAuthError(reason: string): void {
     this.cleanup();
     this.consecutiveFailures++;
+
+    if (reason === 'invalid_api_key' && this.hasConnected) {
+      // This key connected earlier in this client's life and the cloud now
+      // rejects it: the tower was deleted in the cloud or its key replaced by a
+      // newer registration (Issue #1871). Retrying cannot succeed, so stop.
+      this.clearReconnectTimer();
+      this.setState('deregistered', 'auth rejected: invalid_api_key after a successful connection');
+      return;
+    }
 
     if (reason === 'invalid_api_key') {
       // A revoked key re-parks here every AUTH_RETRY_INTERVAL_MS. Raise the
@@ -731,7 +786,7 @@ export class TunnelClient {
 
   private handleConnectionError(err: Error): void {
     this.cleanup();
-    if (this.state === 'auth_failed') return; // Don't override circuit breaker
+    if (this.isParked()) return; // Don't override circuit breaker
     this.consecutiveFailures++;
     // Choke point: some errors originate from the relay (e.g. `ws`'s
     // "Unexpected server response: <status>"), so sanitize here too.

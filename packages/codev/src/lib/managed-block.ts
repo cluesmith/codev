@@ -90,31 +90,75 @@ export function renderHotContextBlock(workspaceRoot: string, pendingHotFiles: re
   ].join('\n');
 }
 
+interface AroundBlock {
+  before: string;
+  after: string;
+  /** Whether a line break ended the line before the BEGIN marker / the END marker's line. */
+  breakBefore: boolean;
+  breakAfter: boolean;
+}
+
+/**
+ * The doc's text around its managed block; null if it has none. The block is the markers,
+ * what lies between them, and the line break on each side (#1990): inserting the block writes
+ * those breaks, so an earlier update may have written them in LF into a CR LF doc too.
+ */
+function splitAroundBlock(doc: string): AroundBlock | null {
+  const begin = doc.indexOf(HOT_BLOCK_BEGIN);
+  const end = doc.indexOf(HOT_BLOCK_END);
+  if (begin === -1 || end === -1 || end <= begin) return null;
+  const head = doc.slice(0, begin);
+  const tail = doc.slice(end + HOT_BLOCK_END.length);
+  const before = head.replace(/\r?\n$/, '');
+  const after = tail.replace(/^\r?\n/, '');
+  return { before, after, breakBefore: before !== head, breakAfter: after !== tail };
+}
+
+/**
+ * The line ending a root doc uses, read from its text outside the managed block (#1990): the
+ * block is regenerated, so a doc an earlier update left with an LF block in a CR LF body is
+ * CR LF, and is healed by the next refresh. Text outside the block whose line breaks are all
+ * CR LF is CR LF; anything else (all LF, both kinds, or no line break at all) takes LF, the
+ * ending the published templates and the rendered block carry.
+ */
+export function rootDocLineEnding(doc: string): '\r\n' | '\n' {
+  const split = splitAroundBlock(doc);
+  const outside = split ? [split.before, split.after] : [doc];
+  const count = (pattern: RegExp): number => outside.reduce((n, s) => n + (s.match(pattern) ?? []).length, 0);
+  const crlf = count(/\r\n/g);
+  return crlf > 0 && crlf === count(/\n/g) ? '\r\n' : '\n';
+}
+
 /**
  * Upsert the managed block into a root-doc's content, non-destructively.
  * - Markers present  → replace everything between them (inclusive) with `block`.
  * - Markers absent    → insert `block` after the first H1 (or at the top if none).
- * User content outside the markers is always preserved. Idempotent.
+ * User content outside the markers is always preserved. Idempotent. The block, with the line
+ * break on each side of it and any an insertion adds, is written in the doc's line ending
+ * (#1990), so a CR LF doc never ends up mixed.
  */
 export function upsertHotContextBlock(docContent: string, block: string): string {
   if (block === '') return docContent;
 
-  const begin = docContent.indexOf(HOT_BLOCK_BEGIN);
-  const end = docContent.indexOf(HOT_BLOCK_END);
-  if (begin !== -1 && end !== -1 && end > begin) {
-    const before = docContent.slice(0, begin);
-    const after = docContent.slice(end + HOT_BLOCK_END.length);
-    return before + block + after;
+  const eol = rootDocLineEnding(docContent);
+  const ownBlock = block.replace(/\r?\n/g, eol);
+  const split = splitAroundBlock(docContent);
+  if (split) {
+    const { before, after, breakBefore, breakAfter } = split;
+    return before + (breakBefore ? eol : '') + ownBlock + (breakAfter ? eol : '') + after;
   }
 
   const lines = docContent.split('\n');
   const h1Idx = lines.findIndex((l) => l.startsWith('# '));
   if (h1Idx === -1) {
-    return `${block}\n\n${docContent}`;
+    return `${ownBlock}${eol}${eol}${docContent}`;
   }
+  // `head` keeps its heading's CR, if any, so a '\n' after it restores the heading's own line
+  // break; a heading on the doc's last line had none, and gets the doc's.
   const head = lines.slice(0, h1Idx + 1).join('\n');
   const tail = lines.slice(h1Idx + 1).join('\n');
-  return `${head}\n\n${block}\n${tail}`;
+  const headBreak = h1Idx === lines.length - 1 ? eol : '\n';
+  return `${head}${headBreak}${eol}${ownBlock}${eol}${tail}`;
 }
 
 /**
@@ -132,6 +176,8 @@ export interface SyncHotContextOptions {
   dryRun?: boolean;
   /** Hot files (workspace-relative) a dry run would have created by now. */
   pendingHotFiles?: readonly string[];
+  /** Root docs a dry run would have written by now, by name, with their content (#1985). */
+  pendingRootDocs?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -146,15 +192,16 @@ export function syncHotContextBlock(
   workspaceRoot: string = targetDir,
   options: SyncHotContextOptions = {},
 ): string[] {
-  const { dryRun = false, pendingHotFiles = [] } = options;
+  const { dryRun = false, pendingHotFiles = [], pendingRootDocs = {} } = options;
   const block = renderHotContextBlock(workspaceRoot, pendingHotFiles);
   if (block === '') return [];
 
   const changed: string[] = [];
   for (const name of ROOT_DOCS) {
     const p = path.join(targetDir, name);
-    if (!fs.existsSync(p)) continue;
-    const before = fs.readFileSync(p, 'utf-8');
+    const pending = pendingRootDocs[name];
+    if (pending === undefined && !fs.existsSync(p)) continue;
+    const before = pending ?? fs.readFileSync(p, 'utf-8');
     const after = upsertHotContextBlock(before, block);
     if (after !== before) {
       if (!dryRun) fs.writeFileSync(p, after);

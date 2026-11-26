@@ -65,6 +65,57 @@ describe('Spec 987 — managed block (pure upsert logic)', () => {
   });
 });
 
+/**
+ * Issue #1990: the block is written in the line ending the doc uses outside the block, so a
+ * CR LF doc never ends up mixed. Text with only CR LF breaks outside the block is CR LF;
+ * anything else (only LF, no break, or both kinds) takes LF, the published templates' ending.
+ */
+describe('#1990 — the block takes the line ending of the doc around it', () => {
+  const BLOCK = `${HOT_BLOCK_BEGIN}\nfresh content\n${HOT_BLOCK_END}`;
+  const crlf = (s: string): string => s.replace(/\r?\n/g, '\r\n');
+  const bareLineFeeds = (s: string): number => (s.match(/(?<!\r)\n/g) ?? []).length;
+
+  it('replaces a block in a CR LF doc with a CR LF block, every byte outside unchanged', () => {
+    const before = crlf(`# Title\n\n${HOT_BLOCK_BEGIN}\nOLD\n${HOT_BLOCK_END}\n\nAfter text.\n`);
+    expect(upsertHotContextBlock(before, BLOCK)).toBe(before.replace('OLD', 'fresh content'));
+  });
+
+  it('inserts into a CR LF doc after its H1, or at its top, in CR LF', () => {
+    expect(upsertHotContextBlock(crlf('# Title\n\nbody\n'), BLOCK)).toBe(crlf(`# Title\n\n${BLOCK}\n\nbody\n`));
+    expect(upsertHotContextBlock(crlf('intro\n# Title'), BLOCK)).toBe(crlf(`intro\n# Title\n\n${BLOCK}\n`));
+    expect(upsertHotContextBlock(crlf('no heading\nhere\n'), BLOCK)).toBe(crlf(`${BLOCK}\n\nno heading\nhere\n`));
+  });
+
+  it('heals a CR LF doc whose block an earlier update replaced in LF', () => {
+    const mixed = crlf(`# Title\n\nbody\n`).replace('body', `${BLOCK}\r\n\r\nbody`);
+    expect(bareLineFeeds(mixed)).toBe(2);
+    const out = upsertHotContextBlock(mixed, BLOCK);
+    expect(bareLineFeeds(out)).toBe(0);
+    expect(out).toBe(crlf(mixed));
+  });
+
+  it('heals a CR LF doc an earlier update inserted the block into, LF breaks on each side included', () => {
+    // What the insertion before #1990 made of '# Title\r\n\r\nbody\r\n'.
+    const inserted = `# Title\r\n\n${BLOCK}\n\r\nbody\r\n`;
+    expect(upsertHotContextBlock(inserted, BLOCK)).toBe(crlf(`# Title\n\n${BLOCK}\n\nbody\n`));
+  });
+
+  it('takes LF when the text outside the block has both endings, or no line break', () => {
+    // The line break on each side of the markers belongs to the block, and follows it.
+    const mixedOutside = `# Title\r\n\r\n${HOT_BLOCK_BEGIN}\r\nOLD\r\n${HOT_BLOCK_END}\r\n\nAfter text.\n`;
+    expect(upsertHotContextBlock(mixedOutside, BLOCK)).toBe(
+      `# Title\r\n\n${BLOCK}\n\nAfter text.\n`,
+    );
+    const noBreakOutside = `${HOT_BLOCK_BEGIN}\r\nOLD\r\n${HOT_BLOCK_END}`;
+    expect(upsertHotContextBlock(noBreakOutside, BLOCK)).toBe(BLOCK);
+  });
+
+  it('is idempotent on a CR LF doc', () => {
+    const once = upsertHotContextBlock(crlf('# Title\n\nbody\n'), BLOCK);
+    expect(upsertHotContextBlock(once, BLOCK)).toBe(once);
+  });
+});
+
 describe('Spec 987 / #1119 — managed block (render + sync into root docs)', () => {
   let tmp: string;
 

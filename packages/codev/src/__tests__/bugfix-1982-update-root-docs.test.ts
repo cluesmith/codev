@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { init } from '../commands/init.js';
 import { update, type UpdateResult } from '../commands/update.js';
 import { HOT_BLOCK_BEGIN, HOT_BLOCK_END } from '../lib/managed-block.js';
@@ -43,6 +44,9 @@ vi.mock('chalk', () => {
 });
 
 const ROOT_DOCS = ['CLAUDE.md', 'AGENTS.md'];
+
+/** The line ending a doc uses: CR LF on a Windows checkout of the templates. */
+const eolOf = (doc: string): string => (doc.includes('\r\n') ? '\r\n' : '\n');
 
 function codevNewFiles(dir: string): string[] {
   const found: string[] = [];
@@ -108,7 +112,8 @@ describe('issue #1982 — codev update on root docs', () => {
 
   it('an edit outside the managed block is one conflict, and the edit is kept', async () => {
     const template = read('CLAUDE.md');
-    const edited = `${template}\n## Our house rules\n\nMY_RULE\n`;
+    // In the doc's own line ending: a Windows checkout's templates are CR LF (#1990).
+    const edited = `${template}\n## Our house rules\n\nMY_RULE\n`.replace(/\r?\n/g, eolOf(template));
     write('CLAUDE.md', edited);
 
     const { result } = await runUpdate();
@@ -136,8 +141,9 @@ describe('issue #1982 — codev update on root docs', () => {
     const template = read('AGENTS.md');
     const begin = template.indexOf(HOT_BLOCK_BEGIN);
     const end = template.indexOf(HOT_BLOCK_END) + HOT_BLOCK_END.length;
-    // The block and the blank line after it, as in a doc written before Spec 987.
-    write('AGENTS.md', template.slice(0, begin) + template.slice(end + 2));
+    // The block and the blank line after it, as in a doc written before Spec 987, in either
+    // line ending (#1990).
+    write('AGENTS.md', template.slice(0, begin) + template.slice(end).replace(/^(\r?\n){2}/, ''));
 
     const { result, report } = await runUpdate();
 
@@ -177,14 +183,16 @@ describe('issue #1982 — codev update on root docs', () => {
     expect(ROOT_DOCS.map(read)).toEqual(before);
   });
 
-  it('a CRLF checkout of an unedited doc is up to date', async () => {
-    const crlf = read('CLAUDE.md').replace(/\n/g, '\r\n');
+  it('a CRLF checkout of an unedited doc is up to date, and stays CRLF', async () => {
+    // Only bare LFs turn into CR LF: on a Windows checkout the doc is CR LF already (#1990).
+    const crlf = read('CLAUDE.md').replace(/\r?\n/g, '\r\n');
     write('CLAUDE.md', crlf);
 
     const { result } = await runUpdate();
 
     expect(result.rootConflicts).toEqual([]);
     expect(codevNewFiles(projectDir)).toEqual([]);
+    expect(read('CLAUDE.md')).toBe(crlf);
   });
 
   it('an edited skill is still kept, with its new version as .codev-new beside it', async () => {
@@ -201,23 +209,29 @@ describe('issue #1982 — codev update on root docs', () => {
     expect(read(`${skill}.codev-new`)).toBe(shipped);
   });
 
-  // Known limit, decided out of scope for #1982: root docs carry no record of the version
-  // a release installed (skills have SHIPPED_SKILL_HASHES), so a doc an adopter never
-  // edited, written by an older release whose template has since changed outside the
-  // managed block, cannot be told from an edit. It stays a conflict and the doc is kept.
-  it('known limit: an unedited doc from an older template that changed outside the block is still a conflict', async () => {
+  // The limit #1982 pinned here is lifted by #1985: root docs now have a history of every
+  // shipped version (SHIPPED_ROOT_DOC_HASHES), as skills do, so an unedited doc an older
+  // release wrote is replaced. A doc that is no shipped version is still the adopter's.
+  it('an unedited doc from an older release is replaced; a doc that is no shipped version stays a conflict', async () => {
     const current = read('CLAUDE.md');
     const lastSection = current.lastIndexOf('\n## ');
     expect(lastSection).toBeGreaterThan(current.indexOf(HOT_BLOCK_END));
-    // The older release's template: the current one before its last section was added.
-    const olderTemplate = `${current.slice(0, lastSection)}\n`;
-    write('CLAUDE.md', olderTemplate);
+    // The current template less its last section: no release shipped it.
+    const notShipped = `${current.slice(0, lastSection)}\n`;
+    write('CLAUDE.md', notShipped);
+    // AGENTS.md as v3.3.4's init wrote it for this project, from the template in git history.
+    const fixture = fileURLToPath(new URL('./fixtures/root-doc-templates/v3.3.4.AGENTS.md.template', import.meta.url));
+    const currentAgents = read('AGENTS.md');
+    write('AGENTS.md', fs.readFileSync(fixture, 'utf-8').split('{{PROJECT_NAME}}').join('fresh'));
 
     const { result } = await runUpdate();
 
     expect(result.rootConflicts.map((c) => c.file)).toEqual(['CLAUDE.md']);
-    expect(read('CLAUDE.md')).toBe(olderTemplate);
+    expect(read('CLAUDE.md')).toBe(notShipped);
     expect(read('CLAUDE.md.codev-new')).toBe(current);
+    expect(result.updated).toEqual(['AGENTS.md']);
+    expect(read('AGENTS.md')).toBe(currentAgents);
+    expect(codevNewFiles(projectDir)).toEqual(['CLAUDE.md.codev-new']);
   });
 
   describe('--dry-run reports exactly what the real run then does, on the same project', () => {

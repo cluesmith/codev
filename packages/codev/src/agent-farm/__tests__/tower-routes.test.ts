@@ -1083,6 +1083,23 @@ describe('tower-routes', () => {
       expect(parsed.hostname).toBe('mac');
     });
 
+    it('titles with the display name, not the slug, when they differ (Issue #1871)', async () => {
+      mockReadCloudConfig.mockReturnValue({
+        tower_id: 'test-id',
+        tower_name: 'ana-s-mbp',
+        display_name: "Ana's MBP",
+        api_key: 'test-key',
+        server_url: 'https://cloud.codevos.ai',
+      });
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
+      const { res, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(JSON.parse(body()).hostname).toBe("Ana's MBP");
+    });
+
     it('returns undefined hostname when no cloud config (Bugfix #470)', async () => {
       mockReadCloudConfig.mockReturnValue(null);
 

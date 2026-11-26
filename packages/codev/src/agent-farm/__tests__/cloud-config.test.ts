@@ -51,6 +51,7 @@ import {
   getMachineIdPath,
   readCloudConfig,
   writeCloudConfig,
+  updateCloudConfig,
   deleteCloudConfig,
   isRegistered,
   maskApiKey,
@@ -272,6 +273,34 @@ describe('cloud-config', () => {
       const raw = readFileSync(CONFIG_PATH, 'utf-8');
       expect(raw.endsWith('\n')).toBe(true);
       expect(() => JSON.parse(raw)).not.toThrow();
+    });
+  });
+
+  describe('updateCloudConfig (Issue #1871)', () => {
+    it('merges the patch and round-trips the optional identity fields', () => {
+      writeCloudConfig(VALID_CONFIG);
+
+      expect(updateCloudConfig(VALID_CONFIG.api_key, { tower_name: 'my-macbook-2', display_name: 'my-macbook' })).toBe(true);
+      expect(updateCloudConfig(VALID_CONFIG.api_key, { deregistered_at: '2026-11-25T00:00:00.000Z' })).toBe(true);
+
+      expect(readCloudConfig()).toEqual({
+        ...VALID_CONFIG,
+        tower_name: 'my-macbook-2',
+        display_name: 'my-macbook',
+        deregistered_at: '2026-11-25T00:00:00.000Z',
+      });
+    });
+
+    it('leaves a config holding a different key untouched', () => {
+      writeCloudConfig(VALID_CONFIG);
+
+      expect(updateCloudConfig('ctk_SomeOtherKey', { deregistered_at: '2026-11-25T00:00:00.000Z' })).toBe(false);
+      expect(readCloudConfig()).toEqual(VALID_CONFIG);
+    });
+
+    it('does nothing when no config exists', () => {
+      expect(updateCloudConfig(VALID_CONFIG.api_key, { tower_name: 'x' })).toBe(false);
+      expect(existsSync(CONFIG_PATH)).toBe(false);
     });
   });
 

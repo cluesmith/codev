@@ -27,9 +27,18 @@ const MACHINE_ID_FILENAME = 'machine-id';
  */
 export interface CloudConfig {
   tower_id: string;
+  /** The cloud's slug: the routing identity in `/t/<slug>/` (Issue #1871). */
   tower_name: string;
   api_key: string;
   server_url: string;
+  /** The cloud's display name, when it differs or is known (Issue #1871). */
+  display_name?: string;
+  /**
+   * When the cloud rejected this registration's key after it had connected
+   * (deleted in the cloud, or replaced by a newer registration). The tunnel
+   * stays down; the credentials are kept for inspection (Issue #1871).
+   */
+  deregistered_at?: string;
 }
 
 const REQUIRED_FIELDS: (keyof CloudConfig)[] = [
@@ -91,12 +100,19 @@ export function readCloudConfig(): CloudConfig | null {
     return null;
   }
 
-  return {
+  const result: CloudConfig = {
     tower_id: config.tower_id as string,
     tower_name: config.tower_name as string,
     api_key: config.api_key as string,
     server_url: config.server_url as string,
   };
+  if (typeof config.display_name === 'string' && config.display_name) {
+    result.display_name = config.display_name;
+  }
+  if (typeof config.deregistered_at === 'string' && config.deregistered_at) {
+    result.deregistered_at = config.deregistered_at;
+  }
+  return result;
 }
 
 /**
@@ -113,6 +129,19 @@ export function writeCloudConfig(config: CloudConfig): void {
   writeFileSync(configPath, json, { mode: 0o600 });
   // Enforce 0600 even if the file already existed with different permissions
   chmodSync(configPath, 0o600);
+}
+
+/**
+ * Merge `patch` into the stored config, but only while it still holds
+ * `apiKey` — a tunnel acting on what the cloud told it must never overwrite a
+ * registration written since that tunnel started (Issue #1871). Returns
+ * whether the config was updated.
+ */
+export function updateCloudConfig(apiKey: string, patch: Partial<CloudConfig>): boolean {
+  const current = readCloudConfig();
+  if (!current || current.api_key !== apiKey) return false;
+  writeCloudConfig({ ...current, ...patch });
+  return true;
 }
 
 /**

@@ -1,0 +1,22 @@
+id: bugfix-1990
+title: codev-update-root-doc-tests-fa
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-25T22:32:24.471Z'
+    approved_at: '2026-11-25T23:43:40.877Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-25T21:53:19.978Z'
+updated_at: '2026-11-25T23:43:50.035Z'
+pr_history:
+  - phase: pr
+    pr_number: 1991
+    branch: builder/bugfix-1990
+    created_at: '2026-11-25T22:32:18.701Z'
+pr_ready_for_human: false
