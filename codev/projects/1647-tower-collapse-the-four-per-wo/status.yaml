@@ -13,8 +13,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 3
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -27,5 +27,16 @@ history:
         verdict: REQUEST_CHANGES
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-specify-iter1-claude.txt
+  - iteration: 2
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-specify-iter2-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-specify-iter2-claude.txt
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-26T01:47:58.411Z'
+updated_at: '2026-11-26T01:53:30.823Z'
