@@ -86,9 +86,31 @@ POSIX `sh` plus `gh` and `jq`, declared `# forge-executable: gh`.
    `YYYY-MM-DDTHH:MM:SSZ` exactly, checked with a `case` glob of digit classes. A missing,
    date-only or extended value, or one carrying a space, qualifier or newline, exits 2 with a
    message on stderr. No `gh` process is spawned.
-2. **Staging.** The script creates one `mktemp -d` directory under `${TMPDIR:-/tmp}` and removes it
-   with `trap … EXIT`. `HUP`, `INT` and `TERM` traps exit so that the `EXIT` trap runs. Nothing is
-   written into the workspace.
+2. **Staging and signals.** The script creates one `mktemp -d` directory under `${TMPDIR:-/tmp}`
+   and removes it with `trap … EXIT`. Nothing is written into the workspace.
+
+   The forge layer enforces the 60 s limit by sending SIGTERM to the shell alone (Node `exec`).
+   POSIX `sh` defers a trapped signal until the running foreground command returns. A TERM trap
+   around a foreground `gh` would therefore neither fire nor let the call settle until `gh`
+   finished. With no trap at all, the shell would die at once, but the temp directory would
+   leak and `gh` would keep running as an orphan. So every `gh` runs in the background, and the
+   script waits for it:
+
+   ```sh
+   gh … >"$out" 2>"$err" & pid=$!
+   wait "$pid"
+   status=$?
+   ```
+
+   `wait` returns immediately on a trapped signal. The `HUP`, `INT` and `TERM` traps kill the
+   in-flight `gh`, and exit with 128 plus the signal number so that the `EXIT` trap removes the
+   temp directory. The call then settles at the limit, with no orphan and no leak.
+
+   Staging to files rather than `$(…)` is what lets this work, because `gh` never holds the
+   exec pipe. A comment in the script says so, so that nobody "simplifies" it back.
+
+   On native Windows, a timeout kill does not deliver a signal the trap can catch, so the temp
+   directory is left in `TMPDIR` there. That is accepted and noted in the script.
 3. **Three fixed queries, each a named operation:**
    - `OverviewBundle`: open PRs `first:30` and open issues `first:100`, both
      `CREATED_AT DESC` as `gh pr list` and `gh issue list` order them, plus two aliased
@@ -99,12 +121,14 @@ POSIX `sh` plus `gh` and `jq`, declared `# forge-executable: gh`.
    Nested connections use `gh`'s caps (`labels`, `assignees` and `reviewRequests` `first:100`).
    The query texts are constants; no value is ever interpolated into them. The operation names
    also let the test's fake `gh` route each request.
-4. **Variables.** `owner`, `repo` and both search strings go through `-F`, so that `gh` expands
-   `{owner}`/`{repo}`. The search strings are
-   `repo:{owner}/{repo} type:issue state:closed closed:>$CODEV_SINCE_DATE` and
-   `repo:{owner}/{repo} type:pr is:merged merged:>$CODEV_SINCE_DATE`. Both begin with `repo:`,
-   so `-F` type conversion cannot apply to them. Cursors, which come from returned data, go
-   through `-f` only.
+4. **Variables.**
+   - The query text goes through `-f query=`, which is never type-converted.
+   - `owner`, `repo` and both search strings go through `-F`, so that `gh` expands
+     `{owner}`/`{repo}`. The search strings are
+     `repo:{owner}/{repo} type:issue state:closed closed:>$CODEV_SINCE_DATE` and
+     `repo:{owner}/{repo} type:pr is:merged merged:>$CODEV_SINCE_DATE`. Both begin with
+     `repo:`, so `-F` type conversion cannot apply to them.
+   - Cursors, which come from returned data, go through `-f` only.
 5. **Status capture.** Each `gh` call writes stdout and stderr to staged files, and the script
    records the exit status. There is never a `gh … | jq` pipeline.
 6. **First-request classification** (Desired State item 6). On a non-zero exit, one `jq`
@@ -125,8 +149,17 @@ POSIX `sh` plus `gh` and `jq`, declared `# forge-executable: gh`.
    that section becomes `null` (never truncated), the error goes to stderr, and paging of that
    section stops.
 9. **Assembly.** One `jq` invocation over the staged pages emits
-   `{prs, issues, recentlyClosed, recentlyMerged}`. It maps each section onto its concept's
-   contract fields, matching the sibling scripts' `gh --json` output:
+   `{prs, issues, recentlyClosed, recentlyMerged}`. Each section carries exactly the fields its
+   sibling script asks `gh --json` for:
+
+   | section | fields |
+   |---|---|
+   | `prs` | `number`, `title`, `url`, `reviewDecision`, `body`, `createdAt`, `author`, `reviewRequests`, `isDraft` |
+   | `issues` | `number`, `title`, `url`, `labels`, `createdAt`, `author`, `assignees` |
+   | `recentlyClosed` | `number`, `title`, `url`, `labels`, `createdAt`, `closedAt` |
+   | `recentlyMerged` | `number`, `title`, `url`, `body`, `createdAt`, `mergedAt`, `headRefName` |
+
+   The values follow `gh`'s conventions:
    - `reviewRequests` is flattened to logins, and team reviewers, which have no login, are
      dropped;
    - an absent `reviewDecision` becomes `""`, as `gh --json` renders it;
@@ -134,7 +167,9 @@ POSIX `sh` plus `gh` and `jq`, declared `# forge-executable: gh`.
    - authors become `{login}`, spelled as `gh` spells bot authors. The spelling is taken from the
      recorded fixture before the mapping is written, not assumed.
 
-   Sections are sliced to their caps.
+   Sections are sliced to their caps. A repository with issues disabled returns an empty issues
+   connection with exit 0, so it maps to `issues: []` and `recentlyClosed: []`. That is the
+   divergence the spec accepts in Desired State item 5.
 
 #### Fixtures
 
@@ -149,6 +184,19 @@ The parity cases must come from real output on both sides: a bot-authored PR, a 
 review decision, labels, and multiple assignees. A public repository with an open bot PR is used
 if this one has none. A case that cannot be observed live, such as a team review request, is
 built by editing a recorded node of the same type, and the README marks it as constructed.
+
+**Search qualifiers** (the spec's closed-PR and closed-unmerged-PR exclusions) cannot be tested
+with a fake `gh`, because it returns whatever its fixture holds. The filtering happens at
+GitHub. Coverage therefore comes from three places, and the plan claims no more than these:
+
+1. The argument-guard test pins the exact search strings.
+2. The recording is made by real GitHub with those strings, and must contain the excluded
+   cases:
+   - this repository's 24 h window always holds merged PRs, which are closed PRs, and they must
+     be absent from the recorded `closed` search and from `recentlyClosed`;
+   - a closed-unmerged PR inside the window must be absent from `merged`. One is taken from this
+     repository if the window holds one, otherwise from a public repository that does.
+3. Phase 3's live check confirms the same against current data.
 
 Pagination and classification fixtures are synthetic GraphQL bodies of the recorded shape:
 `hasNextPage` chains, `errors` arrays with and without `path`, `data: null`, and non-JSON
@@ -172,6 +220,7 @@ stdout.
       gives two, the second an `OverviewIssuesPage`. Never three.
 - [ ] Every classification row in the Test Plan behaves as specified.
 - [ ] A malformed `CODEV_SINCE_DATE` exits non-zero with no `gh` spawned.
+- [ ] A timeout settles promptly, kills the in-flight `gh` and leaves no temp files.
 - [ ] `pnpm --filter @cluesmith/codev build` and the package's vitest suite pass.
 
 #### Test Plan
@@ -191,8 +240,10 @@ native Windows and where `jq` is absent.
   - the first request passes `owner`, `repo`, `closedQuery` and `mergedQuery` through `-F`,
     with literal `{owner}/{repo}` and the qualifiers `type:issue state:closed` and
     `type:pr is:merged`;
-  - cursors pass through `-f`;
+  - `query=` and cursors pass through `-f`;
   - the `query=` text is byte-identical across runs with different data.
+- **Issues disabled:** an empty issues connection with exit 0 gives `issues: []` and
+  `recentlyClosed: []`, with PRs intact.
 - **`CODEV_SINCE_DATE`:** missing, date-only, with milliseconds, with a trailing
   `repo:evil/x`, and with an embedded newline. Each exits non-zero, and the fake `gh` log stays
   empty.
@@ -217,6 +268,9 @@ native Windows and where `jq` is absent.
   both quote kinds, `;` and newlines round-trip byte-identical. No `pwned` file appears.
 - **Temp cleanup:** with `TMPDIR` pointed at a test-owned directory, that directory is empty
   after a success, after a whole failure and after a search-local failure.
+- **Timeout:** the fake `gh` sleeps for 10 s and records its pid, and the dispatcher runs with
+  `timeoutMs: 500`. The call settles well under 10 s and is flagged `timedOut`. The recorded
+  `gh` pid is no longer alive, and `TMPDIR` is empty.
 - **Presets** (`forge.test.ts`):
   - `overview-bundle` resolves to `null` for gitlab, gitea, linear and jira, and to the script
     for github;
@@ -248,26 +302,15 @@ use the bundle.
 
 #### Files to Create / Modify
 
-- `packages/codev/src/agent-farm/servers/overview-budget.ts` (new, no imports). It exports:
+- `packages/codev/src/lib/overview-budget.ts` (new, no imports). The issue names
+  `servers/overview-budget.ts`, but `lib/` is the right home. `forge.ts`, in `lib/`, must import
+  this module's plan type, and a `lib` → `agent-farm/servers` import would run backwards. The
+  overview cache and doctor can both import from `lib/`. The module exports:
   - `LIST_TTL_MS` (180 000), `SEARCH_TTL_MS` (600 000), `USER_TTL_MS` (3 600 000) and
     `INVALIDATE_DEBOUNCE_MS` (60 000);
-  - a structural `OverviewFetchShape` type: `{ mode: 'bundled' }` or
-    `{ mode: 'four-call'; runnable: readonly string[] }`;
-  - `projectHourlyForgeCalls(shape): { idle: number; churn: number }`.
-
-  The projection works like this:
-  - an open list, or the bundle, refreshes `3_600_000 / LIST_TTL_MS` times an hour idle, and
-    `3_600_000 / INVALIDATE_DEBOUNCE_MS` times under constant invalidation;
-  - a search refreshes `3_600_000 / SEARCH_TTL_MS` times an hour in both cases;
-  - `user-identity` is excluded, as in the spec's figures.
-- `packages/codev/src/agent-farm/servers/overview.ts`: import those four constants instead of
-  declaring them. The failure-window constants stay where they are, since they are not part of
-  the projection.
-- `packages/codev/src/lib/forge.ts`. It gains:
   - `OVERVIEW_CONSTITUENTS` (`pr-list`, `issue-list`, `recently-closed`, `recently-merged`);
-  - the `OverviewPlan` type;
-  - `resolveOverviewPlan(forgeConfig)`, built on the same resolution as `resolveAllConcepts`
-    (no I/O).
+  - the `OverviewPlan` type, declared once here (below);
+  - `projectHourlyForgeCalls(plan): { idle: number; churn: number }`.
 
   `OverviewPlan` is one of:
   - `{ mode: 'bundled'; bypassed: Array<{ concept; how: 'overridden' | 'disabled' }> }`, where
@@ -277,7 +320,17 @@ use the bundle.
     - `{ kind: 'bundle-disabled' }`, for a project `null`;
     - `{ kind: 'preset-disabled'; provider }`.
 
-  It is structurally assignable to `OverviewFetchShape`.
+  The projection works like this:
+  - an open list, or the bundle, refreshes `3_600_000 / LIST_TTL_MS` times an hour idle, and
+    `3_600_000 / INVALIDATE_DEBOUNCE_MS` times under constant invalidation;
+  - a search refreshes `3_600_000 / SEARCH_TTL_MS` times an hour in both cases;
+  - `user-identity` is excluded, as in the spec's figures.
+- `packages/codev/src/agent-farm/servers/overview.ts`: import the four constants instead of
+  declaring them. The failure-window constants stay where they are, since they are not part of
+  the projection.
+- `packages/codev/src/lib/forge.ts`: `resolveOverviewPlan(forgeConfig): OverviewPlan`, importing
+  the type and `OVERVIEW_CONSTITUENTS` from `overview-budget.ts`. It is built on the same
+  resolution as `resolveAllConcepts`, with no I/O.
 - `packages/codev/src/commands/doctor.ts`. After the concept rows, doctor prints one `overview`
   line built from `resolveOverviewPlan` and `projectHourlyForgeCalls`. It reads, for example:
 
@@ -378,8 +431,9 @@ the `/api/overview` payload is unchanged, and the failure semantics follow Desir
     then validates the output against the contract:
     - malformed output is not JSON, not an object, missing a key, or has a section that is
       neither an array nor `null`;
-    - a malformed result becomes an error with no data, plus a `malformed` reason naming what is
-      wrong;
+    - `fetchForOverview` returns `OverviewFetchResult`, which is `ForgeCommandResult` plus an
+      optional `malformed?: string`. A malformed result has an error, no data, and `malformed`
+      naming what is wrong;
     - a valid result has both search sections passed through the existing 24 h post-filter,
       skipping `null`s.
 - `packages/codev/src/agent-farm/servers/overview.ts`:
@@ -404,8 +458,16 @@ the `/api/overview` payload is unchanged, and the failure semantics follow Desir
     - a negative bundle entry from malformed output reads
       `overview-bundle output malformed (<reason>) — could not fetch PRs`.
 
-    To support the second, `CacheEntry` gains an optional `reason`, set only for malformed
-    output.
+    `describeMissing` reads a `FetchOutcome`, so the malformed reason has to travel through
+    every path that produces one:
+    - `CacheEntry` and `FetchOutcome` both gain an optional `reason`;
+    - `dispatch` stores `malformed` as the negative entry's `reason`, and returns it on the
+      outcome;
+    - `cachedFetch` copies `entry.reason` onto the outcome on the within-TTL path and on the
+      suspension path.
+
+    The text therefore stays the same on every poll inside the failure window, not only the
+    first.
 - **Existing tests, kept as the four-call variant.**
   - `overview.test.ts` and `overview-rate-limit.test.ts` add `overviewPlan` to their existing
     `github.js` mock, returning four-call with all four runnable. No other line changes.
@@ -457,7 +519,8 @@ the `/api/overview` payload is unchanged, and the failure semantics follow Desir
 | polls within the TTL; invalidation | single invocation per TTL; at most one refetch per debounce window; two pollers plus an invalidation mid-flight give one invocation |
 | `recentlyClosed: null` | positively cached for the full TTL, limiter success recorded, `forgeStatus: 'unavailable'`, no `errors` key |
 | `prs: null`, from an override | `errors.prs` = `overview-bundle returned no PRs` |
-| malformed output | whole failure, negative entry, `errors` text names the malformed reason, failure window escalates |
+| malformed output | whole failure, negative entry, `errors` text names the malformed reason on the first poll and on later polls inside the failure window, failure window escalates |
+| issues disabled: `issues: []`, `recentlyClosed: []`, PRs present | empty backlog, no `errors.issues`, `forgeStatus: 'ok'` (Desired State item 5) |
 | workspace A rate-limited | A's entry negative, sections blank, budget suspended, `forgeStatus: 'rate-limited'`, `forgeResetAt` set, `errors.prs`/`errors.issues` match `gh rate limited until …`, zero constituent calls |
 | during A's suspension: B within TTL (plain or invalidated) | served without a fetch, `forgeStatus: 'rate-limited'` |
 | during A's suspension: B expired | reads empty, no fetch |
@@ -494,6 +557,8 @@ above.
   - one invocation and two `gh` processes per bundle refresh, since this repository has more
     than 100 open issues;
   - all sections populated, with non-empty 24 h lists on a day with closures;
+  - no PR in `recentlyClosed`, although the window holds merged PRs, which are closed PRs;
+    and no unmerged PR in `recentlyMerged`;
   - the points delta matching the measured cost;
   - the two modes' sections equal, apart from any item that changed between the two runs.
 - Whether `GH_REPO` drives `{owner}/{repo}` expansion in `gh api graphql` is checked first. If
@@ -526,6 +591,9 @@ item 10), and the stale concept counts are corrected.
   - the eligibility rule (item 7), including that an `overview-bundle` override bypasses
     constituent overrides, and that doctor discloses it;
   - that gitlab, gitea, linear and jira disable it;
+  - the issues-disabled divergence (Desired State item 5). A GitHub repository with issues
+    disabled now shows an empty backlog and `forgeStatus: ok` where it used to show "could not
+    fetch issues";
   - a short override example for a non-GitHub forge.
 - `codev/resources/arch.md`:
   - the forge section's "18 concepts" list becomes the full current list, 21 with
@@ -565,7 +633,9 @@ mirror there.
 | Existing overview tests silently start exercising bundle mode once it becomes the default | High if unhandled | Medium | They pin `overviewPlan` to four-call explicitly (the kept variant); bundle mode has its own tests; the #1645 harness is re-pinned deliberately, with a four-call twin |
 | Doctor's full-factory forge mock breaks on the new import | Certain if unhandled | Low | Add `resolveOverviewPlan` to the mock in the same phase that adds the import |
 | A real failure is misclassified as search-local and masked | Low | High | The classification predicate requires a path on every error and excludes rate limits by type and by text; the 12-row classification matrix |
-| Temp files leak, or the trap misbehaves under Git Bash | Medium | Low | Temp-cleanup tests on all three exit paths; the Windows workflow run |
+| The 60 s kill leaves `gh` running and holds the call open: a trapped TERM in `sh` waits for the foreground command | High if unhandled | Medium | Every `gh` runs in the background with `wait`, so the trap fires at once, kills `gh` and cleans up; a timeout test asserts a prompt settle, a dead `gh` pid and an empty `TMPDIR` |
+| Temp files leak, or the trap misbehaves under Git Bash | Medium | Low | Temp-cleanup tests on all four exit paths, timeout included; the Windows workflow run; a leak on a native-Windows kill is accepted and documented |
+| Search qualifiers are wrong and nothing notices, because a fake `gh` cannot filter | Medium | Medium | Exact-string argument test; a recording by real GitHub that contains the excluded cases; the live check |
 | A 60 s timeout test makes the suite slow | — | Low | Two-part test (argument plus the existing kill test), no real 60 s wait |
 | A whole-bundle failure blanks all four sections (accepted residual, D2) | Low | High | As in the spec: no runtime fallback; first retry after 60 s; the doctor line makes the mode visible |
 | The live check spends shared GraphQL quota | Certain | Negligible | A few refreshes, a few points each |
