@@ -1,7 +1,7 @@
 id: '1647'
 title: tower-collapse-the-four-per-wo
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -16,13 +16,16 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-26T22:13:31.489Z'
+updated_at: '2026-11-26T22:13:33.590Z'
 force_advanced:
   phase: specify
   iteration: 3
   max_iterations: 3
   rebuttal_file: 1647-specify-iter3-rebuttals.md
   at: '2026-11-26T01:59:56.927Z'
+context_refreshes:
+  - boundary: enter:plan
+    at: '2026-11-26T22:13:33.589Z'
