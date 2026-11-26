@@ -1062,11 +1062,14 @@ afx tower register [options]
 
 **Options:**
 - `--reauth` - Re-authenticate without changing tower name
+- `--claim` - Take the name back from a disconnected tower you own, instead of registering as `<name>-2`
 - `-p, --port <port>` - Tower port to signal after registration (default: 4100)
 
 **Description:**
 
 Opens a browser to codevos.ai for authentication, then exchanges the token for an API key. If the browser callback times out, falls back to manual token paste. Writes credentials to `~/.agent-farm/cloud-config.json` and signals the running tower daemon to connect.
+
+The cloud owns the tower's routing name (its slug, as in `/t/<slug>/`). When the requested name is taken it registers the tower as `<name>-2` and Tower stores and advertises that slug; the success message says so. With `--claim`, a name held by another of your towers that is not connected is taken over instead. A rename made in the cloud UI reaches Tower the next time the tunnel reconnects.
 
 **Examples:**
 
@@ -1076,6 +1079,9 @@ afx tower register
 
 # Re-authenticate existing registration
 afx tower register --reauth
+
+# Re-register a machine and take its old name back from a stale, disconnected row
+afx tower connect --claim
 
 # Register and signal tower on custom port
 afx tower register -p 4300
@@ -1109,7 +1115,9 @@ afx tower status [options]
 
 **Description:**
 
-Displays local tower status plus cloud registration details: tower name, ID, connection state, uptime, and access URL. If the tower daemon is not running, shows config-based info. The tower dashboard also includes a CloudStatus UI component showing this information.
+Displays local tower status plus cloud registration details: the tower's slug and display name, ID, connection state, uptime, and the access URL built from the slug. If the tower daemon is not running, shows config-based info. The tower dashboard also includes a CloudStatus UI component showing this information.
+
+If Codev Cloud rejects the tower's key after it had connected (the tower was deleted in the cloud, or its key was replaced by a newer registration), Tower stops retrying and marks the registration `deregistered` in `cloud-config.json`, keeping the credentials. Status reports it, as does the Tower home page. Run `afx tower connect` to register again.
 
 **Environment Variables:**
 - `CODEVOS_URL` - Override the codevos.ai server URL (default: `https://codevos.ai`). Useful for local development or staging environments.

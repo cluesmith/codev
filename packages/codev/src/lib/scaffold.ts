@@ -9,7 +9,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isEmptySkillDir } from './skill-refresh.js';
-import { ROOT_DOCS, withEmptyHotBlock } from './managed-block.js';
+import { ROOT_DOCS, rootDocLineEnding, withEmptyHotBlock } from './managed-block.js';
 import { SHIPPED_ROOT_DOC_HASHES } from './shipped-root-doc-hashes.js';
 
 interface CreateUserDirsOptions {
@@ -295,6 +295,15 @@ function normalizeRootDoc(doc: string): string {
   return withEmptyHotBlock(doc.replace(/\r\n/g, '\n'));
 }
 
+/**
+ * `text` in the line ending the root doc at `docPath` uses outside its managed block (#1990),
+ * by the rule the block refresh writes with; as it is when no regular file sits there.
+ */
+function inDocLineEnding(text: string, docPath: string): string {
+  if (!fs.statSync(docPath).isFile()) return text;
+  return text.replace(/\r?\n/g, rootDocLineEnding(fs.readFileSync(docPath, 'utf-8')));
+}
+
 /** The template written for `projectName`. Split and joined: a `$` in the name stays literal. */
 function substituteProjectName(template: string, projectName: string): string {
   return template.split(PROJECT_NAME_PLACEHOLDER).join(projectName);
@@ -356,9 +365,9 @@ function shippedVersionName(content: string, file: string, template: string): st
 /**
  * Copy root files (CLAUDE.md, AGENTS.md) with project name substitution. With
  * `handleConflicts`, an existing doc that differs from the template outside the managed
- * block keeps its content and gets the template beside it as `.codev-new`, unless
- * `replaceShipped` is set and it is an older shipped version, never edited: then it is
- * replaced (#1985).
+ * block keeps its content and gets the template beside it as `.codev-new`, in the doc's line
+ * ending (#1990), unless `replaceShipped` is set and it is an older shipped version, never
+ * edited: then it is replaced (#1985).
  */
 export function copyRootFiles(
   targetDir: string,
@@ -426,8 +435,9 @@ export function copyRootFiles(
         written[file] = replacement;
         removeSettledPending();
       } else if (handleConflicts) {
-        // Create .codev-new for merge
-        if (!dryRun) fs.writeFileSync(destPath + '.codev-new', content);
+        // Create .codev-new for merge, in the doc's line ending so a diff shows only real changes
+        // (#1990); matching normalises line endings, so it is still recognised once settled.
+        if (!dryRun) fs.writeFileSync(destPath + '.codev-new', inDocLineEnding(content, destPath));
         conflicts.push(file);
       }
       // Skip if exists and not handling conflicts

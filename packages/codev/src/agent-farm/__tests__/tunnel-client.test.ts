@@ -1421,3 +1421,81 @@ describe('#1372 self-healing', () => {
     expect(seenAtScheduleTime).toEqual([1, 2]);
   });
 });
+
+describe('#1871 cloud identity and deregistration', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  type Priv = {
+    handleAuthError: (reason: string) => void;
+    doConnect: () => void;
+    setState: (state: string, reason?: string) => void;
+    onWsOpen: (ws: WebSocket) => void;
+    startH2Server: (ws: WebSocket) => void;
+    ws: WebSocket | null;
+    reconnectTimer: unknown;
+  };
+
+  it('invalid_api_key after a successful connection is terminal `deregistered`, with no half-open retry', () => {
+    vi.useFakeTimers();
+    const c = createClient();
+    const priv = c as unknown as Priv;
+    const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+    const reasons: Array<string | undefined> = [];
+    c.onStateChange((_s, _p, reason) => reasons.push(reason));
+
+    priv.setState('connected', 'test');
+    priv.setState('disconnected', 'websocket closed');
+    priv.handleAuthError('invalid_api_key');
+
+    expect(c.getState()).toBe('deregistered');
+    expect(reasons.at(-1)).toContain('after a successful connection');
+    expect(priv.reconnectTimer).toBeNull();
+    vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS * 2);
+    expect(doConnect).not.toHaveBeenCalled();
+    expect(c.getState()).toBe('deregistered');
+    c.disconnect();
+  });
+
+  it('invalid_api_key on a key that never connected keeps the #1372 half-open breaker', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const c = createClient();
+    const priv = c as unknown as Priv;
+    const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+
+    priv.handleAuthError('invalid_api_key');
+
+    expect(c.getState()).toBe('auth_failed');
+    vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS);
+    expect(doConnect).toHaveBeenCalledTimes(1);
+    c.disconnect();
+  });
+
+  it('reports the identity auth_ok confirms, with slug and name absent from an older cloud', () => {
+    const c = createClient();
+    const priv = c as unknown as Priv;
+    vi.spyOn(priv, 'startH2Server').mockImplementation(() => {});
+    const seen: unknown[] = [];
+    c.onAuthOk((identity) => seen.push(identity));
+
+    for (const msg of [
+      { type: 'auth_ok', towerId: 'tw-1', slug: 'mac-2', name: 'mac' },
+      { type: 'auth_ok', towerId: 'tw-1' },
+    ]) {
+      const ws = createMockWs();
+      (ws as unknown as { send: () => void }).send = vi.fn();
+      priv.ws = ws;
+      priv.onWsOpen(ws);
+      ws.emit('message', Buffer.from(JSON.stringify(msg)));
+    }
+
+    expect(seen).toEqual([
+      { towerId: 'tw-1', slug: 'mac-2', name: 'mac' },
+      { towerId: 'tw-1', slug: undefined, name: undefined },
+    ]);
+    c.disconnect();
+  });
+});

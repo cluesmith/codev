@@ -79,7 +79,8 @@ vi.mock('../utils/logger.js', () => ({
   }),
 }));
 
-import { towerRegister, towerDeregister } from '../commands/tower-cloud.js';
+import { towerRegister, towerDeregister, towerCloudStatus } from '../commands/tower-cloud.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * #1515: both commands signal the running Tower daemon, and with no port they
@@ -103,6 +104,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
     mkdirSync(TEST_DIR, { recursive: true });
     readlineAnswers.length = 0;
     vi.mocked(openBrowser).mockClear();
+    for (const fn of Object.values(logger)) vi.mocked(fn).mockClear();
 
     fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : String(input);
@@ -223,6 +225,96 @@ describe('tower cloud CLI flows (Phase 5)', () => {
       expect(openBrowser).toHaveBeenCalledWith(
         expect.stringContaining('reauth=true'),
       );
+    });
+  });
+
+  describe('cloud identity (Issue #1871)', () => {
+    /** Redeem answers with the cloud's slug; returns the parsed redeem request bodies. */
+    function redeemAnswers(response: Record<string, unknown>): Array<Record<string, unknown>> {
+      const bodies: Array<Record<string, unknown>> = [];
+      fetchSpy.mockImplementation(async (input, init) => {
+        const url = typeof input === 'string' ? input : String(input);
+        if (url.includes('/api/towers/register/redeem')) {
+          bodies.push(JSON.parse(String((init as RequestInit).body)));
+          return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(null, { status: 200 });
+      });
+      return bodies;
+    }
+
+    it('persists the slug the cloud assigned and says the requested name was taken', async () => {
+      const bodies = redeemAnswers({ towerId: 'tw-1', slug: 'mac-2', name: 'mac', apiKey: 'ctk_MockApiKey123' });
+      readlineAnswers.push('mac');
+
+      await towerRegister({ port: UNUSED_TOWER_PORT });
+
+      expect(readCloudConfig()).toMatchObject({ tower_name: 'mac-2', display_name: 'mac' });
+      expect(bodies[0]).not.toHaveProperty('claimSlug');
+      expect(logger.success).toHaveBeenCalledWith("Tower 'mac-2' registered successfully.");
+      expect(vi.mocked(logger.info).mock.calls.flat().join('\n')).toContain("'mac' was taken");
+      expect(logger.kv).toHaveBeenCalledWith('Access URL', 'https://cloud.codevos.ai/t/mac-2/');
+    });
+
+    it('--claim sends claimSlug: true on redeem', async () => {
+      const bodies = redeemAnswers({ towerId: 'tw-1', slug: 'mac', name: 'mac', apiKey: 'ctk_MockApiKey123' });
+      readlineAnswers.push('mac');
+
+      await towerRegister({ claim: true, port: UNUSED_TOWER_PORT });
+
+      expect(bodies[0]).toMatchObject({ name: 'mac', claimSlug: true });
+      expect(readCloudConfig()!.tower_name).toBe('mac');
+    });
+
+    it('re-registers a deregistered tower without asking to replace it', async () => {
+      writeCloudConfig({
+        tower_id: 'old-id',
+        tower_name: 'mac',
+        api_key: 'ctk_OldKey',
+        server_url: 'https://codevos.ai',
+        deregistered_at: '2026-11-25T00:00:00.000Z',
+      });
+      readlineAnswers.push('mac'); // tower name only: no confirmation prompt
+
+      await towerRegister({ port: UNUSED_TOWER_PORT });
+
+      const config = readCloudConfig()!;
+      expect(config.api_key).toBe('ctk_MockApiKey123');
+      expect(config.tower_name).toBe('mac');
+      expect(config.deregistered_at).toBeUndefined();
+    });
+
+    it('status prints the slug, the display name and the access URL built from the slug', async () => {
+      writeCloudConfig({
+        tower_id: 'tw-1',
+        tower_name: 'mac-2',
+        display_name: 'mac',
+        api_key: 'ctk_MockApiKey123',
+        server_url: 'https://codevos.ai',
+      });
+
+      await towerCloudStatus(UNUSED_TOWER_PORT);
+
+      expect(logger.kv).toHaveBeenCalledWith('Registration', 'registered');
+      expect(logger.kv).toHaveBeenCalledWith('Tower Slug', 'mac-2');
+      expect(logger.kv).toHaveBeenCalledWith('Display Name', 'mac');
+      expect(logger.kv).toHaveBeenCalledWith('Access URL', 'https://codevos.ai/t/mac-2/');
+    });
+
+    it('status says deregistered and points at afx tower connect, with no access URL', async () => {
+      writeCloudConfig({
+        tower_id: 'tw-1',
+        tower_name: 'mac-2',
+        api_key: 'ctk_MockApiKey123',
+        server_url: 'https://codevos.ai',
+        deregistered_at: '2026-11-25T00:00:00.000Z',
+      });
+
+      await towerCloudStatus(UNUSED_TOWER_PORT);
+
+      expect(logger.kv).toHaveBeenCalledWith('Registration', 'deregistered (2026-11-25T00:00:00.000Z)');
+      expect(vi.mocked(logger.info).mock.calls.flat().join('\n')).toContain("afx tower connect");
+      expect(vi.mocked(logger.kv).mock.calls.map((c) => c[0])).not.toContain('Access URL');
     });
   });
 
