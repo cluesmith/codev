@@ -89,3 +89,11 @@ Architect chose option B: the small hardening PR.
   on main are `chore(porch):`; 15 are this same merge-from-main message). The merge exists
   because Codex asked for the sync in round 1. Rewriting would force-push over porch's state
   commits for no gain.
+
+## 2026-11-26 — architect decisions at the pr gate
+
+- Short-id redraw for the 48,880 ambiguous issue-less protocol names: left out of this PR (it
+  changes the id space). The architect will file it as its own issue.
+- No comment on #1992 from the builder; the note to the reporter (upgrade to ≥3.3.6) is with
+  the owner.
+- Merge decision is with the owner and not yet made; holding at the `pr` gate.
