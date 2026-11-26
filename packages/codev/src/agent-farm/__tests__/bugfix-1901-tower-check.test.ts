@@ -19,8 +19,14 @@ const refused = () =>
   });
 const reset = () => Object.assign(new TypeError('fetch failed'), { cause: errno('ECONNRESET') });
 const timeout = () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+/** A live Tower's answer to the probe, `GET /api/liveness` (#1999). */
 const healthy = () =>
-  ({ ok: true, status: 200, json: async () => ({ status: 'healthy' }), text: async () => '' }) as Response;
+  ({
+    ok: true,
+    status: 200,
+    json: async () => ({ status: 'alive', version: '3.4.0', schemaVersion: 20, startedAt: '2026-11-26T00:00:00.000Z' }),
+    text: async () => '',
+  }) as Response;
 
 /** A fetch that plays `steps` in order: an Error is thrown, anything else is returned. */
 function scriptedFetch(...steps: Array<() => Error | Response>) {
@@ -60,7 +66,7 @@ describe('checkTower (#1901)', () => {
     const check = await checkTower(clientWith(fetchFn), { retryDelayMs: 0 });
     expect(check.state).toBe('unresponsive');
     if (check.state !== 'unresponsive') return;
-    expect(check.message).toMatch(/^Tower did not answer \/health \(fetch failed: ECONNRESET\) after \d+ ms; it appears to be up, retry$/);
+    expect(check.message).toMatch(/^Tower did not answer its liveness probe \(fetch failed: ECONNRESET\) after \d+ ms; it appears to be up, retry$/);
     expect(check.message).not.toContain('not running');
     expect(check.message).not.toContain('afx tower start');
     expect(fetchFn).toHaveBeenCalledTimes(2);
