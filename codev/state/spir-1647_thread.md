@@ -57,3 +57,21 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - The owner approved spec-approval as written (82d206702), ruled at 22:12 UTC and relayed by
   the architect. I ran `porch approve` (ffd94d2ce). On to Plan; porch requested a context
   refresh at `enter:plan`.
+
+## 2026-11-26: plan drafted (5d6aa4891)
+- Four phases, bottom up along the forge layer's seams:
+  1. the concept and the GitHub script;
+  2. mode resolution, the projection and doctor;
+  3. the cache's bundle path;
+  4. docs.
+- Two choices the spec left to the plan:
+  - The cache asks a new `overviewPlan(cwd)` helper in `github.ts`. Existing overview tests
+    already mock that module, so they pin four-call mode in one line and remain the kept
+    "four-call variant". The bundled default gets its own tests.
+  - A bundle splits back into the four per-section outcomes that `getOverview` already
+    consumes, so `forgeStatus`, `errors` and all derivation stay untouched. The payload is
+    unchanged by construction.
+- The 60 s limit is tested in two parts: the value is asserted on the dispatcher call, and the
+  existing Spec 1951 dispatcher test already proves that `timeoutMs` kills a hanging tool.
+  There is no 60 s wait in the suite.
+- Running the plan review: 2-way, codex and claude.
