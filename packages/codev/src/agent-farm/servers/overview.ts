@@ -574,12 +574,13 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   // Generic protocol: experiment-1560[-slug] → builder-experiment-1560 (a
   // numbered spawn), else experiment-AbCd → builder-experiment-abcd, where the
   // whole remainder is the issue-less spawn's short id, '-'/'_' included
-  // (maintain-x_9Q → builder-maintain-x_9q, as buildAgentName produces; #1740).
+  // (maintain-x_9Q → builder-maintain-x_9q; #1740). Named by buildAgentName,
+  // as spawn names the terminal (maintain-0123 → builder-maintain-123; #1992).
   const genericMatch = lower.match(/^([a-z]+)-(.+)$/);
   if (genericMatch) {
-    const numbered = genericMatch[2].match(/^(\d+)(?:-|$)/);
-    if (numbered) return `builder-${genericMatch[1]}-${numbered[1]}`;
-    return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+    const [, protocol, rest] = genericMatch;
+    const numbered = rest.match(/^(\d+)(?:-|$)/);
+    return buildAgentName('protocol', numbered ? numbered[1] : rest, protocol);
   }
 
   return null;

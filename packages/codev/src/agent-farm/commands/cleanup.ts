@@ -18,6 +18,7 @@ import { dismissHeldForAgent } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from '../utils/workspace-path.js';
 import { executeForgeCommand } from '../../lib/forge.js';
 import { sameIssueId } from '../../lib/issue-id.js';
+import { buildAgentName } from '../utils/agent-names.js';
 import { isWindows } from '../../lib/platform.js';
 import { killSessionTree, type KillSessionTreeOptions } from '../../lib/process-tree.js';
 import { removeWorktreeDirectory } from '../lib/worktree-links.js';
@@ -314,6 +315,15 @@ async function removeWorktree(worktreePath: string, config: Config): Promise<voi
 }
 
 /**
+ * A task builder's id from its worktree name or short id, named by
+ * buildAgentName as spawn names it: `task-bEPd` / `bEPd` → `builder-task-bepd`,
+ * `task-0123` → `builder-task-123` (#1992).
+ */
+export function taskBuilderId(taskName: string): string {
+  return buildAgentName('task', taskName.startsWith('task-') ? taskName.slice(5) : taskName);
+}
+
+/**
  * Cleanup a builder's worktree and branch
  */
 export async function cleanup(options: CleanupOptions): Promise<void> {
@@ -341,10 +351,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
   } else if (options.task) {
     // Find task builder by worktree name (e.g., "task-bEPd")
     const taskName = options.task;
-    // Task builder IDs are "builder-task-<lowercased shortId>" (via buildAgentName)
-    // Extract the shortId from the worktree name (e.g., "task-bEPd" → "bEPd" → "bepd")
-    const shortId = taskName.startsWith('task-') ? taskName.slice(5) : taskName;
-    const normalizedId = `builder-task-${shortId.toLowerCase()}`;
+    const normalizedId = taskBuilderId(taskName);
     builder = state.builders.find((b) => b.id === normalizedId);
 
     if (!builder) {
@@ -362,8 +369,7 @@ export async function cleanup(options: CleanupOptions): Promise<void> {
     if (!builder) {
       // Try normalized task ID (e.g., "task-bEPd" → "builder-task-bepd")
       if (projectId.startsWith('task-')) {
-        const shortId = projectId.slice(5);
-        const normalizedId = `builder-task-${shortId.toLowerCase()}`;
+        const normalizedId = taskBuilderId(projectId);
         builder = state.builders.find((b) => b.id === normalizedId);
       }
     }
