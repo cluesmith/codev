@@ -1,7 +1,7 @@
 id: '1999'
 title: tower-a-cheap-liveness-route-w
 protocol: air
-phase: implement
+phase: pr
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -11,4 +11,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-26T22:46:42.230Z'
-updated_at: '2026-11-26T22:46:42.232Z'
+updated_at: '2026-11-26T23:11:40.073Z'
