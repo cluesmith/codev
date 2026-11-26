@@ -295,6 +295,21 @@ describe('section 1: the tunnel handshake', () => {
     expect(relay.sessionsOpened(devvm.towerId)).toBe(2);
   });
 
+  it('closes the session, and with it the secret, when the key is replaced; the old key no longer authenticates [r5]', async () => {
+    const before = await connect(mbp);
+    const oldKey = mbp.apiKey;
+    const newKey = relay.rotateKey(mbp.towerId);
+    expect(newKey).not.toBe(oldKey);
+    expect(await waitFor(async () => relay.session(mbp.towerId) === null, 5_000, 10)).toBe(true);
+    expect(cloudAnswer(await relayCall(relay, devvm.apiKey, { to: mbp.towerId })).body.reason).toBe('tower-offline');
+    expect((await call(relay, 'GET', '/api/peer/towers', { key: oldKey })).status).toBe(401);
+    expect((await call(relay, 'GET', '/api/peer/towers', { key: newKey })).status).toBe(200);
+    const after = await connect(mbp);
+    expect(after.authOk.type).toBe('auth_ok');
+    expect(after.authOk.relay.sessionSecret).not.toBe(before.authOk.relay.sessionSecret);
+    expect(relay.sessionsOpened(mbp.towerId)).toBe(2);
+  });
+
   it("records what a session states on the Tower's row too, so the listing shows it while the Tower is offline", async () => {
     const fake = await connect(devvm, { protocols: [1], remoteMessaging: 'on' });
     const listed = async () => (await call(relay, 'GET', '/api/peer/towers', { key: mbp.apiKey })).json.towers[0];
@@ -551,10 +566,25 @@ describe("section 4: C's checks, in order", () => {
       relay.writeRecordUnchecked(mbp.towerId, patch);
       const answer = cloudAnswer(await relayCall(relay, mbp.apiKey, { to: devvm.towerId }));
       expect(answer, JSON.stringify(patch)).toEqual({ status: 500, body: { v: 1, outcome: 'unavailable', reason: 'cloud-error' } });
-      relay.writeRecordUnchecked(mbp.towerId, { slug: 'ana-s-mbp', ownerEmail: 'ana@example.com', ownerId: 'usr_ana' });
-      ana.ownerHandle = null;
+      relay.restoreRecord(mbp.towerId);
     }
     expect(fake.received).toEqual([]);
+  });
+
+  it('a record written unchecked breaks only the statements its own Tower sends, until restored', async () => {
+    const toDevvm = await connect(devvm);
+    const toMbp = await connect(mbp);
+    relay.renameTower(mbp.towerId, 'ana-laptop');
+    relay.writeRecordUnchecked(mbp.towerId, { slug: 'Ana_Laptop', ownerHandle: 'Ana' });
+    expect(cloudAnswer(await relayCall(relay, mbp.apiKey, { to: devvm.towerId })).body.reason).toBe('cloud-error');
+    // The other direction of the pair, and the account the two share, are untouched.
+    expect((await relayCall(relay, devvm.apiKey, { to: mbp.towerId })).status).toBe(200);
+    expect(statementOf(toMbp.received[0])).toMatchObject({ fromTowerId: devvm.towerId, fromOwnerId: 'usr_ana', fromOwnerHandle: null });
+    expect(ana.ownerHandle).toBeNull();
+
+    relay.restoreRecord(mbp.towerId);
+    expect((await relayCall(relay, mbp.apiKey, { to: devvm.towerId })).status).toBe(200);
+    expect(statementOf(toDevvm.received[0])).toMatchObject({ fromTowerSlug: 'ana-laptop', fromOwnerHandle: null });
   });
 
   it('step 8: a live session that states another version, or none, is 409 peer-unsupported', async () => {
@@ -785,7 +815,12 @@ describe('sections 5 and 6: the forward, and what C checks of the answer', () =>
       fake.handler = handler;
       const answer = cloudAnswer(await relayCall(relay, mbp.apiKey, { to: devvm.towerId }));
       expect(answer, name).toEqual({ status: 502, body: { v: 1, outcome: 'unavailable', reason: 'tower-error' } });
+      // What R said is kept on the forward, as far as C read it.
+      const said = relay.forwards.at(-1)!.answer;
+      expect(said?.status, name).toBe(name === 'status 500' ? 500 : name === 'status 201' ? 201 : 200);
+      expect(said!.body.length, name).toBeLessThanOrEqual(65_536);
     }
+    expect(relay.forwards.find((f) => f.answer?.headers['content-type'] === 'text/plain')).toBeDefined();
     fake.handler = (s) => respond(s, 200, json, Buffer.alloc(65_536, 0x20));
     const atCap = await relayCall(relay, mbp.apiKey, { to: devvm.towerId });
     expect(atCap.status).toBe(200);
@@ -972,6 +1007,18 @@ describe('faults the stand-in injects', () => {
     expect(String(original.headers['x-codev-peer-mac'])).toBe(macUnder(secretOf(fake), String(original.headers['x-codev-peer-statement'])));
   });
 
+  it("replays the pair's own last statement, never another sender's to the same recipient", async () => {
+    const fake = await connect(devvm);
+    await relayCall(relay, spare.apiKey, { to: devvm.towerId });
+    await relayCall(relay, mbp.apiKey, { to: devvm.towerId });
+    relay.injectFault({ kind: 'replay-statement', to: devvm.towerId }, 1);
+    await relayCall(relay, spare.apiKey, { to: devvm.towerId });
+    const [fromSpare, fromMbp, replayed] = fake.received;
+    expect(statementOf(fromMbp).fromTowerId).toBe(mbp.towerId);
+    expect(replayed.headers['x-codev-peer-statement']).toBe(fromSpare.headers['x-codev-peer-statement']);
+    expect(statementOf(replayed).fromTowerId).toBe(spare.towerId);
+  });
+
   it('holds an answer on request, so concurrent message calls to one peer are seen in flight together', async () => {
     await connect(devvm);
     relay.injectFault({ kind: 'answer-delay', ms: 150 });
@@ -1022,7 +1069,7 @@ describe('section 3: the listing', () => {
 });
 
 describe('section 2: the switch-state report', () => {
-  it("answers 204 and records the switch on the Tower's row and its session, as the listing shows", async () => {
+  it("answers 204 and records the switch on the Tower's row and its session, ignoring a field it does not know (section 0)", async () => {
     await connect(mbp, { protocols: [1], remoteMessaging: 'off' });
     const mbpAsListed = async () => (await call(relay, 'GET', '/api/peer/towers', { key: devvm.apiKey })).json.towers[0];
     expect((await mbpAsListed()).remoteMessaging).toBe('off');

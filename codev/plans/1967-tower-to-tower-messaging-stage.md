@@ -306,7 +306,17 @@ Towers against it. Every later phase is tested with these.
   `startTower` still sets `NODE_ENV=test` and `AF_TEST_DB` from the port. A restart, which phase 9
   needs, calls it again with the same port and the same `extraEnv`, so it finds the same
   directories and database. The directory `startTower` makes for itself goes unused and its
-  `stop()` removes it. If anything the harness needs turns out to be missing from `startTower`, it
+  `stop()` removes it.
+
+  **A limit of the harness** (found in phase 2; architect's ruling, 2026-11-26). On startup a
+  Tower ends the shellpers of every workspace under a temp directory and forgets their sessions
+  (`isTemporaryWorkspace`, `servers/tower-terminals.ts`), and the harness's workspaces are all
+  under one. They stay there: the reaping is what keeps a crashed test from leaving shellpers on
+  the machine. So layer B can show that a restarted Tower's database, `peer_outbox` and
+  `peer_accepted` survive and that delivery resumes to an agent activated again after the
+  restart, but not that mail reaches a terminal that itself survived the restart, as it does on a
+  real Tower. That waits for the walkthrough at `verify-approval` (the last row of "Where each
+  scenario is tested"). If anything the harness needs turns out to be missing from `startTower`, it
   gains an option rather than a copy. The harness also provides a CLI runner
   that switches the mocked Tower port and database path per call (the pattern of
   `cross-workspace-addressing.e2e.test.ts`), and helpers for workspaces and inert terminals.
@@ -1325,6 +1335,7 @@ Every scenario in the spec's Test Scenarios, and the inherited stage 2 scenarios
 | Inherited: the walkthrough and its skipped-step table | 13 | B |
 | Inherited: `afx://` unquoted on Windows shells | 5, 13 | D |
 | Waits for the real cloud: same name on another account; `/t/` refusal at the cloud; the cloud's per-peer limit; behind NAT | — | at `verify-approval` |
+| Waits for real Towers: mail reaching a recipient's terminal that itself survived a Tower restart (a restarted test Tower ends its temp-directory workspaces' terminals; layer B shows the database, `peer_outbox` and `peer_accepted` surviving and delivery resuming to an agent activated again; phase 2) | — | at `verify-approval`, in the real-Tower walkthrough |
 
 **Budget for porch's check.** Layer A adds no Tower process and no real wait. The pipeline test
 (phase 8) is the largest: two temporary databases, the stand-in and an in-process receiver on an

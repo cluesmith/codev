@@ -212,3 +212,30 @@
   reporter does not print passing files, so I listed what the same config collects
   (`vitest list --filesOnly --exclude='**/e2e/**'`): 477 files, including stand-in-relay.test.ts
   and seeded-generator.test.ts, and not two-towers-harness.e2e.test.ts. Build check passed.
+
+## 2026-11-26 — phase 2 review, iteration 1
+
+- Codex REQUEST_CHANGES (1), Claude APPROVE with 5 minor points. Rebuttal:
+  `codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_2-iter1-rebuttals.md`.
+- Disputed (codex): `PUT /api/peer/state` with an unknown field. Not changed: section 0 says
+  receivers ignore fields they do not know, everywhere; "a body that is not this object" is a
+  body without `remoteMessaging` as "on"/"off", and all of those are already 400 in the test.
+  A comment at the check and the test's name now say so.
+- Accepted (claude), all five: unchecked record writes are per Tower (`ownerOverride`, only the
+  statements that Tower sends) with `restoreRecord`; a test for `rotateKey` closing the session
+  [r5]; `replay-statement` keyed per pair; `forward.answer` kept on the 502 path; wall time.
+  **For phase 8:** break one direction of a pair with `writeRecordUnchecked(<sender>, …)`; the
+  other direction stays healthy. Undo with `restoreRecord`.
+- Wall time, layer A files of this phase: stand-in-relay.test.ts + seeded-generator.test.ts,
+  57 tests, about 1.4 s (three repeat runs of the stand-in file: 1.41–1.43 s each).
+- Architect ruling (main, 2026-11-26T23:46Z), recorded here and in the plan:
+  1. A red on-demand run in a test this phase is writing may be diagnosed, fixed and rerun, then
+     reported with the phase; one in an earlier phase's test, or one whose cause I have not found,
+     goes to the architect BEFORE any rerun. (Phase 2's runs 1 and 2 were within this.)
+  2. The restart limit is written into the plan (phase 2 harness text and a "waits for real
+     Towers" row of the scenario table): layer B shows the database, `peer_outbox` and
+     `peer_accepted` surviving a restart and delivery resuming to an agent activated again, not
+     mail reaching a terminal that itself survived; that waits for the real-Tower walkthrough at
+     verify-approval. Harness workspaces stay in the temp directory.
+  3. `seeded-generator.test.ts` outside the plan's file list is fine.
+- Layer B rerun after these changes (load 1.7): 4/4 in 12.9 s, teardown report empty.

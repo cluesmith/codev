@@ -296,6 +296,12 @@ export interface StandInTower {
   account: StandInAccount;
   protocols: number[];
   remoteMessaging: PeerListedSwitchState;
+  /**
+   * Owner fields written by `writeRecordUnchecked`, stated in place of the account's in the
+   * statements this Tower sends only, so one direction of a pair can break while the other
+   * stays healthy. Empty for a record C wrote by its rules.
+   */
+  ownerOverride: Partial<StandInAccount>;
 }
 
 /** A live tunnel session (section 1): one per Tower, replaced by a newer connection. */
@@ -335,7 +341,11 @@ export interface StandInForward {
   /** The statement as issued: `null` for a raw request whose header was not a statement. */
   statement: Record<string, unknown> | null;
   payload: Buffer;
-  /** R's answer; `null` when none came (timeout or a dead stream). */
+  /**
+   * R's answer; `null` when none came (timeout or a dead stream). For an answer C refused
+   * (`502 tower-error`), what had arrived when C stopped reading: the status and headers,
+   * and the body read before its size went over the cap (empty when the headers failed).
+   */
   answer: { status: number; headers: Record<string, string | string[]>; body: Buffer } | null;
 }
 
@@ -495,7 +505,11 @@ interface FaultEntry {
 type CloudBody = { outcome: 'refused' | 'unavailable'; reason: string; retryAfterSec?: number; supported?: number[] };
 
 /** How one request down a tunnel ended. */
-type TunnelResult = { kind: 'answer'; response: TunnelResponse } | { kind: 'unchecked' } | { kind: 'no-answer' };
+type TunnelResult =
+  | { kind: 'answer'; response: TunnelResponse }
+  /** An answer C refused; `response` is what had arrived when C stopped reading. */
+  | { kind: 'unchecked'; response: TunnelResponse }
+  | { kind: 'no-answer' };
 
 class AnswerSent {
   constructor(readonly call: StandInCall) {}
@@ -514,7 +528,10 @@ export class StandInRelay {
   private counters = new Map<string, Counter>();
   private readonly inFlightNow = new Map<string, number>();
   private readonly inFlightMax = new Map<string, number>();
+  /** The last statement forwarded per pair, keyed `<from>><to>`, for the `replay-statement` fault. */
   private readonly lastIssued = new Map<string, { header: string; mac: string; statement: Record<string, unknown> }>();
+  /** Each Tower's slug as C last wrote it by its rules, for `restoreRecord`. */
+  private readonly checkedSlugs = new Map<string, string>();
   private readonly offline = new Set<string>();
   private readonly noVersion = new Set<string>();
   private faults: FaultEntry[] = [];
@@ -605,8 +622,10 @@ export class StandInRelay {
       account: tower.account,
       protocols: [],
       remoteMessaging: 'unknown',
+      ownerOverride: {},
     };
     this.towers.set(towerId, created);
+    this.checkedSlugs.set(towerId, created.slug);
     return created;
   }
 
@@ -620,6 +639,7 @@ export class StandInRelay {
     const tower = this.tower(towerId);
     this.assertSlugFree(tower.account, slug, towerId);
     tower.slug = slug;
+    this.checkedSlugs.set(towerId, slug);
   }
 
   /** Move a Tower to another account; its per-pair counters stay as they were. */
@@ -638,13 +658,27 @@ export class StandInRelay {
   /**
    * Write a record without C's rules, so a statement built from it does not fit them: the
    * way to make step 9 answer `500 cloud-error`. The real cloud never holds such a record.
+   * Only the statements this Tower sends change: owner fields go to its `ownerOverride`, not
+   * to the account other Towers share, so its peers' statements to it stay as they were.
    */
   writeRecordUnchecked(towerId: string, patch: { slug?: string } & Partial<StandInAccount>): void {
     const tower = this.tower(towerId);
     if (patch.slug !== undefined) tower.slug = patch.slug;
-    if (patch.ownerId !== undefined) tower.account.ownerId = patch.ownerId;
-    if (patch.ownerHandle !== undefined) tower.account.ownerHandle = patch.ownerHandle;
-    if (patch.ownerEmail !== undefined) tower.account.ownerEmail = patch.ownerEmail;
+    if (patch.ownerId !== undefined) tower.ownerOverride.ownerId = patch.ownerId;
+    if (patch.ownerHandle !== undefined) tower.ownerOverride.ownerHandle = patch.ownerHandle;
+    if (patch.ownerEmail !== undefined) tower.ownerOverride.ownerEmail = patch.ownerEmail;
+  }
+
+  /** Undo `writeRecordUnchecked`: the slug last written by C's rules, the account's owner fields. */
+  restoreRecord(towerId: string): void {
+    const tower = this.tower(towerId);
+    tower.slug = this.checkedSlugs.get(towerId)!;
+    tower.ownerOverride = {};
+  }
+
+  /** The owner fields a statement from this Tower states. */
+  private ownerOf(tower: StandInTower): StandInAccount {
+    return { ...tower.account, ...tower.ownerOverride };
   }
 
   private assertSlugFree(account: StandInAccount, slug: string, except?: string): void {
@@ -1080,9 +1114,9 @@ export class StandInRelay {
               toTowerId: recipient.towerId,
               fromTowerId: sender.towerId,
               fromTowerSlug: sender.slug,
-              fromOwnerId: sender.account.ownerId,
-              fromOwnerHandle: sender.account.ownerHandle,
-              fromOwnerEmail: sender.account.ownerEmail,
+              fromOwnerId: this.ownerOf(sender).ownerId,
+              fromOwnerHandle: this.ownerOf(sender).ownerHandle,
+              fromOwnerEmail: this.ownerOf(sender).ownerEmail,
               sameOwner: true,
               requestId: call.requestId,
               issuedAt: this.now(),
@@ -1109,14 +1143,15 @@ export class StandInRelay {
     let statementHeader = issued.header;
     let mac = issued.mac;
     let statement: Record<string, unknown> = issued.fields;
+    const pair = `${String(issued.fields.fromTowerId)}>${to}`;
     const replay = this.takeFault('replay-statement', forTo);
-    const previous = this.lastIssued.get(to);
+    const previous = this.lastIssued.get(pair);
     if (replay && previous) {
       ({ header: statementHeader, mac, statement } = previous);
     } else if (this.takeFault('wrong-secret', forTo)) {
       mac = createHmac('sha256', randomBytes(32)).update(issued.bytes).digest('base64url');
     }
-    this.lastIssued.set(to, { header: statementHeader, mac, statement });
+    this.lastIssued.set(pair, { header: statementHeader, mac, statement });
 
     // A session gone before anything is sent is `tower-offline` [r8].
     if (session.h2.destroyed || session.h2.closed || this.sessions.get(to) !== session) {
@@ -1147,7 +1182,7 @@ export class StandInRelay {
       answerCap: PEER_MAX_ANSWER_BYTES,
     });
 
-    if (result.kind === 'answer') forward.answer = result.response;
+    if (result.kind !== 'no-answer') forward.answer = result.response;
     if (late || result.kind === 'no-answer') {
       this.cloudAnswer(res, call, 504, { outcome: 'unavailable', reason: 'no-answer' });
     }
@@ -1222,13 +1257,13 @@ export class StandInRelay {
           return;
         }
         if (request.answerCap !== undefined && !answerHeadersPass(status, headers)) {
-          finish({ kind: 'unchecked' });
+          finish({ kind: 'unchecked', response: { status, headers, body: Buffer.alloc(0) } });
         }
       });
       stream.on('data', (chunk: Buffer) => {
         length += chunk.length;
         if (request.answerCap !== undefined && length > request.answerCap) {
-          finish({ kind: 'unchecked' });
+          finish({ kind: 'unchecked', response: { status, headers, body: Buffer.concat(chunks) } });
           return;
         }
         chunks.push(chunk);
@@ -1297,6 +1332,9 @@ export class StandInRelay {
     } catch {
       state = undefined;
     }
+    // "A body that is not this object" is 400; a field it does not know is ignored, as
+    // receivers do everywhere in the contract (section 0), so `{"remoteMessaging":"on",
+    // "later":true}` is a report of "on".
     if (state !== 'on' && state !== 'off') this.cloudAnswer(res, call, 400, { outcome: 'refused', reason: 'malformed' });
 
     if (peerRoutes > this.limits.peerRoutesPerTowerPerMinute) this.rateLimited(req, res, call);
@@ -1362,9 +1400,9 @@ export class StandInRelay {
       toTowerId,
       fromTowerId: sender.towerId,
       fromTowerSlug: sender.slug,
-      fromOwnerId: sender.account.ownerId,
-      fromOwnerHandle: sender.account.ownerHandle,
-      fromOwnerEmail: sender.account.ownerEmail,
+      fromOwnerId: this.ownerOf(sender).ownerId,
+      fromOwnerHandle: this.ownerOf(sender).ownerHandle,
+      fromOwnerEmail: this.ownerOf(sender).ownerEmail,
       sameOwner: sender.account === recipient.account,
       requestId: options.requestId ?? randomUUID(),
       issuedAt,
