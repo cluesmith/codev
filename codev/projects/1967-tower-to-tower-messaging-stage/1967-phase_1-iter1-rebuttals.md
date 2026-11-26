@@ -15,7 +15,7 @@ The reader already refused a non-string `detail`, so refusing an over-long one i
   handed at 501 code points is capped and read back by S.
 - `printableDetail` keeps its strip and cap, as the contract says S does before printing.
 
-## Codex 1: `statementId` is not checked as the canonical base64url of 16 bytes — NOT CHANGED
+## Disputed: `statementId` is not checked as the canonical base64url of 16 bytes (codex 1) — NOT CHANGED; the architect ruled the rebuttal stands
 
 The contract's rule for the field (section 5) is "String of exactly 22 characters from A–Z, a–z,
 0–9, `-`, `_`: the base64url of 16 random bytes, new for every statement". I read the part
