@@ -536,8 +536,8 @@ export class TowerClient {
 
   /**
    * Tower's version from the liveness route (#1977), at no cost to Tower. `unknownRoute` is set
-   * when the Tower is older than the route, `unanswered` when nothing answered at all (timeout,
-   * reset, refused), which says nothing about which Tower it is.
+   * when the Tower is older than the route, with or without the key; `unanswered` when nothing
+   * answered at all (timeout, reset, refused), which says nothing about which Tower it is.
    */
   async getLiveness(): Promise<
     { ok: true; liveness: TowerLiveness } | { ok: false; error: string; unknownRoute?: true; unanswered?: true }
@@ -546,6 +546,13 @@ export class TowerClient {
     if (result.ok && result.data?.status === 'healthy') return { ok: true, liveness: result.data };
     const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
     if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+    // An older Tower answers a keyless client 401, the route not being on its public list. Its
+    // `/health` is public, so a healthy answer there says which Tower it is; a refused Host
+    // header, the only 401 a current Tower gives this route, refuses `/health` too.
+    if (result.status === 401) {
+      const health = await this.request<TowerHealth>('/health');
+      if (health.ok && health.data?.status === 'healthy') return { ...failure, unknownRoute: true };
+    }
     return result.status === 0 ? { ...failure, unanswered: true } : failure;
   }
 

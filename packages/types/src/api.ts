@@ -885,7 +885,10 @@ export const TOWER_LIVENESS_ROUTE = '/health/live';
  */
 export interface TowerLiveness extends TowerVersionInfo {
   status: 'healthy';
-  /** The global.db schema version this Tower's code migrates to. */
+  /**
+   * The global.db schema version this Tower's code migrates to at boot: a constant of the
+   * running code, not a value read from the database.
+   */
   schemaVersion: number;
 }
 

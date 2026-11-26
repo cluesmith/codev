@@ -34,3 +34,17 @@ back onto `handleVersion`.
 **Not changed:** `db/tower-owner.ts` still probes `/health` for the startup ownership guard
 (it is not `probeHealth`, and the issue scopes item 2 to the SDK probe). `doctor` keeps
 `/health` for `insideCodevSession`.
+
+## 2026-11-26 — PR #2001, CMAP
+
+- **codex: REQUEST_CHANGES.** `getLiveness()` read only a 404 as `unknownRoute`, but an older
+  Tower answers a keyless client 401. Fixed: on a 401 it asks the public `/health`, and a healthy
+  answer confirms an older Tower (a refused Host 401s both). Re-measured against the live
+  v3.3.8 Tower: keyless `getLiveness()` now gives `unknownRoute`.
+- **claude: APPROVE**, non-blocking items taken:
+  - VS Code `terminal-manager.probeTowerHealth` used `getHealth()` for a yes/no answer; it now
+    uses `isRunning()` (the liveness route).
+  - The route test now positively asserts all five spies on the `/health` side.
+  - `schemaVersion` documented as a constant of the running code, not read from the DB.
+- Left: VS Code `connection-manager.connect()` keeps `getHealth()`. It runs once per connect
+  attempt with backoff and logs the payload's uptime.

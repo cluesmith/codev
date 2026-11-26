@@ -136,6 +136,8 @@ describe('GET /health/live (#1977)', () => {
     expect(heavy.getInstances).toHaveBeenCalled();
     expect(heavy.listProcessCensus).toHaveBeenCalled();
     expect(heavy.getGlobalDb).toHaveBeenCalled();
+    expect(heavy.computeRegisteredShellperPids).toHaveBeenCalled();
+    expect(heavy.isStartupReconcileSettled).toHaveBeenCalled();
   });
 
   it("gives the probe the Tower's version", async () => {

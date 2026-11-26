@@ -274,6 +274,24 @@ describe('TowerClient liveness route (#1977)', () => {
       expect(asked).toEqual(['/health/live']);
     });
 
+    it("marks a keyless client's 401 as an unknown route when the older Tower's public /health answers", async () => {
+      const { client, asked } = tower({
+        '/health/live': () => new Response('Unauthorized', { status: 401 }),
+        '/health': json(200, { status: 'healthy' }),
+      });
+      expect(await client.getLiveness()).toMatchObject({ ok: false, unknownRoute: true });
+      expect(asked).toEqual(['/health/live', '/health']);
+    });
+
+    it('does not take a 401 that /health shares (a refused Host) for an older Tower', async () => {
+      const unauthorized = () => new Response('Unauthorized', { status: 401 });
+      const { client } = tower({ '/health/live': unauthorized, '/health': unauthorized });
+      const live = await client.getLiveness();
+      expect(live.ok).toBe(false);
+      expect(live).not.toHaveProperty('unknownRoute');
+      expect(live).not.toHaveProperty('unanswered');
+    });
+
     it('marks no answer at all as unanswered, not as an older Tower', async () => {
       const { client } = tower({ '/health/live': timeout });
       const live = await client.getLiveness();
