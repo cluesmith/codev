@@ -109,3 +109,13 @@
   at steps 1–8; `dismissHeldForAgent` (afx cleanup) is set-based, so the accepted-once mirror covers
   set-based writers too; the Windows three-shell `afx://` check had no home (windows.yml is all
   bash) — phase 5 adds `windows-probe.mjs --argv` and bash/pwsh/cmd steps.
+- Plan gate (2026-11-26): the owner ruled main-58 "approve" — the thirteen-phase plan as it is, no
+  lean cuts; the delivery-time grant check discussed with the architect is not adopted. Merged
+  origin/main (d84036762, #1871's fix) — merge, never rebase. Applied the architect's six
+  corrections from fresh codex/claude reviews (plan 1301 → 1355 lines): the peer_accepted mirror
+  names every mailbox writer and covers reason and release_hold changes (setHeldVerdict); a
+  KeyedSerializer.runWithin deadline for the receiver's 5 s answer; the extended held-count
+  Playwright suite runs only through the isolated peers config; the release_hold exclusion names
+  its queries (listHeld must keep returning held-for-release rows) and the grep exempts
+  schema/migrations; the two-Tower harness reuses startTower via extraEnv; not-registered reads
+  #1871's deregistered_at.
