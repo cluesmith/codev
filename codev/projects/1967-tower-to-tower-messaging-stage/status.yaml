@@ -1,9 +1,48 @@
 id: '1967'
 title: tower-to-tower-messaging-stage
 protocol: spir
-phase: plan
-plan_phases: []
-current_plan_phase: null
+phase: implement
+plan_phases:
+  - id: phase_1
+    title: Wire contract module and shared test vectors
+    status: in_progress
+  - id: phase_2
+    title: Stand-in relay and two-Tower test harness
+    status: pending
+  - id: phase_3
+    title: Peer storage and the mailbox migration
+    status: pending
+  - id: phase_4
+    title: The remote-messaging switch and grants
+    status: pending
+  - id: phase_5
+    title: Tunnel handshake, session secret and the verified entry point
+    status: pending
+  - id: phase_6
+    title: 'Receiving a message: accepted once, delivery through the mailbox and gate'
+    status: pending
+  - id: phase_7
+    title: Peer listing and the cloud client
+    status: pending
+  - id: phase_8
+    title: The outbox, the sender's checks and the per-peer queue
+    status: pending
+  - id: phase_9
+    title: afx send across Towers, end to end
+    status: pending
+  - id: phase_10
+    title: Discovery across Towers
+    status: pending
+  - id: phase_11
+    title: Inbox, status and record surfaces
+    status: pending
+  - id: phase_12
+    title: 'Dashboard: Peers panel and three-count indicator'
+    status: pending
+  - id: phase_13
+    title: Docs in both trees, the walkthrough end to end, and Windows
+    status: pending
+current_plan_phase: phase_1
 gates:
   spec-approval:
     status: approved
@@ -21,10 +60,13 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-26T22:15:48.360Z'
+updated_at: '2026-11-26T22:15:50.633Z'
 force_advanced:
   phase: plan
   iteration: 3
   max_iterations: 3
   rebuttal_file: 1967-plan-iter3-rebuttals.md
   at: '2026-11-26T00:11:51.687Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-11-26T22:15:50.632Z'
