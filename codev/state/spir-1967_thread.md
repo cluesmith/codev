@@ -171,3 +171,44 @@
   case's statementId is unique (the file's comment promises it and the cloud relies on it).
   For phases 6 and 10 (claude): encodeAnswerJson throws above 65 536 bytes; R's answer path must
   catch that and answer, not kill the stream.
+
+## 2026-11-26 — phase 2: stand-in relay and two-Tower harness
+
+- After a context refresh at the phase boundary. Files: `__tests__/helpers/stand-in-relay.ts`,
+  `helpers/two-towers.ts`, `helpers/seeded-generator.ts`, and three tests:
+  `stand-in-relay.test.ts` (49, layer A), `seeded-generator.test.ts` (5, layer A; not in the
+  plan's file list, added so the generator is tested on its own), `two-towers-harness.e2e.test.ts`
+  (4, layer B).
+- The stand-in imports only `codev-types` shapes and constants plus `node:crypto`, `ws`, `http2`;
+  a structural test checks it imports nothing of `peer/contract.ts` or any production peer module.
+  As the issuing side it rebuilds 42 of the 47 verified vectors byte for byte, MAC included (the
+  other five are serialised as C does not write: keys reversed, an unknown field, `1.0`, …), and
+  its own field rules refuse all 73 step-4 cases (duplicate-key cases left out: JSON.parse hides
+  them). One cross-check uses contract.ts: a statement the stand-in issues verifies there.
+- Readings the stand-in takes where the contract leaves order open (in its header comment):
+  within step 2, malformed before unsupported-version; a missing version header is
+  unsupported-version, a missing `to` is malformed; on `PUT /api/peer/state` a bad body (400)
+  before the limits, as the relay checks headers before limits. Left out on purpose: the `/t/`
+  proxy (`tunnelRequest` sends any request down a tunnel, which is what a failed second barrier
+  looks like at R) and a bad-key rate limit (C's number, [r16]).
+- Faults: `setOffline`, `answer-late` (forward reaches R, S told 504), `reset-stream`, `deploy()`,
+  modes `absent`/`null`, `bodyless` (never 200), `setStatesNoVersion`, `writeRecordUnchecked`
+  (→ 500 cloud-error), `wrong-secret`, `replay-statement`, `answer-delay` (to see calls in
+  flight). Originated forwards: `forward()`, `replay()`, `tunnelRequest()`.
+- Layer B, on demand (load average 2.4–2.9 each time), three runs:
+  1. 3/4: my restart test asked `/api/status` whether the workspace ran; that route leaves out
+     workspaces under the temp directory. Switched to the address book (the CLI's own view).
+  2. 3/4: after the restart the architect never came back. Tower's design, not a harness bug:
+     on startup reconcile SIGTERMs the shellpers of temp-directory workspaces and deletes their
+     rows (`isTemporaryWorkspace`, servers/tower-terminals.ts). The restart test now checks what
+     persists (held mail in the same database, same port, same cloud identity, a new session
+     secret) and re-activates the workspace to get its architect back.
+     **For phase 9:** after `HarnessTower.restart()`, activate workspaces again before expecting
+     a recipient agent; the database (and so peer_outbox / peer_accepted) is what survives.
+  3. 4/4 in 12.8 s. Teardown report empty: no Tower process, no shellper, no directory, the
+     stand-in's port closed.
+- Porch's exact tests command (`npm test -- --exclude='**/e2e/**'` in packages/codev), run once
+  with the e2e file in place: 463 passed, 14 skipped (477 files), 10 297 tests, exit 0. Its
+  reporter does not print passing files, so I listed what the same config collects
+  (`vitest list --filesOnly --exclude='**/e2e/**'`): 477 files, including stand-in-relay.test.ts
+  and seeded-generator.test.ts, and not two-towers-harness.e2e.test.ts. Build check passed.
