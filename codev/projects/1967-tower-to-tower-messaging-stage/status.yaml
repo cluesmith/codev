@@ -11,48 +11,16 @@ gates:
     approved_at: '2026-11-25T23:41:48.065Z'
   plan-approval:
     status: pending
+    requested_at: '2026-11-26T00:11:54.086Z'
   pr:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
-history:
-  - iteration: 1
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-plan-iter1-codex.txt
-      - model: claude
-        verdict: COMMENT
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-plan-iter1-claude.txt
-  - iteration: 2
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-plan-iter2-codex.txt
-      - model: claude
-        verdict: COMMENT
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-plan-iter2-claude.txt
-  - iteration: 3
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-plan-iter3-codex.txt
-      - model: claude
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-plan-iter3-claude.txt
+iteration: 1
+build_complete: false
+history: []
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-26T00:11:51.687Z'
+updated_at: '2026-11-26T00:11:54.086Z'
 force_advanced:
   phase: plan
   iteration: 3
