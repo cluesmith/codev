@@ -25,3 +25,16 @@
 - Left alone, possible follow-ups: `db/tower-owner.ts` `probeTowerHealth` (raw `/health` on the
   owner-conflict path only) and the VS Code `connection-manager` connect, which calls `getHealth()`
   for uptime.
+
+## 2026-11-26: review (codex + claude)
+
+- codex COMMENT, claude APPROVE. Both flagged that `isTowerLiveness` checked only `status` and
+  `version` while narrowing to a type with required `schemaVersion` and `startedAt`. It now
+  checks all four, and a test pins it. Claude flagged that the public-route docs said every
+  entry is a browser navigation, which `/api/liveness` is not; the wording in `server-utils.ts`
+  and `arch.md` now names the keyless probes.
+- Not acted on, recorded in the PR: the dev-build window in the older-Tower check (the issue
+  prescribes route presence), and the boot gate still holding the probe (unchanged behaviour,
+  a possible follow-up).
+- The first full-suite run caught two more #1901 test files whose fixtures answered `/health`
+  with `{status:'healthy'}` for every path, or pinned the old wording. Fixed in place.
