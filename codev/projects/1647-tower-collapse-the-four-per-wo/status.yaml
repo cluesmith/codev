@@ -1,0 +1,20 @@
+id: '1647'
+title: tower-collapse-the-four-per-wo
+protocol: spir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: pending
+  plan-approval:
+    status: pending
+  pr:
+    status: pending
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-26T01:28:11.587Z'
+updated_at: '2026-11-26T01:28:11.588Z'
