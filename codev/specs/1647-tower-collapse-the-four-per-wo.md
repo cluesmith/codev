@@ -15,8 +15,8 @@ per-workspace fetch into one GraphQL request. It changes the forge abstraction s
 adopters, not one file.
 
 The cost is paid by anyone running Tower against GitHub with several workspaces open. Each
-workspace costs 52 process spawns, about 72 HTTP requests and about 112 GraphQL points an hour
-at idle, and more under refresh churn. Thirteen watched workspaces spend more than a quarter of
+workspace costs 52 forge concept invocations an hour at idle, each one a `gh` process, plus about
+72 HTTP requests and about 112 GraphQL points. Refresh churn adds more. Thirteen watched workspaces spend more than a quarter of
 the account's hourly budget on the dashboard alone, before the user's own `gh` use, builders and
 CI tooling.
 
@@ -40,14 +40,15 @@ query that `gh` answers from its HTTP cache; it costs nothing and is not counted
 this repository: open PRs 72 KB, 200 open issues 93 KB, 24 h merged PRs 42 KB (our PR bodies
 average about 10 KB).
 
-**Hourly spend per watched workspace, today:**
+**Hourly spend per watched workspace, today.** "Invocations" are forge concept invocations. Today
+each is exactly one `gh` process, because `gh issue list` and `gh … --search` page internally.
 
-| | spawns | HTTP requests | GraphQL points |
-|---|---|---|---|
-| idle, repo with more than 100 open issues | 52 | 72 | 112 |
-| idle, repo with 100 or fewer open issues | 52 | 52 | 72 |
-| constant invalidation churn, large repo | 132 | 192 | 312 |
-| constant invalidation churn, small repo | 132 | 132 | 192 |
+| | invocations | `gh` processes | HTTP requests | GraphQL points |
+|---|---|---|---|---|
+| idle, repo with more than 100 open issues | 52 | 52 | 72 | 112 |
+| idle, repo with 100 or fewer open issues | 52 | 52 | 52 | 72 |
+| constant invalidation churn, large repo | 132 | 132 | 192 | 312 |
+| constant invalidation churn, small repo | 132 | 132 | 132 | 192 |
 
 `invalidate()` is fired automatically by porch, VS Code and cleanup. It marks the two open lists
 stale, debounced to once a minute per workspace, so under churn the lists refresh 60 times an
@@ -78,9 +79,22 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
    script sends one `gh api graphql` request carrying open PRs, open issues and both 24 h search
    windows. It sends a follow-up request only when a section overflows its first page, and only
    up to the caps the individual concepts use today: PRs 30, issues 200 (newest first), each
-   search 1,000. In the common case that is one request, or two on a repository with more than
-   100 open issues. The bundle runs with an explicit **60 s** time limit and a **40 MB** output
-   limit. Those are twice and four times the single-concept defaults, because one bundle carries
+   search 1,000.
+
+   A POSIX `sh` script cannot page inside one `gh` call. Each follow-up request is therefore a
+   separate `gh api graphql` process within the same invocation, and in this design `gh`
+   processes equal HTTP requests. The first request carries every section's first page. An
+   issue follow-up asks for the next issue page only, and a search follow-up only for the next
+   page of that search. That means one `gh` process on a repository with 100 or fewer open
+   issues, and two on a larger one. Each 24 h search adds a process only if it exceeds 100
+   results in the window. The figures below assume neither does; this repository's 24 h windows
+   hold well under 100. The worst case, with both searches at their 1,000 cap, is 20 processes
+   in one invocation.
+
+   Nested connections use the caps `gh --json` uses today: `labels`, `assignees` and
+   `reviewRequests` at 100 each. The search strings carry the qualifiers `gh` adds: `repo:`;
+   `type:issue state:closed` for the closed window; `type:pr is:merged` for the merged window.
+   The bundle runs with an explicit **60 s** time limit and a **40 MB** output limit. Those are twice and four times the single-concept defaults, because one bundle carries
    the work four concepts did under four parallel 30 s / 10 MB limits. Any repository state that
    fits in today's four calls therefore fits in the bundle.
 
@@ -113,17 +127,22 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
 
    Hourly spend per watched workspace with the bundle:
 
-   | | spawns | HTTP requests | GraphQL points |
-   |---|---|---|---|
-   | idle, repo with more than 100 open issues | 20 (from 52) | 40 (from 72) | 100 (from 112) |
-   | idle, repo with 100 or fewer open issues | 20 (from 52) | 20 (from 52) | 60 (from 72) |
-   | constant invalidation churn, large repo | 60 (from 132) | 120 (from 192) | 300 (from 312) |
-   | constant invalidation churn, small repo | 60 (from 132) | 60 (from 132) | 180 (from 192) |
+   | | invocations | `gh` processes | HTTP requests | GraphQL points |
+   |---|---|---|---|---|
+   | idle, repo with more than 100 open issues | 20 (from 52) | 40 (from 52) | 40 (from 72) | 100 (from 112) |
+   | idle, repo with 100 or fewer open issues | 20 (from 52) | 20 (from 52) | 20 (from 52) | 60 (from 72) |
+   | constant invalidation churn, large repo | 60 (from 132) | 120 (from 132) | 120 (from 192) | 300 (from 312) |
+   | constant invalidation churn, small repo | 60 (from 132) | 60 (from 132) | 60 (from 132) | 180 (from 192) |
 
    Points come from `rateLimit(dryRun: true)` on the candidate query: 3 for the full first page
-   (lists only: 2, searches only: 1), 2 for an issue page. The win is in spawns and requests.
-   Points fall modestly at idle, and under churn the points saving all but vanishes. Reducing
-   churn itself is #1650's job.
+   (lists only: 2, searches only: 1), 2 for an issue page. The size of the win depends on the
+   repository:
+   - **Invocations** fall 62% everywhere.
+   - **`gh` processes** fall 62% on a repo with 100 or fewer open issues, but only 23% (52 → 40)
+     on a larger one such as this repository.
+   - **HTTP requests** fall 44–62%.
+   - **Points** fall modestly at idle, and under churn the points saving all but vanishes.
+     Reducing churn itself is #1650's job.
 
 4. **The overview payload is unchanged.** `/api/overview` returns the same `OverviewData` shape.
    The dashboard and VS Code need no change; they simply see fresher 24 h lists.
@@ -139,9 +158,11 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
    1 there ("repository has disabled issues"), so today the backlog shows "could not fetch
    issues" and `recentlyClosed` fails. GraphQL returns an empty issue connection with exit 0
    (verified 2026-11-25 against a public repository with issues disabled). The bundle therefore
-   shows an empty backlog and an empty recently-closed list, with PRs intact. That is accurate:
-   the repository has no issues. The owner may overrule this at the spec gate in favour of
-   reporting `issues: null`.
+   shows an empty backlog and an empty recently-closed list, with PRs intact. Because no section
+   is `null`, `forgeStatus` also changes, from `unavailable` today to `ok`. That is accurate: the
+   repository has no issues. The owner may overrule the whole behaviour change at the spec gate:
+   empty backlog, no `errors.issues`, and `forgeStatus: ok`. The alternative is reporting
+   `issues: null`, which keeps today's behaviour.
 
 6. **Failure semantics.**
    - **Search-local failures stay in their section.** The GitHub script classifies a non-zero
@@ -205,7 +226,8 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
    workspace's resolved overview plan and returns forge calls per hour per watched workspace,
    idle and under constant invalidation. The plan is either bundled, or four-call with the set
    of constituents that are actually runnable. "Forge calls" means concept invocations
-   (spawns); requests and points depend on repository size and are not projected.
+   (the unit the issue's acceptance names). `gh` processes, requests and points depend on
+   repository size and are not projected.
    - Bundled: 20 idle, 60 under churn.
    - Four-call: each runnable open list adds 20 idle and 60 under churn; each runnable search
      adds 6 in both. All four runnable gives 52 and 132; with `recently-merged` disabled, 46
@@ -231,10 +253,13 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
 
 ## Success Criteria
 
-- [ ] On a GitHub workspace with default forge config, a full overview refresh spawns exactly one
-      forge command for PRs, issues and both searches, plus the unchanged hourly
-      `user-identity`. Verified by a spawn-counting fake `gh` on PATH: repeated polls within one
-      TTL spawn one bundle, and one more after the TTL expires.
+- [ ] On a GitHub workspace with default forge config, a full overview refresh makes exactly one
+      forge concept invocation for PRs, issues and both searches, plus the unchanged hourly
+      `user-identity`. Repeated polls within one TTL make one invocation, and one more after the
+      TTL expires. Verified with a fake `gh` on PATH that counts processes:
+      - a fixture with 100 or fewer open issues: one `gh` process per invocation;
+      - a fixture with more than 100 open issues: two `gh` processes per invocation (first page,
+        then issues only), against today's four.
 - [ ] `projectHourlyForgeCalls` returns bundled 20/60 and four-call 52/132 (idle/churn) at current
       TTLs. Four-call figures drop by each disabled constituent's share (e.g. 46/126 with
       `recently-merged` disabled). It is computed from the same constants the cache uses, so
@@ -249,8 +274,10 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
 - [ ] For a fixture repository state, the bundle's four sections are equivalent to the four
       individual concepts' outputs (and therefore produce an identical `OverviewData`). This
       includes a bot-authored PR or issue, a PR with no review decision, team reviewers
-      (dropped) and labels. The only exception is the issues-disabled divergence in Desired
-      State item 5.
+      (dropped) and labels. In the 24 h window, a closed PR must not appear in `recentlyClosed`,
+      and a closed-unmerged PR must not appear in `recentlyMerged`; this guards the search
+      qualifiers. The only exception is the issues-disabled divergence in Desired State
+      item 5.
 - [ ] Pagination: with more than 100 open issues the bundle returns up to 200, newest first,
       matching `issue-list`. A search section that overflows one page is paged up to 1,000.
 - [ ] Failure classification, per Desired State item 6:
@@ -263,8 +290,9 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
 - [ ] Bundle rate-limited: the budget is suspended, the payload carries `forgeStatus:
       'rate-limited'`, `forgeResetAt`, and `errors.prs`/`errors.issues` matching
       `gh rate limited until …`, and no constituent concept is spawned. Forty polls at 2.5 s
-      against a permanently rate-limited fake `gh` spawn one bundle (plus one REST identity
-      call), then nothing until the suspension lifts.
+      against a permanently rate-limited fake `gh` make one bundle invocation, which is one `gh`
+      process because the first request fails, plus one REST identity call. Then nothing until
+      the suspension lifts.
 - [ ] Bundle timeout: a fake `gh` that hangs is killed at the 60 s limit. The result is a
       whole-bundle failure, negatively cached, with no constituent concept spawned.
 - [ ] gitlab, gitea, linear and jira presets: the overview makes the four calls and the bundle is
@@ -344,8 +372,9 @@ per section inside the bundle's output.
 
 - **Pros:** the smallest contract surface for adopters (one concept, one script, one contract
   type). One cache entry and one single-flight key per workspace. Meets "one forge call per
-  refresh window" literally. Searches become fresher. Spawns fall 62% and requests 44–62%.
-  Points fall 11–17% at idle.
+  refresh window" literally. Searches become fresher. Concept invocations fall 62%. `gh`
+  processes fall 62% on repos with 100 or fewer open issues, and 23% on larger ones. Requests
+  fall 44–62%, and points 11–17% at idle.
 - **Cons:** the searches spend 1 point every 180 s instead of every 600 s, so the points saving
   is smaller than it could be. A whole-request failure blanks all sections (residual risk,
   Desired State item 6). Per-section `null` adds a little contract and classification logic.
@@ -373,7 +402,7 @@ constituents.
 - **Pros:** points match Approach 2. Search failures of every kind, including timeouts and
   whole-request failures, are isolated by construction. Each script is simpler.
 - **Cons:** two new concepts, two contracts, two eligibility rules and two doctor lines. 26
-  spawns/h instead of 20. Does not literally meet "one forge call per refresh window".
+  invocations/h instead of 20. Does not literally meet "one forge call per refresh window".
 - **Risk:** medium. More adopter-facing surface for the same outcome.
 
 ### Approach 4: Keep four calls, raise TTLs further
@@ -402,9 +431,9 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
   *Alternative not taken:* drop the issue's "`projectHourlyForgeCalls` … `codev doctor` reports
   it" acceptance item and ship only the bundle, leaving doctor with the concept row alone.
 - **D2. One bundle at the 180 s list TTL, searches folded in** (Approach 1). Measured basis, from
-  Current State and Desired State item 3: per watched workspace-hour, spawns 52 → 20, requests
-  72 → 40, points 112 → 100 on a repo with more than 100 open issues (72 → 60 points on smaller
-  repos). The 24 h lists become 3× fresher.
+  Current State and Desired State item 3: per watched workspace-hour, on a repo with more than
+  100 open issues, concept invocations go 52 → 20, `gh` processes 52 → 40, requests 72 → 40 and
+  points 112 → 100. On smaller repos: invocations and `gh` processes 52 → 20, points 72 → 60. The 24 h lists become 3× fresher.
   *Alternatives not taken:* Approach 2, a sections input with the searches kept on 600 s: 86
   points/h (46 on smaller repos), at the cost of a conditional input every override must honour
   and a two-clock cache entry. Approach 3, two concepts, for complete search isolation.
@@ -445,11 +474,15 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
 ## Test Scenarios
 
 **Bundle path (GitHub default config)**
-- Spawn count: N polls inside one TTL produce 1 bundle spawn (plus 1 identity), and 1 more after
-  the TTL. Invalidation produces at most one refetch per debounce window.
+- Invocation and process count: N polls inside one TTL produce 1 bundle invocation (plus 1
+  identity), and 1 more after the TTL. That invocation is 1 `gh` process on a fixture with 100
+  or fewer open issues, and 2 on one with more. Invalidation produces at most one refetch per debounce window.
 - Parity: a recorded GraphQL response mapped by the script equals the recorded `gh --json`
   outputs of the four concepts for the same state. Covers bot author, null review decision, team
   reviewer, multiple labels and assignees.
+- Search qualifiers: the closed and merged search strings carry `repo:`, `type:issue
+  state:closed` and `type:pr is:merged`. A closed PR, a closed-unmerged PR and an open issue
+  inside the window appear in neither search section where they don't belong.
 - Pagination: issues `hasNextPage` gives a second page fetched, 200 newest returned, never a
   third. A search overflowing 100 is paged, capped at 1,000.
 - 24 h post-filter applied to both search sections.
@@ -495,7 +528,8 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
 
 **Non-functional**
 - `/api/overview` shape unchanged (type-level and snapshot of keys).
-- Real `gh` smoke during verification against this repository: one spawn per refresh, sections
+- Real `gh` smoke during verification against this repository: one invocation and two `gh`
+  processes per refresh (424 open issues), sections
   populated, non-empty 24 h lists on a day with closures, and the points delta per refresh
   matching the measured cost.
 
