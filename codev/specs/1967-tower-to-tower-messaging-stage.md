@@ -46,7 +46,7 @@ What exists on `main` and in Codev Cloud today, read in the source for this spec
   Tower, including from cron targets, `afx interrupt` and `afx refresh`.
 - **The tunnel.** Tower opens a WebSocket to the cloud's `/tunnel`, sends
   `{type:'auth', apiKey}`, and receives `{type:'auth_ok', towerId, slug, name}` (the cloud has
-  sent `slug` and `name` since its PR #18; Tower reads only `towerId`). `slug` is the name used in
+  sent `slug` and `name` since its PR #18, merged 2026-11-17; Tower reads only `towerId`). `slug` is the name used in
   `/t/<slug>/` and in addresses; `name` is the display name as typed, which can contain spaces,
   capitals and punctuation. Tower then runs an HTTP/2
   server over the socket; only the cloud opens requests on it. Tower's tunnel client runs inside
@@ -262,10 +262,11 @@ Where sender-held mail and grants are stored, and how the per-peer queue is buil
 ## Wire Contract (proposed to Codev Cloud)
 
 *This section is written to be read on its own by the Codev Cloud architect, and is the Tower
-half's proposal for codev-cloud issue #22. This is revision 3. It takes in the cloud architect's
+half's proposal for codev-cloud issue #22. This is revision 4. It takes in the cloud architect's
 first answers (comment 7174155361), marked (a) to (h), their review of revision 1 (comment
-7174678201), marked [r1] to [r18], and their four corrections to revision 2 and one suggestion
-(comment 7174920555), marked [r2-A] to [r2-D] and [r2-s]. Where it and the approved spec differ, the difference is also
+7174678201), marked [r1] to [r18], their four corrections to revision 2 and one suggestion
+(comment 7174920555), marked [r2-A] to [r2-D] and [r2-s], and their two corrections to revision 3,
+marked [r3-1] and [r3-2]. Where it and the approved spec differ, the difference is also
 listed under "Departures from the Approved Spec".*
 
 ### Parties and principles
@@ -286,9 +287,10 @@ listed under "Departures from the Approved Spec".*
 - **A Tower's name in this protocol is its slug** [r1]: the name in `/t/<slug>/` and in addresses.
   The display name, as the owner typed it (`auth_ok.name`, for example "Ana's MBP" for the slug
   `ana-s-mbp`), appears nowhere in this protocol, and a Tower never takes its own name from it.
-- **HTTP 200 means that R decided, and nothing else** [r3]. C never answers 200 itself. S learns
-  who decided from the status: a 200 is R's answer; any other status is C's, or comes from
-  something in front of C.
+- **HTTP 200 means that R decided, and nothing else** [r3]. C never answers 200 itself *to a relay
+  call*. This rule is about `POST /api/peer/relay` only: the listing answers 200 and the
+  switch-state report 204 [r3-2]. For a relay call, S learns who decided from the status: a 200 is
+  R's answer; any other status is C's, or comes from something in front of C.
 - **TLS on both legs.** A Tower accepts a session secret only on a `wss:` tunnel and makes the
   calls in sections 2 to 4 only over `https:`. The single exception is a cloud whose host is a
   loopback address (tests). A Tower configured with any other `http:` cloud treats it as having no
@@ -379,8 +381,9 @@ Content-Type: application/json
 { "remoteMessaging": "on" }
 ```
 
-- Answer `204`. Errors are `401` and `429` in the answer shape of section 6. C allows 30 calls a
-  minute per Tower [r10].
+- Answer `204`. Errors are `400 malformed` (a body that is not this object, or a `remoteMessaging`
+  that is not `"on"` or `"off"`) [r3-2], `401` and `429`, all in the answer shape of section 6. C
+  allows 30 calls a minute per Tower [r10].
 - On no answer, a 5xx or a `429`, the Tower tries again up to three times, after 5 seconds, 30
   seconds and 2 minutes (or after `retryAfterSec`, if longer), then stops; the next `auth` carries
   the truth [r17]. A newer change replaces a pending retry.
@@ -455,7 +458,7 @@ x-codev-peer-request-id: <message id or query id: a UUID chosen by S>
   | 1 | The key authenticates (on every call; how C makes that cheap is C's choice). C tells a caller without a valid key nothing about its headers | `401 unauthenticated` |
   | 2 | The headers are valid: `x-codev-peer-request-id` is a UUID in canonical lower-case form (`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`); `x-codev-peer-kind` is one of the two kinds; `x-codev-peer-to` does not name S itself [r7]; and the call carries no `Content-Encoding` header of any value, so that "the bytes" means one thing for the size cap and the hash [r9]. And `x-codev-peer-version` is a version C relays | `400 malformed`; for the version, `400 unsupported-version` |
   | 3 | The payload is at most 102 400 bytes, from `Content-Length` and again while reading | `413 too-large` |
-  | 4 | The per-Tower limit (message calls only; section 7) | `429 rate-limited` |
+  | 4 | The per-Tower limits (section 7): message calls, and the ceiling on all calls to `/api/peer/…` routes [r3-1] | `429 rate-limited` |
   | 5 | `x-codev-peer-to` is another Tower of S's account | `404 unknown-tower` |
   | 6 | The per-pair limit for the kind (section 7) | `429 rate-limited` |
   | 7 | R has a live session | `503 tower-offline` |
@@ -761,6 +764,9 @@ in R's 200, ends a send only when its sender is still waiting for the answer. Fo
 at S, the row stays held, and that peer's queue waits `retryAfterSec` if the answer gives one, or
 the next back-off interval if it does not, then retries the same row first, keeping the order.
 
+- **A `429` from the ceiling** [r3-1]. A query that gets it is refused with the reason, never held,
+  as every query refusal is. A message that gets it is handled like any other `429`: a fresh send
+  is refused, and held mail stays held while that peer's queue waits `retryAfterSec`.
 - **A discovery query is never held**: every answer but `answered` refuses it, with the reason
   (Decision 6).
 - An answer from R of `not-verified`: S holds and retries.
@@ -794,6 +800,7 @@ the next back-off interval if it does not, then retries the same row first, keep
 | `query` relay calls from one Tower to one Tower | 10 a minute | C and R | From the approved spec. Queries are limited per pair only [r11] |
 | `PUT /api/peer/state` | 30 a minute per Tower | C | New [r10] |
 | `GET /api/peer/towers` | 30 a minute per Tower | C | New [r10]. Leaves room for the call budget in section 3 |
+| Every call to an `/api/peer/…` route from one Tower: the relay of either kind, the listing and the switch-state report | **600 a minute** | C | New [r3-1]. Without it, query calls naming made-up recipients would hit no limit (the 60 counts messages only, and a per-pair counter exists only for a real pair) and each would write a record row. A Tower within the other limits does not reach it unless it queries more than 48 peers at the full per-pair rate in one minute |
 
 The sizes and times are protocol constants (above), not limits C sets.
 
@@ -802,7 +809,10 @@ The sizes and times are protocol constants (above), not limits C sets.
   (step 5), whatever its outcome after that (`tower-offline` included). So `unknown-tower` counts
   against the per-Tower limit and never touches a per-pair counter: C keeps per-pair counters only
   for pairs within one account, and a Tower sending made-up recipient ids cannot grow them. A call
-  whose `x-codev-peer-kind` is not valid counts as a message. A retry is a call like any other and
+  whose `x-codev-peer-kind` is not valid counts as a message. Every authenticated call to an
+  `/api/peer/…` route counts against the 600-a-minute ceiling, `unknown-tower` and invalid calls
+  included; on the relay it is checked at step 4, and on the listing and the switch-state report
+  before their own limits [r3-1]. A retry is a call like any other and
   counts, and so does a call whose answer is `not-verified`. S's one-call-per-peer rule and its
   back-off keep retries few.
 - **Calls with a bad key** are limited by C for its own protection; the number is C's and not part
@@ -915,7 +925,7 @@ spec at the gate adopts them, except where the owner rules otherwise.
 | C3 | Held at the sender: offline, cloud unreachable, or not verified; "if no answer comes back" the row stays held (Decision 5) | A named outcome `no-answer`, distinct from `tower-offline`, from a cloud relay timeout of 15 seconds; both held at the sender. R answers within 5 seconds | (e) "Online" is soft: a vanished peer looks online for about 135 seconds, and a relay to it would otherwise hang |
 | C4 | "A refusal for rate is never retried automatically by the sending Tower; the sender is told, and decides" (Decision 3) | Kept for a fresh send whose sender is still waiting. For mail already held at the sender, a rate-limited answer **from either source** (the cloud's `429`, or `rate-limited` in R's answer) leaves the row held and pauses that peer's queue for `retryAfterSec`, or the next back-off interval when there is none, keeping the order. R sends `retryAfterSec` when its per-peer minute limit tripped | After an outage a backlog of up to 50 held messages is drained in one go. At 30 a minute per pair at the cloud, and 30 a minute per peer at R, messages 31 to 50 would otherwise end refused, against "accepted exactly once when the route returns" |
 | C5 | "Every relay attempt" is recorded at the cloud; "every inbound decision" and "every outbound attempt" at the Towers (Decision 3) | Rate-limited attempts, not-verified requests and unauthenticated calls are recorded as one counted row per sender, reason and minute. The cloud counts them in memory and writes once a minute, so a deploy or crash can lose up to a minute of flood counts (see also K1) | (h) Otherwise the record is what a flood fills |
-| C6 | Cloud limits "per sending Tower and per pair", with a number only per Tower (Decision 3) | Per pair: 30 messages a minute. The 60 a minute counts message calls only; queries are limited per pair only; a call counts against the per-Tower limit once authenticated and against the per-pair limit only once its recipient is another Tower of the account, so `unknown-tower` never touches a per-pair counter; a call with an invalid kind counts as a message; retries and not-verified included. The listing and switch-state routes: 30 a minute per Tower each. The limit on calls with a bad key is the cloud's own and not in the contract (K3) | (h) [r10] [r11] [r2-B] The numbers were missing |
+| C6 | Cloud limits "per sending Tower and per pair", with a number only per Tower (Decision 3) | Per pair: 30 messages a minute. The 60 a minute counts message calls only; queries are limited per pair only; a call counts against the per-Tower limit once authenticated and against the per-pair limit only once its recipient is another Tower of the account, so `unknown-tower` never touches a per-pair counter; a call with an invalid kind counts as a message; retries and not-verified included. The listing and switch-state routes: 30 a minute per Tower each. A ceiling of 600 calls a minute per Tower across every `/api/peer/…` route [r3-1]. The limit on calls with a bad key is the cloud's own and not in the contract (K3) | (h) [r10] [r11] [r2-B] The numbers were missing |
 | C7 | `--raw`, `--interrupt`, `--no-enter`, `--delay`: refused by the sending Tower; "the receiving Tower refuses them again" (Decision 5) | The sending Tower refuses them. The payload has no field that can ask for them, and R acts on no field it does not know, so R has nothing to refuse | The intent, that R never honours them, holds by construction; a field R would only ever refuse adds nothing |
 | C8 | "A peer with no grant gets the same answer as a Tower that does not exist" (Decision 6); full reasons between my own Towers (Decision 5 and the walkthrough) | Between my own Towers, a discovery query without a grant is refused with `no-grant` and the command to add one. The identical answer stays for other owners, in stage 3 | The two decisions disagree for own Towers; this follows Decision 5 and the walkthrough |
 | C9 | Front door only: a refusal reason, and rules for grants in such a workspace (Decisions 4, 5, 10) | Not built, and no such refusal exists | The owner cut the front-door-only setting at stage 1's plan approval (decision main-31); nothing exists for stage 2 to interact with |
