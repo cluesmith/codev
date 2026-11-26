@@ -141,9 +141,10 @@ describe('TowerClient.probeHealth (#1901)', () => {
       cause: Object.assign(new AggregateError(codes.map(errno), ''), { code: codes[0] }),
     });
 
-  it('reports running with the health payload on a healthy answer', async () => {
-    const { impl } = jsonFetch(200, { status: 'healthy', uptime: 5 });
-    expect(await new TowerClient(opts(impl)).probeHealth()).toMatchObject({ state: 'running', health: { uptime: 5 } });
+  it('reports running with the liveness body on an alive answer', async () => {
+    const { impl, calls } = jsonFetch(200, LIVENESS);
+    expect(await new TowerClient(opts(impl)).probeHealth()).toEqual({ state: 'running', liveness: LIVENESS });
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/api/liveness']);
   });
 
   it('reports not-running only when every address refused the connection', async () => {
@@ -177,6 +178,147 @@ describe('TowerClient.probeHealth (#1901)', () => {
   it('reports an error status as unresponsive with the status and body', async () => {
     const { impl } = jsonFetch(503, { error: 'BUSY' });
     expect(await new TowerClient(opts(impl)).probeHealth()).toEqual({ state: 'unresponsive', error: 'HTTP 503: BUSY' });
+  });
+});
+
+const LIVENESS = { status: 'alive', version: '3.4.0', schemaVersion: 20, startedAt: '2026-11-26T00:00:00.000Z' };
+
+/**
+ * A Tower as a transport (#1999): each route answers as scripted, a thrown error is a transport
+ * failure, and any other path gets the catch-all every Tower gives a route it does not have (a
+ * plain-text 404, so no error code). Records the paths asked, in order.
+ */
+function towerAt(routes: Record<string, () => Response>) {
+  const asked: string[] = [];
+  const impl = vi.fn(async (url: string) => {
+    const { pathname } = new URL(url);
+    asked.push(pathname);
+    const route = routes[pathname];
+    return route ? route() : new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
+  }) as unknown as typeof fetch;
+  return { impl, asked };
+}
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+const timeout = () => {
+  throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+};
+const refused = () => {
+  throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+};
+
+describe('TowerClient.probeHealth against /api/liveness (#1999)', () => {
+  it('asks only the liveness route of a Tower that has it, never the census behind /health', async () => {
+    const tower = towerAt({ '/api/liveness': () => json(200, LIVENESS), '/health': () => json(200, { status: 'healthy' }) });
+    expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({ state: 'running', liveness: LIVENESS });
+    expect(tower.asked).toEqual(['/api/liveness']);
+  });
+
+  it('does not fall back to /health when the liveness route goes unanswered: a busy Tower gets no heavier probe', async () => {
+    const tower = towerAt({ '/api/liveness': timeout, '/health': () => json(200, { status: 'healthy' }) });
+    expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({ state: 'unresponsive', error: 'Request timeout' });
+    expect(tower.asked).toEqual(['/api/liveness']);
+  });
+
+  it('reports not-running on a refused connection, without asking /health', async () => {
+    const tower = towerAt({ '/api/liveness': refused });
+    expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({ state: 'not-running' });
+    expect(tower.asked).toEqual(['/api/liveness']);
+  });
+
+  it('reports a 200 that is not a liveness body as unresponsive (something else is on the port)', async () => {
+    const tower = towerAt({ '/api/liveness': () => json(200, { hello: 'world' }) });
+    expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({
+      state: 'unresponsive',
+      error: 'answered /api/liveness without a liveness body',
+    });
+    expect(tower.asked).toEqual(['/api/liveness']);
+  });
+
+  it('does not take a 404 that carries a code for a missing route', async () => {
+    const tower = towerAt({ '/api/liveness': () => json(404, { error: 'NOT_FOUND', message: 'nope' }) });
+    expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({
+      state: 'unresponsive',
+      error: 'HTTP 404: nope (NOT_FOUND)',
+    });
+    expect(tower.asked).toEqual(['/api/liveness']);
+  });
+
+  describe('a Tower older than the route', () => {
+    it('falls back to /health on the catch-all 404, and reports running with no liveness body', async () => {
+      const tower = towerAt({ '/health': () => json(200, { status: 'healthy', uptime: 5 }) });
+      expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({ state: 'running', liveness: null });
+      expect(tower.asked).toEqual(['/api/liveness', '/health']);
+    });
+
+    it('falls back to /health on a 401: the route is keyed there, and this client has no key', async () => {
+      const tower = towerAt({
+        '/api/liveness': () => new Response('Unauthorized', { status: 401, headers: { 'Content-Type': 'text/plain' } }),
+        '/health': () => json(200, { status: 'healthy' }),
+      });
+      const client = new TowerClient({ port: 4100, fetchFn: tower.impl });
+      expect(await client.probeHealth()).toEqual({ state: 'running', liveness: null });
+      expect(await client.isRunning()).toBe(true);
+      expect(tower.asked).toEqual(['/api/liveness', '/health', '/api/liveness', '/health']);
+    });
+
+    it('classifies its /health as before: unanswered is unresponsive', async () => {
+      const tower = towerAt({ '/health': timeout });
+      expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({ state: 'unresponsive', error: 'Request timeout' });
+      expect(tower.asked).toEqual(['/api/liveness', '/health']);
+    });
+
+    it('classifies its /health as before: an error status is unresponsive', async () => {
+      const tower = towerAt({ '/health': () => json(503, { error: 'STARTING_UP', message: 'Tower is starting up.' }) });
+      expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({
+        state: 'unresponsive',
+        error: 'HTTP 503: Tower is starting up. (STARTING_UP)',
+      });
+    });
+
+    it('classifies its /health as before: a status other than healthy is unresponsive', async () => {
+      const tower = towerAt({ '/health': () => json(200, { status: 'degraded' }) });
+      expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({
+        state: 'unresponsive',
+        error: 'reported status "degraded"',
+      });
+    });
+
+    it('classifies its /health as before: refused is not-running', async () => {
+      const tower = towerAt({ '/health': refused });
+      expect(await new TowerClient(opts(tower.impl)).probeHealth()).toEqual({ state: 'not-running' });
+    });
+  });
+});
+
+describe('TowerClient.getLiveness (#1999)', () => {
+  it("returns the running Tower's version and schema version", async () => {
+    const tower = towerAt({ '/api/liveness': () => json(200, LIVENESS) });
+    expect(await new TowerClient(opts(tower.impl)).getLiveness()).toEqual({ ok: true, liveness: LIVENESS });
+  });
+
+  it('says unknownRoute for a Tower older than the route', async () => {
+    const tower = towerAt({});
+    expect(await new TowerClient(opts(tower.impl)).getLiveness()).toEqual({ ok: false, error: 'Not found', unknownRoute: true });
+  });
+
+  it('says unanswered when no HTTP answer came, which says nothing about the version', async () => {
+    const tower = towerAt({ '/api/liveness': timeout });
+    expect(await new TowerClient(opts(tower.impl)).getLiveness()).toEqual({ ok: false, error: 'Request timeout', unanswered: true });
+  });
+
+  it('says neither for any other failure', async () => {
+    const tower = towerAt({ '/api/liveness': () => json(500, { error: 'INTERNAL' }) });
+    expect(await new TowerClient(opts(tower.impl)).getLiveness()).toEqual({ ok: false, error: 'INTERNAL' });
+  });
+
+  it('says neither for a 200 that is not a liveness body', async () => {
+    const tower = towerAt({ '/api/liveness': () => json(200, { status: 'healthy' }) });
+    expect(await new TowerClient(opts(tower.impl)).getLiveness()).toEqual({
+      ok: false,
+      error: 'Tower answered 200 without a liveness body',
+    });
   });
 });
 

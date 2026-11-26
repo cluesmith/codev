@@ -125,7 +125,7 @@ async function unresponsivePortMessage(port: number, tower: { error: string; ela
     }
   }
   return [
-    `A process is listening on port ${port} but did not answer /health within ` +
+    `A process is listening on port ${port} but did not answer Tower's liveness probe within ` +
       `${Math.round(tower.elapsedMs / 1000)} s (${tower.error}):`,
     ...(pids.length > 0 ? pids.map((pid) => `  ${describe(pid)}`) : ['  (no listening PID found)']),
     'If the machine is busy, wait and run afx tower start again.',
@@ -273,7 +273,7 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     return;
   }
   if (tower.state === 'unresponsive') {
-    logToFile(`Port ${port} held but /health unanswered (${tower.error}); refusing to start`);
+    logToFile(`Port ${port} held but the liveness probe went unanswered (${tower.error}); refusing to start`);
     fatal(await unresponsivePortMessage(port, tower));
   }
 

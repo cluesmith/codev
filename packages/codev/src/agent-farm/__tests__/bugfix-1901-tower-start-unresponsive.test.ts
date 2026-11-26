@@ -114,7 +114,7 @@ describe('afx tower start against a port it cannot get an answer from (#1901)', 
     expect(daemonSpawn).not.toHaveBeenCalled();
 
     const output = stderr.join('\n');
-    expect(output).toContain(`A process is listening on port ${port} but did not answer /health`);
+    expect(output).toContain(`A process is listening on port ${port} but did not answer Tower's liveness probe`);
     expect(output).toContain(`PID ${child.pid}: `);
     expect(output).toContain('createServer');
     expect(output).toContain('If the machine is busy, wait and run afx tower start again.');

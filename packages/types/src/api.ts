@@ -872,6 +872,27 @@ export interface TowerVersionInfo {
   startedAt: string;
 }
 
+// --- Tower liveness (GET /api/liveness) ---
+
+/**
+ * Response of `GET /api/liveness` (#1999): the probe a client sends before it talks to Tower.
+ * The route does no work (no instance list, no process census, no database read), so it
+ * answers as fast as Tower's event loop does. `/health` keeps the census for the callers that
+ * show it.
+ *
+ * A Tower from before this route answers it with its catch-all 404 (401 to a caller without
+ * the key, as the route is not public there), and that answer is itself the version check.
+ */
+export interface TowerLiveness {
+  status: 'alive';
+  /** Semver of the in-memory Tower process, as `GET /api/version` reports it. */
+  version: string;
+  /** The global.db schema version this Tower migrated to at boot (`GLOBAL_CURRENT_VERSION`). */
+  schemaVersion: number;
+  /** ISO-8601 timestamp of when this Tower process started. */
+  startedAt: string;
+}
+
 // --- Analytics (GET /api/analytics) ---
 
 export interface ProtocolStats {

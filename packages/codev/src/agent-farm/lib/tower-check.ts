@@ -7,6 +7,9 @@
  * start a second Tower while the first was up. Here only a refused connection reads as "not
  * running". Anything else is retried once after a short pause, then reported with the
  * underlying error and no advice to start Tower.
+ *
+ * The probe is `GET /api/liveness`, which does no work (#1999); `/health` is asked only of a
+ * Tower older than that route.
  */
 
 import type { TowerHealthProbe } from './tower-client.js';
@@ -54,7 +57,7 @@ export async function checkTower(
         state: 'unresponsive',
         error: probe.error,
         elapsedMs,
-        message: `Tower did not answer /health (${probe.error}) after ${elapsedMs} ms; it appears to be up, retry`,
+        message: `Tower did not answer its liveness probe (${probe.error}) after ${elapsedMs} ms; it appears to be up, retry`,
       };
     }
   }

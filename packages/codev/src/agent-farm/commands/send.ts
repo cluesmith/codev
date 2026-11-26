@@ -350,8 +350,10 @@ function namesAnArchitectInAWorkspace(to: string): boolean {
  * Such a Tower reads `<workspace>:architect:<name>` with its own parser, as a builder
  * called `architect:<name>`, and answers that it was not found: true of the address it
  * read, and no help to someone who has just upgraded and typed the new form. So when that
- * form comes back not found, the address book is asked. A Tower that has no address book
- * is the older one; a Tower that answers knows the form, and its not-found stands.
+ * form comes back not found, Tower's version is read from `GET /api/liveness` (#1999), the
+ * route that does no work. A Tower without that route is the older one: both first ship
+ * after v3.3.8, so no release has Spec 1940 without the route. A Tower that answers knows the
+ * form, and its not-found stands.
  *
  * Only on that failure, so a send that succeeds, or fails any other way, costs nothing more.
  *
@@ -359,19 +361,14 @@ function namesAnArchitectInAWorkspace(to: string): boolean {
  * that gives no answer to the question at all is busy, not older, and its not-found cannot be
  * judged either way, so that is said instead (#1901).
  */
-async function explainNotFound(
-  client: TowerClient,
-  to: string,
-  result: SendResult,
-  caller: { workspace?: string; from: string },
-): Promise<string | null> {
+async function explainNotFound(client: TowerClient, to: string, result: SendResult): Promise<string | null> {
   if (result.errorCode !== 'NOT_FOUND' || !namesAnArchitectInAWorkspace(to)) return null;
-  const book = await client.getAddressBook(caller);
-  if (book.ok) return null;
-  if (book.unknownRoute) return olderTowerError('does not know an address of the form <workspace>:architect:<name>');
-  if (book.unanswered) {
+  const live = await client.getLiveness();
+  if (live.ok) return null;
+  if (live.unknownRoute) return olderTowerError('does not know an address of the form <workspace>:architect:<name>');
+  if (live.unanswered) {
     return (
-      `Tower did not answer the address-book check (${book.error}) needed to tell whether ${to} is ` +
+      `Tower did not answer the version check (${live.error}) needed to tell whether ${to} is ` +
       `missing or this Tower predates that address form; it appears to be up, retry`
     );
   }
@@ -555,7 +552,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   const gate = (options.retry ?? 0) > 0 ? { retries: 0 } : {};
   let tower = await checkTower(client, gate);
   while (tower.state !== 'running') {
-    const why = tower.state === 'not-running' ? 'Tower is not running' : `Tower did not answer /health (${tower.error})`;
+    const why = tower.state === 'not-running' ? 'Tower is not running' : `Tower did not answer its liveness probe (${tower.error})`;
     if (!(await retry(`${why}; nothing has been sent.`))) {
       fatal(tower.message);
     }
@@ -602,7 +599,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
       }, retry);
 
       if (!result.ok) {
-        const explained = await explainNotFound(client, target!, result, { workspace, from });
+        const explained = await explainNotFound(client, target!, result);
         throw new Error(explained ?? (result.error || 'Unknown error'));
       }
 

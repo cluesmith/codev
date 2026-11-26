@@ -6,7 +6,8 @@
  * in the workspace, and answers that it was not found. The command runs for real here,
  * through the real SDK client, against a transport that answers as that Tower does. It must
  * say the Tower is older and how to restart it, and it must ask the extra question only
- * when a send of the new form has failed that way. (`afx workspace list`, `afx workspace
+ * when a send of the new form has failed that way. The question is Tower's version, from
+ * `GET /api/liveness` (#1999): a Tower without that route is the older one. (`afx workspace list`, `afx workspace
  * name`: `spec-1940-older-tower.test.ts`. `afx whoami`: `spec-1134-whoami.test.ts`.)
  */
 
@@ -40,12 +41,12 @@ function json(status: number, payload: unknown): Response {
 }
 
 /**
- * A Tower, as a transport. `send` and `addressBook` answer the two routes; `/health` is
+ * A Tower, as a transport. `send` and `liveness` answer the two routes; `/health` is
  * healthy; anything else is the catch-all 404 every Tower gives a route it does not have.
  */
 function towerAnswering(routes: {
   send: (to: string) => Response;
-  addressBook?: () => Response;
+  liveness?: () => Response;
 }): Request[] {
   const requests: Request[] = [];
   transport.fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -54,7 +55,7 @@ function towerAnswering(routes: {
     requests.push({ method: init?.method ?? 'GET', path: pathname, body });
     if (pathname === '/health') return json(200, { status: 'healthy' });
     if (pathname === '/api/send') return routes.send(body?.to ?? '');
-    if (pathname === '/api/address-book' && routes.addressBook) return routes.addressBook();
+    if (pathname === '/api/liveness' && routes.liveness) return routes.liveness();
     return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
   }) as typeof fetch;
   return requests;
@@ -75,6 +76,8 @@ function olderTower(): Request[] {
   });
 }
 
+const ALIVE = () => json(200, { status: 'alive', version: '3.4.0', schemaVersion: 20, startedAt: '2026-11-26T00:00:00.000Z' });
+
 /** A Tower of this version, in which that architect does not exist. */
 function thisTowerWithoutThatArchitect(): Request[] {
   return towerAnswering({
@@ -83,7 +86,7 @@ function thisTowerWithoutThatArchitect(): Request[] {
         error: 'NOT_FOUND',
         message: "Architect 'review' not found in workspace 'codev'. Architects there: main. Front door: codev:architect.",
       }),
-    addressBook: () => json(200, { workspaces: [] }),
+    liveness: ALIVE,
   });
 }
 
@@ -131,15 +134,18 @@ describe('Spec 1940: afx send of the new form against a Tower from before it', (
     await expect(send({ builder: 'codev:architect:review', message: 'hello' })).rejects.toMatchObject({ code: 1 });
 
     expect(errors).toEqual([OLDER]);
-    // Asked as the sender, after the send failed.
+    // The probe finds no liveness route and falls back to /health; the version is asked
+    // again after the send failed, and its absence is the answer.
     expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /api/liveness',
       'GET /health',
       'POST /api/send',
-      'GET /api/address-book',
+      'GET /api/liveness',
     ]);
+    expect(requests.map((r) => r.path)).not.toContain('/api/address-book');
   });
 
-  it('leaves a genuine not-found alone: a Tower that has an address book knows the form', async () => {
+  it('leaves a genuine not-found alone: a Tower that answers the liveness route knows the form', async () => {
     const requests = thisTowerWithoutThatArchitect();
 
     await expect(send({ builder: 'codev:architect:review', message: 'hello' })).rejects.toMatchObject({ code: 1 });
@@ -147,7 +153,12 @@ describe('Spec 1940: afx send of the new form against a Tower from before it', (
     expect(errors).toEqual([
       "[error] Architect 'review' not found in workspace 'codev'. Architects there: main. Front door: codev:architect. (NOT_FOUND)",
     ]);
-    expect(requests.map((r) => r.path)).toContain('/api/address-book');
+    expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /api/liveness',
+      'POST /api/send',
+      'GET /api/liveness',
+    ]);
+    expect(requests.map((r) => r.path)).not.toContain('/api/address-book');
   });
 
   it.each([
@@ -164,38 +175,45 @@ describe('Spec 1940: afx send of the new form against a Tower from before it', (
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('not found in workspace');
     expect(errors[0]).not.toContain('older');
-    expect(requests.map((r) => r.path)).not.toContain('/api/address-book');
+    // The probe's one question, and nothing after the send.
+    expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual(['GET /api/liveness', 'GET /health', 'POST /api/send']);
   });
 
-  it('takes only a missing address book for an older Tower: any other failure of that question leaves the not-found', async () => {
+  it('takes only a missing liveness route for an older Tower: any other failure of that question leaves the not-found', async () => {
+    let asked = 0;
     const requests = towerAnswering({
       send: () => json(404, { error: 'NOT_FOUND', message: "Architect 'review' not found in workspace 'codev'." }),
-      addressBook: () => json(500, { error: 'INTERNAL', message: 'database is locked' }),
+      // The probe's answer is alive; the version check after the send fails another way.
+      liveness: () => (asked++ === 0 ? ALIVE() : json(500, { error: 'INTERNAL', message: 'event loop stalled' })),
     });
 
     await expect(send({ builder: 'codev:architect:review', message: 'hello' })).rejects.toMatchObject({ code: 1 });
 
     expect(errors).toEqual(["[error] Architect 'review' not found in workspace 'codev'. (NOT_FOUND)"]);
-    expect(requests.map((r) => r.path)).toContain('/api/address-book');
+    expect(requests.map((r) => r.path)).toEqual(['/api/liveness', '/api/send', '/api/liveness']);
   });
 
   it('asks nothing more when the new form fails some other way', async () => {
     const requests = towerAnswering({
       send: () => json(403, { error: 'REFUSED', message: 'builder x may only address its own spawning architect' }),
+      liveness: ALIVE,
     });
 
     await expect(send({ builder: 'codev:architect:review', message: 'hello' })).rejects.toMatchObject({ code: 1 });
 
     expect(errors).toEqual(['[error] builder x may only address its own spawning architect (REFUSED)']);
-    expect(requests.map((r) => r.path)).not.toContain('/api/address-book');
+    expect(requests.map((r) => r.path)).toEqual(['/api/liveness', '/api/send']);
   });
 
   it('asks nothing more when the send succeeds', async () => {
-    const requests = towerAnswering({ send: () => json(200, { ok: true, resolvedTo: 'review', bodyLength: 5 }) });
+    const requests = towerAnswering({
+      send: () => json(200, { ok: true, resolvedTo: 'review', bodyLength: 5 }),
+      liveness: ALIVE,
+    });
 
     await expect(send({ builder: 'codev:architect:review', message: 'hello' })).resolves.toBe('delivered');
 
     expect(errors).toEqual([]);
-    expect(requests.map((r) => r.path)).toEqual(['/health', '/api/send']);
+    expect(requests.map((r) => r.path)).toEqual(['/api/liveness', '/api/send']);
   });
 });

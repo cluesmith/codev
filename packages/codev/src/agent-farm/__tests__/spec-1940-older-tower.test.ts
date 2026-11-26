@@ -44,7 +44,10 @@ const olderTower = (async (input: Parameters<typeof fetch>[0]) => {
 /** A Tower of this version that has no row for the workspace: a 404 of the route's own. */
 const towerWithoutTheWorkspace = (async (input: Parameters<typeof fetch>[0]) => {
   const { pathname } = new URL(String(input));
-  if (pathname === '/health') return answer(200, 'application/json', JSON.stringify({ status: 'healthy' }));
+  // #1999: this version's Tower answers the liveness probe; `/health` is never asked of it.
+  if (pathname === '/api/liveness') {
+    return answer(200, 'application/json', JSON.stringify({ status: 'alive', version: '3.4.0', schemaVersion: 20, startedAt: '2026-11-26T00:00:00.000Z' }));
+  }
   return answer(
     404,
     'application/json',

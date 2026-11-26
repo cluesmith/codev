@@ -28,7 +28,7 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, TowerLiveness, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
 import {
   getArchitectByName,
   getBuilders,
@@ -154,6 +154,7 @@ import type { IssueSearchItem, IssueSearchResponse } from '@cluesmith/codev-type
 import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
+import { GLOBAL_CURRENT_VERSION } from '../db/migrations.js';
 import { listProcessCensus } from './process-census.js';
 import { containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 import {
@@ -238,6 +239,7 @@ type RouteEntry = (
 
 const ROUTES: Record<string, RouteEntry> = {
   'GET /health':          (_req, res, _url, ctx) => handleHealthCheck(res, ctx),
+  'GET /api/liveness':    (_req, res, _url, ctx) => handleLiveness(res, ctx),
   'GET /api/shellpers/husks': (_req, res, _url, ctx) => handleHuskPreview(res, ctx),
   'POST /api/shellpers/husks/sweep': (_req, res, _url, ctx) => handleHuskSweep(res, ctx),
   'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
@@ -795,6 +797,25 @@ function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx
   res.end(JSON.stringify({ pid: process.pid }), () => {
     requestShutdown('shutdown request');
   });
+}
+
+/**
+ * GET /api/liveness (#1999): the probe every CLI command sends before it talks to Tower.
+ *
+ * It must stay free of work: no instance list, no process census, no database read. Under
+ * load the probe is what tells a busy Tower from a dead one, and `/health`, which does all
+ * three, made a starved event loop slower still. Everything here is fixed at boot. Public
+ * (`isPublicRoute`) like `/health`, which it replaces for that purpose.
+ */
+function handleLiveness(res: http.ServerResponse, ctx: RouteContext): void {
+  const body: TowerLiveness = {
+    status: 'alive',
+    version: ctx.version,
+    schemaVersion: GLOBAL_CURRENT_VERSION,
+    startedAt: ctx.startedAt,
+  };
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
 }
 
 function handleVersion(res: http.ServerResponse, ctx: RouteContext): void {

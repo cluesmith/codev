@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, TowerLiveness, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -185,14 +185,22 @@ export interface TowerHealth {
 }
 
 /**
- * One `/health` probe, classified (#1901). `not-running`: the connection was refused, so
+ * One liveness probe, classified (#1901). `not-running`: the connection was refused, so
  * nothing is listening. `unresponsive`: something accepted the connection but did not answer
  * healthily; `error` carries the reason.
+ *
+ * The probe asks `GET /api/liveness` (#1999). `liveness` is null when the Tower is older than
+ * that route and `/health` answered instead.
  */
 export type TowerHealthProbe =
-  | { state: 'running'; health: TowerHealth }
+  | { state: 'running'; liveness: TowerLiveness | null }
   | { state: 'not-running' }
   | { state: 'unresponsive'; error: string };
+
+/** Whether `body` is a `GET /api/liveness` answer, as far as a client relies on it. */
+function isTowerLiveness(body: unknown): body is TowerLiveness {
+  return isRecord(body) && body.status === 'alive' && typeof body.version === 'string';
+}
 
 /** Issue #1227: a shellper the husk sweep would reap (or has reaped). */
 export interface HuskCandidate {
@@ -494,19 +502,53 @@ export class TowerClient {
   }
 
   /**
-   * Probe `/health` once and say why it failed, not just that it did (#1901). Only a refused
+   * Probe Tower once and say why it failed, not just that it did (#1901). Only a refused
    * connection means nothing is listening; a timeout, a reset, an error status or an unreadable
    * body all come from something that accepted the connection, which under load is usually a
    * live Tower whose event loop is starved. Retrying, and wording the result for a person, is
    * the caller's policy.
+   *
+   * It asks `GET /api/liveness`, which does no work (#1999); `/health` runs a process census
+   * and is the slowest route exactly when this probe matters. A Tower older than the route
+   * answers it with its catch-all 404, or 401 to a client without the key (the route is not
+   * public there), and only then is `/health` asked. A probe that went unanswered is not
+   * retried against `/health`: that would add the heavy route to a Tower already too busy.
    */
   async probeHealth(): Promise<TowerHealthProbe> {
+    const result = await this.request<TowerLiveness>('/api/liveness');
+    if (result.ok && isTowerLiveness(result.data)) return { state: 'running', liveness: result.data };
+    if (result.connectionRefused) return { state: 'not-running' };
+    if (result.status === 0) return { state: 'unresponsive', error: result.error ?? 'no response' };
+    if (isUnknownRoute(result) || result.status === 401) return this.probeLegacyHealth();
+    if (!result.ok) return { state: 'unresponsive', error: `HTTP ${result.status}: ${result.error}` };
+    return { state: 'unresponsive', error: 'answered /api/liveness without a liveness body' };
+  }
+
+  /** The probe against a Tower from before `/api/liveness`: its `/health`, classified as before. */
+  private async probeLegacyHealth(): Promise<TowerHealthProbe> {
     const result = await this.request<TowerHealth>('/health');
-    if (result.ok && result.data?.status === 'healthy') return { state: 'running', health: result.data };
+    if (result.ok && result.data?.status === 'healthy') return { state: 'running', liveness: null };
     if (result.connectionRefused) return { state: 'not-running' };
     if (result.status === 0) return { state: 'unresponsive', error: result.error ?? 'no response' };
     if (!result.ok) return { state: 'unresponsive', error: `HTTP ${result.status}: ${result.error}` };
     return { state: 'unresponsive', error: `reported status ${JSON.stringify(result.data?.status)}` };
+  }
+
+  /**
+   * The running Tower's version and schema version, from the route that does no work (#1999).
+   * `unknownRoute`: the Tower answered with its catch-all 404, so it is older than that route,
+   * and so older than this client. `unanswered`: no HTTP answer at all, which says nothing
+   * about which Tower it is (#1901).
+   */
+  async getLiveness(): Promise<
+    | { ok: true; liveness: TowerLiveness }
+    | { ok: false; error: string; unknownRoute?: true; unanswered?: true }
+  > {
+    const result = await this.request<TowerLiveness>('/api/liveness');
+    if (result.ok && isTowerLiveness(result.data)) return { ok: true, liveness: result.data };
+    const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status} without a liveness body` };
+    if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+    return result.status === 0 ? { ...failure, unanswered: true } : failure;
   }
 
   async isRunning(): Promise<boolean> {

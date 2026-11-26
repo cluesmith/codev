@@ -151,6 +151,9 @@ export function isPublicRoute(method: string, pathname: string): boolean {
 
   if (pathname === '/health') return true;
   if (pathname === '/api/version') return true;
+  // #1999: the cheap probe that replaced `/health` for liveness. Public like `/health`, so a
+  // client without the key can still tell whether Tower is up; it carries what /api/version does.
+  if (pathname === '/api/liveness') return true;
   if (pathname === '/' || pathname === '/index.html') return true;
 
   // Cloud OAuth callback (#1570). cloud.codevos.ai ends registration by
