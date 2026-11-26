@@ -93,3 +93,13 @@
   works from the cloud's 401; the marker half waits for #1871); held counts are computed in
   `servers/overview.ts`. Sending split (outbox/in-process vs end to end) and discovery made its own
   phase: 13 phases now.
+- Contract revision 4 (architect relay, cloud correction; committed alone as 68cff8fe4): a ceiling of
+  600 calls/min per Tower across all /api/peer routes, checked at C's step 4 (made-up query
+  recipients were otherwise unlimited); query 429 refused and never held, message 429 like any 429;
+  "C never answers 200" is about the relay call only; bad PUT body → 400 malformed.
+- Plan review round 2: codex REQUEST_CHANGES (3), claude COMMENT (5); all taken. Notable:
+  `pruneTerminal` can delete a delivered remote row before the 30-day accepted-once window ends, so
+  `peer_accepted` now carries the message's state itself, updated in the same transaction as the
+  mailbox row; the peers Playwright config creates and removes its own temp dirs and refuses live
+  paths; the 1313 held-count suite stays in the default run (it is route-mocked); grant mode flags
+  `--deliver|--hold` named; peer record/outbox prune (never under 30 days).
