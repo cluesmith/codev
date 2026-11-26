@@ -16,7 +16,8 @@ adopters, not one file.
 
 The cost is paid by anyone running Tower against GitHub with several workspaces open. Each
 workspace costs 52 forge concept invocations an hour at idle, each one a `gh` process, plus about
-72 HTTP requests and about 112 GraphQL points. Refresh churn adds more. Thirteen watched workspaces spend more than a quarter of
+72 HTTP requests and about 112 GraphQL points. Refresh churn adds more. Thirteen watched
+workspaces spend more than a quarter of
 the account's hourly budget on the dashboard alone, before the user's own `gh` use, builders and
 CI tooling.
 
@@ -94,9 +95,14 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
    Nested connections use the caps `gh --json` uses today: `labels`, `assignees` and
    `reviewRequests` at 100 each. The search strings carry the qualifiers `gh` adds: `repo:`;
    `type:issue state:closed` for the closed window; `type:pr is:merged` for the merged window.
-   The bundle runs with an explicit **60 s** time limit and a **40 MB** output limit. Those are twice and four times the single-concept defaults, because one bundle carries
-   the work four concepts did under four parallel 30 s / 10 MB limits. Any repository state that
-   fits in today's four calls therefore fits in the bundle.
+   The bundle runs with an explicit **60 s** time limit and a **40 MB** output limit. Those are
+   twice and four times the single-concept defaults, because one bundle carries the work four
+   concepts did under four parallel 30 s / 10 MB limits. This is a sizing
+   rationale, not a guarantee. The common case is one or two `gh` processes, well inside 60 s
+   (today's two-page `issue-list` takes about 2 s). The output limit covers the four sections'
+   combined worst case. A pathological repository whose searches both page to their 1,000 cap
+   runs up to 20 sequential processes and could exceed 60 s; it then fails as a timeout (item
+   6), where four parallel calls might not have.
 
 2. **The `overview-bundle` contract** (a new contract type in the forge contracts module):
    - **Input:** `CODEV_SINCE_DATE`, always set by the caller. It is the start of the 24 h
@@ -142,7 +148,10 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
      on a larger one such as this repository.
    - **HTTP requests** fall 44–62%.
    - **Points** fall modestly at idle, and under churn the points saving all but vanishes.
-     Reducing churn itself is #1650's job.
+     Folding the searches into the invalidation-sensitive bundle takes them from 6 to 60
+     refreshes an hour under churn. Today `invalidate()` never touches them. So on a
+     churn-heavy workspace this project buys fewer invocations, processes and requests, not
+     fewer points, until #1650 narrows what invalidates.
 
 4. **The overview payload is unchanged.** `/api/overview` returns the same `OverviewData` shape.
    The dashboard and VS Code need no change; they simply see fresher 24 h lists.
@@ -181,25 +190,50 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
    - **Everything else is a whole-bundle failure**, propagating `gh`'s stderr and non-zero
      status unchanged. That covers an error with no `path`; an error touching a list field;
      mixed errors; any rate-limit error; a failed issue page; non-JSON stdout; a transport,
-     auth or `gh`-missing failure; a timeout; output overflow; and malformed output. It is
-     handled exactly as a single concept's failure is today: negative cache with the escalating
-     window, per-budget rate-limit suspension with `forgeStatus: 'rate-limited'` and
-     `forgeResetAt`, and stale-within-TTL data served while suspended. Both `errors.prs` and
-     `errors.issues` are populated from the bundle's outcome, with the same text naming the
-     real backend that `describeMissing` produces today (e.g. `gh rate limited until …`).
+     auth or `gh`-missing failure; a timeout; output overflow; and malformed output. It goes
+     through the same per-entry mechanism a single concept's failure uses today. Because one
+     entry now holds four sections, the visible effect is wider (see the residual risk below):
+     - The failing workspace's bundle entry is **replaced by a negative entry**. Its four
+       sections are blank until the escalating failure window elapses; no last-good data is
+       retained across the workspace's own failure. This is today's `dispatch` behaviour,
+       unchanged, and it is what the residual risk below refers to.
+     - A rate-limit error also suspends the `gh` budget, giving `forgeStatus: 'rate-limited'`
+       and `forgeResetAt`.
+     - **Stale data is served only on a suspension caused elsewhere.** While the budget is
+       suspended by some other fetch (another workspace's bundle, or any other `gh`-budget
+       concept), a workspace whose own bundle entry is positive and still inside its TTL keeps
+       being served, even if it has been invalidated. An expired entry reads as empty. This is
+       today's `cachedFetch` suspension path, unchanged.
+
+     Both `errors.prs` and `errors.issues` are populated from the bundle's outcome, with the
+     same text naming the real backend that `describeMissing` produces today (e.g.
+     `gh rate limited until …`).
    - **A bundle with a `null` section is a successful fetch.** It is positively cached for the
      full 180 s TTL and counts as a success for the rate limiter and the failure window. The
      `null` section gets no retry or backoff of its own; it is attempted again on the next
      bundle refresh. It is represented exactly as today's failed concept for that section: a
      `null` search leaves `recentlyClosed` empty (closed) or drops the issue-to-PR links
      (merged), with no `errors` key, because `OverviewData` has none for searches. A `null` list
-     (possible only from a custom override) sets that list's `errors` text. Any `null` section
+     (possible only from a custom override) sets that list's `errors` text. The bundle path
+     supplies accurate text for this case, e.g. `overview-bundle returned no PRs`, never
+     `describeMissing`'s "CLI unavailable", because the CLI ran fine. Any `null` section
      sets `forgeStatus: 'unavailable'`.
-   - **Residual risk, accepted under D2:** a failure GitHub reports for the whole request (a
-     server-side timeout or an error with no path), or the bundle's own 60 s time limit, blanks
-     all four sections until the failure window elapses. Today it would blank only the concept
-     that failed. Approach 3 (a separate searches call) would remove this risk, at the cost
-     recorded under Solution Approaches.
+   - **Residual risk, accepted under D2 (blank on failure):** any whole-bundle failure blanks
+     all four of the failing workspace's sections until the failure window elapses, or for a
+     rate limit until the suspension lifts (up to 15 minutes). Causes include a rate limit, a
+     failure GitHub reports for the whole request (a server-side timeout or an error with no
+     path) and the bundle's own 60 s limit.
+
+     Today the degradation is partial. The four concepts hold separate entries with separate
+     TTLs, so when the lists' refresh fails, the two searches keep showing until their own 600 s
+     TTL expires. Under the bundle the 24 h lists blank along with the open lists. That is a
+     small regression; the 24 h lists are the least critical sections.
+
+     Two alternatives are named for the owner. Approach 3 (a separate searches call) restores
+     today's partial degradation. **Stale-if-error** keeps a workspace's last positive data, and
+     serves it with the rate-limited or unavailable status after a failed refresh, even past
+     its TTL. That would be a new policy for every mode, which #1645 did not adopt: it
+     deliberately shows an expired list as empty. The spec does not adopt it here.
 
 7. **Bundle vs. four calls is decided from configuration, never as a runtime fallback**
    (decision D3). For each workspace, the cache uses the bundle when:
@@ -287,9 +321,12 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
         whole-bundle failure with `gh`'s status and stderr;
       - a failed search follow-up page nulls that section, and a failed issue page fails the
         bundle.
-- [ ] Bundle rate-limited: the budget is suspended, the payload carries `forgeStatus:
+- [ ] Bundle rate-limited: the budget is suspended, and the failing workspace's entry becomes
+      negative, so its sections are blank. Its payload carries `forgeStatus:
       'rate-limited'`, `forgeResetAt`, and `errors.prs`/`errors.issues` matching
-      `gh rate limited until …`, and no constituent concept is spawned. Forty polls at 2.5 s
+      `gh rate limited until …`, and no constituent concept is spawned. A second workspace's
+      positive, within-TTL bundle is still served during the suspension, without a fetch. Forty
+      polls at 2.5 s
       against a permanently rate-limited fake `gh` make one bundle invocation, which is one `gh`
       process because the first request fails, plus one REST identity call. Then nothing until
       the suspension lifts.
@@ -334,6 +371,15 @@ render. A failed list sets its own `errors.prs` or `errors.issues` text.
   with exit 0 (verified 2026-11-25). Values needing placeholder expansion must use `-F`. Values
   taken from returned data, namely page cursors, must use `-f`. `-F` also type-converts numbers,
   booleans and `@file`, which a data-derived string must never be exposed to.
+- **The isolation path rests on verified `gh` behaviour:** when GitHub answers HTTP 200 with a
+  non-empty `errors` array, `gh api graphql` writes the full body (`data` plus `errors`) to
+  stdout, writes `gh: <message>` to stderr and exits 1. This was verified on 2026-11-25 with a
+  query that resolved one issue and failed another: exit 1, stdout carried the partial `data`.
+  The forge layer discards stdout on a non-zero exit, so classification must happen inside the
+  script, before it exits.
+- **Temp files:** if the script stages pages on disk, it uses `mktemp` outside the repository
+  tree, removes them with a `trap` on every exit path, and works under Git Bash. Nothing is
+  ever written into the workspace.
 - **No injection surface:** the query text is a fixed string, and every dynamic value is a
   GraphQL variable. `CODEV_SINCE_DATE` becomes part of a search-query *string*, the one place an
   input enters a query language, so it is validated against the exact timestamp format first.
@@ -433,7 +479,8 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
 - **D2. One bundle at the 180 s list TTL, searches folded in** (Approach 1). Measured basis, from
   Current State and Desired State item 3: per watched workspace-hour, on a repo with more than
   100 open issues, concept invocations go 52 → 20, `gh` processes 52 → 40, requests 72 → 40 and
-  points 112 → 100. On smaller repos: invocations and `gh` processes 52 → 20, points 72 → 60. The 24 h lists become 3× fresher.
+  points 112 → 100. On smaller repos: invocations and `gh` processes 52 → 20, points 72 → 60.
+  The 24 h lists become 3× fresher.
   *Alternatives not taken:* Approach 2, a sections input with the searches kept on 600 s: 86
   points/h (46 on smaller repos), at the cost of a conditional input every override must honour
   and a two-clock cache entry. Approach 3, two concepts, for complete search isolation.
@@ -457,6 +504,9 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
   item 5).
 - **Time and output limits** of 60 s and 40 MB for the bundle (Desired State item 1). The
   alternative was capping the searches below 1,000, which would contradict D3's caps.
+- **Blank on failure** (Desired State item 6). A failed bundle blanks the failing workspace's
+  four sections, as each concept's own failure blanks it today. The alternatives are
+  stale-if-error, and Approach 3 for today's partial degradation.
 
 ### Still open
 
@@ -476,7 +526,8 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
 **Bundle path (GitHub default config)**
 - Invocation and process count: N polls inside one TTL produce 1 bundle invocation (plus 1
   identity), and 1 more after the TTL. That invocation is 1 `gh` process on a fixture with 100
-  or fewer open issues, and 2 on one with more. Invalidation produces at most one refetch per debounce window.
+  or fewer open issues, and 2 on one with more. Invalidation produces at most one refetch per
+  debounce window.
 - Parity: a recorded GraphQL response mapped by the script equals the recorded `gh --json`
   outputs of the four concepts for the same state. Covers bot author, null review decision, team
   reviewer, multiple labels and assignees.
@@ -498,9 +549,14 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
   - a failed issue page 2 gives a whole failure.
 - Positive caching of a bundle with a `null` section: no refetch until the TTL, the limiter
   records a success, and `forgeStatus: unavailable`.
-- Rate limit (stderr `API rate limit exceeded`): suspension, `forgeStatus: rate-limited`,
-  `forgeResetAt` set, `errors.prs` and `errors.issues` text, zero constituent spawns,
-  stale-within-TTL data served.
+- Rate limit (stderr `API rate limit exceeded`) on workspace A's bundle: A's entry becomes
+  negative with blank sections, the budget is suspended, A reports `forgeStatus: rate-limited`
+  with `forgeResetAt` set and `errors.prs`/`errors.issues` text, and no constituent is
+  spawned. During that suspension, workspace B behaves as follows:
+  - a positive, within-TTL bundle (invalidated or not) is still served, with `rate-limited`
+    status;
+  - an expired bundle reads as empty;
+  - in neither case is a fetch dispatched.
 - Non-rate-limit failure (exit 1, gh missing): negative cache with an escalating window, and
   error text naming `gh`.
 - Timeout: a hanging fake `gh` is killed at 60 s, giving a whole failure and a negative cache.
@@ -540,13 +596,13 @@ path, additive to the same concept. If they prefer complete search isolation, Ap
 | Bundle mapping drifts from `gh --json` (bot logins, null review decision, label shape) and the UI changes subtly | Medium | Medium | Fixture parity tests built from real `gh` output; real-`gh` smoke at verification |
 | `-f` used for `{owner}/{repo}` gives silently empty searches | Medium | Medium | Constraint called out; test asserts expansion; smoke checks non-empty results on a repo with recent closures |
 | A path-scoped search error takes down the whole overview | Medium | High | Search-local classification (Desired State item 6) |
-| A whole-request failure or timeout blanks all four sections (residual) | Low | High | Accepted under D2 with Approach 3 named as the remedy; first retry after 60 s; 60 s limit sized for worst-case paging |
+| A whole-request failure or timeout blanks all four sections (residual) | Low | High | Accepted under D2 with Approach 3 named as the remedy; first retry after 60 s; 60 s limit sized for the common case, and a pathological 20-process invocation fails loudly as a timeout rather than hanging |
 | Misclassifying a real failure as search-local masks it | Low | High | Classification requires a path on every error and excludes rate limits; the failed section is explicit `null`; exhaustive classification tests |
 | A project's existing constituent override silently bypassed | Low | High | Eligibility rule (item 7), tests per constituent, doctor states the mode and reason, and discloses the bundle-override case |
 | Hybrid preset (linear/jira) runs the GitHub bundle and shows GitHub issues | Low | High | Presets disable the bundle explicitly; preset test |
 | Runtime fallback doubles spend under a rate limit | Low | High | No runtime fallback (item 7); rate-limit test asserts zero constituent spawns |
 | Data-derived values reach `-F` type conversion or the query text | Low | Medium | Fixed query text, cursors via `-f`, `CODEV_SINCE_DATE` validated; hostile-string tests |
-| Pagination logic in POSIX sh is fiddly | Medium | Low | Bounded caps; fixture tests for `hasNextPage`; same tooling (`gh`, `jq`) as sibling scripts |
+| Pagination and page assembly in POSIX sh is fiddly (temp files, cleanup, Git Bash paths) | Medium | Medium | Bounded caps; fixture tests for `hasNextPage`; temp-file constraint (outside the repo, `trap` cleanup); same tooling (`gh`, `jq`) as sibling scripts; Windows workflow run |
 | Git Bash on Windows mishandles braces or quoting | Low | Medium | Quote all `{…}` values; dispatch the on-demand Windows workflow on the PR branch |
 | GitHub changes GraphQL cost model | Low | Low | Projection counts calls, not points; point figures are labelled as measured on a date |
 
