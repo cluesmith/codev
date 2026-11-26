@@ -553,14 +553,15 @@ export function worktreeNameToRoleId(dirName: string): string | null {
 
   // Task: task-NAvW → builder-task-navw. The whole remainder is the short id:
   // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3;
-  // #1740). Named by buildAgentName, as spawn names the terminal, so an
-  // all-digit id loses its leading zeros the same way (task-0123 → builder-task-123; #1992).
+  // #1740). Named through buildAgentName, as spawn names the terminal, so an
+  // all-digit short id loses its leading zeros the same way (task-0042 →
+  // builder-task-42; #1844).
   const taskMatch = lower.match(SHORT_ID_NAME_TASK);
   if (taskMatch) return buildAgentName('task', taskMatch[1]);
 
-  // Worktree: worktree-foIg → worktree-foig (no builder- prefix). spawnWorktree
-  // names it by hand and keeps leading zeros, so this branch must NOT go through
-  // buildAgentName (worktree-0123 stays worktree-0123; #1992).
+  // Worktree: worktree-foIg → worktree-foig (no builder- prefix). Spawn names
+  // this terminal `worktree-<short id>` directly, not via buildAgentName, so
+  // leading zeros stay.
   const worktreeMatch = lower.match(SHORT_ID_NAME_WORKTREE);
   if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
 
@@ -576,13 +577,13 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   // Generic protocol: experiment-1560[-slug] → builder-experiment-1560 (a
   // numbered spawn), else experiment-AbCd → builder-experiment-abcd, where the
   // whole remainder is the issue-less spawn's short id, '-'/'_' included
-  // (maintain-x_9Q → builder-maintain-x_9q; #1740). Named by buildAgentName,
-  // as spawn names the terminal (maintain-0123 → builder-maintain-123; #1992).
+  // (maintain-x_9Q → builder-maintain-x_9q; #1740). Named through
+  // buildAgentName, as spawn names the terminal, so leading zeros go the same
+  // way (experiment-0042 → builder-experiment-42; #1844).
   const genericMatch = lower.match(/^([a-z]+)-(.+)$/);
   if (genericMatch) {
-    const [, protocol, rest] = genericMatch;
-    const numbered = rest.match(/^(\d+)(?:-|$)/);
-    return buildAgentName('protocol', numbered ? numbered[1] : rest, protocol);
+    const numbered = genericMatch[2].match(/^(\d+)(?:-|$)/);
+    return buildAgentName('protocol', numbered ? numbered[1] : genericMatch[2], genericMatch[1]);
   }
 
   return null;

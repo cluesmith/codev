@@ -1,0 +1,22 @@
+id: bugfix-1844
+title: vscode-agents-view-hides-task-
+protocol: bugfix
+phase: verified
+plan_phases: []
+current_plan_phase: null
+gates:
+  pr:
+    status: approved
+    requested_at: '2026-11-26T22:17:38.296Z'
+    approved_at: '2026-11-26T22:17:43.863Z'
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-25T23:44:24.641Z'
+updated_at: '2026-11-26T22:17:45.947Z'
+pr_history:
+  - phase: pr
+    pr_number: 1993
+    branch: builder/bugfix-1844
+    created_at: '2026-11-26T22:17:36.207Z'
+pr_ready_for_human: false
