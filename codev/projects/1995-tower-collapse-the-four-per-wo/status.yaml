@@ -16,7 +16,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 2
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     build_output: ''
@@ -30,7 +30,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-claude.txt
 started_at: '2026-11-26T01:28:07.091Z'
-updated_at: '2026-11-26T22:31:01.040Z'
+updated_at: '2026-11-26T22:31:10.999Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-26T22:13:27.161Z'
