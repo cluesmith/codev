@@ -86,3 +86,10 @@
   porch's check runs `*.test.ts` only (unit + in-process stand-in/pipeline on injected clocks),
   two-Tower e2e / Playwright / Windows on demand. Harness is phase 2; vectors ship in phase 1;
   migration tested on a backup-API copy of a real global.db in phase 3; Playwright in phase 10.
+- Plan review round 1: codex REQUEST_CHANGES (4), claude COMMENT (7); all taken after checking each
+  against the tree. Notable: the default Playwright config reuses port 4100 (new isolated
+  `playwright.peers.config.ts`); `startTower` can't pre-write cloud-config (harness spawns directly,
+  bugfix-1515 pattern, throwaway HOME); no persisted "deregistered" marker on main (`not-registered`
+  works from the cloud's 401; the marker half waits for #1871); held counts are computed in
+  `servers/overview.ts`. Sending split (outbox/in-process vs end to end) and discovery made its own
+  phase: 13 phases now.
