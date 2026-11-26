@@ -5,10 +5,10 @@ phase: implement
 plan_phases:
   - id: phase_1
     title: Wire contract module and shared test vectors
-    status: in_progress
+    status: complete
   - id: phase_2
     title: Stand-in relay and two-Tower test harness
-    status: pending
+    status: in_progress
   - id: phase_3
     title: Peer storage and the mailbox migration
     status: pending
@@ -42,7 +42,7 @@ plan_phases:
   - id: phase_13
     title: Docs in both trees, the walkthrough end to end, and Windows
     status: pending
-current_plan_phase: phase_1
+current_plan_phase: phase_2
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -72,7 +72,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_1-iter1-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-26T23:02:51.226Z'
+updated_at: '2026-11-26T23:09:18.715Z'
 force_advanced:
   phase: plan
   iteration: 3
@@ -83,3 +83,5 @@ context_refreshes:
   - boundary: enter:implement
     at: '2026-11-26T22:15:50.632Z'
     acknowledged_at: '2026-11-26T22:16:29.099Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-11-26T23:09:18.715Z'
