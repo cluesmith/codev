@@ -1309,6 +1309,8 @@ describe('overview', () => {
         expect(worktreeNameToRoleId(`task-${id}`), `task-${id}`).toBe(buildAgentName('task', id));
         expect(worktreeNameToRoleId(`maintain-${id}`), `maintain-${id}`).toBe(buildAgentName('protocol', id, 'maintain'));
       }
+      expect(worktreeNameToRoleId('task-0123')).toBe('builder-task-123');
+      expect(worktreeNameToRoleId('maintain-0123')).toBe('builder-maintain-123');
       // spawnWorktree names its session `worktree-${shortId}` by hand, zeros kept.
       expect(worktreeNameToRoleId('worktree-0123')).toBe('worktree-0123');
     });
