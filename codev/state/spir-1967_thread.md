@@ -138,8 +138,9 @@
     rejected (the status decides). A discovery answer leaves out any address that fails section 4,
     so one odd workspace name cannot make S refuse the whole answer.
   - Payload duplicate keys are `malformed` at R (the spec says "parses as the kind's schema").
-  - Gotcha: the Write tool turned ` ` escapes in a regex literal into literal U+2028/U+2029
-    (a JS syntax hazard). Fixed; tests build such characters with String.fromCodePoint.
+  - Gotcha: the Write tool, and Bash heredocs, turn a typed backslash-u-2028 escape into the literal
+    character U+2028 (a JS syntax hazard in a regex, and it breaks consult's codex event parser).
+    Fixed in contract.ts; tests build such characters with String.fromCodePoint.
 - Phase 1 landed at acaf1f178; the architect re-verified the 45 verified vectors in Python and posted
   the file to codev-cloud #22. The cloud reads none of the five readings differently. Two
   clarifications folded in (no behaviour change, no revision number, per the architect): the spec
