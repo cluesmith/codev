@@ -281,6 +281,9 @@ listed under "Departures from the Approved Spec".*
   canonical JSON form. R verifies the MAC over the bytes it received, then parses them.
 - All JSON is UTF-8. Every base64url value is RFC 4648 §5 with no padding. Times are epoch
   milliseconds, written as JSON integers no larger than 2^53 − 1. Hashes are lowercase hex.
+- **"Integer" is judged on the parsed value**, not on how the number is written: `1.0` is the
+  integer 1 and `1.7641e12` the integer 1 764 100 000 000, and both pass a rule that asks for an
+  integer (a clarification agreed with the cloud on the shared vectors; no change of behaviour).
 - **Every header this protocol adds starts with `x-codev-peer-`** (g).
 - Receivers ignore fields they do not know, everywhere in this contract. A change of meaning raises
   the protocol version.
@@ -580,7 +583,7 @@ uses the exact bytes:
 | `toTowerId`, `fromTowerId`, `fromOwnerId` | String of 1 to 64 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `_`, `-` |
 | `fromTowerSlug` | String matching `^[a-z0-9][a-z0-9-]{0,62}$`. S's slug at the moment of issue |
 | `fromOwnerHandle` | `null`, or a string matching `^[a-z][a-z0-9-]{0,62}$`. Always `null` until accounts have handles (stage 3) |
-| `fromOwnerEmail` | String of 1 to 254 bytes as UTF-8, containing none of the **excluded code points** listed below the table [r2-C]. Inside the base64url bytes, so a non-ASCII address is never a raw header value (b) |
+| `fromOwnerEmail` | String of 1 to 254 bytes as UTF-8, containing none of the **excluded code points** listed below the table [r2-C], and no unpaired surrogate (a lone U+D800 to U+DFFF written as a `\u` escape is not-verified; agreed with the cloud on the shared vectors, which cannot emit one). Inside the base64url bytes, so a non-ASCII address is never a raw header value (b) |
 | `sameOwner` | JSON boolean. Always `true` in stage 2; a stage 2 Tower answers `false` with `no-grant` (below) |
 | `requestId` | String, a UUID in canonical lower-case form, copied from S's validated header |
 | `issuedAt` | JSON integer, epoch ms, 1 to 2^53 − 1. When C issued the statement |

@@ -140,3 +140,11 @@
   - Payload duplicate keys are `malformed` at R (the spec says "parses as the kind's schema").
   - Gotcha: the Write tool turned ` ` escapes in a regex literal into literal U+2028/U+2029
     (a JS syntax hazard). Fixed; tests build such characters with String.fromCodePoint.
+- Phase 1 landed at acaf1f178; the architect re-verified the 45 verified vectors in Python and posted
+  the file to codev-cloud #22. The cloud reads none of the five readings differently. Two
+  clarifications folded in (no behaviour change, no revision number, per the architect): the spec
+  now says "integer" is judged on the parsed value, and that an unpaired surrogate in
+  fromOwnerEmail is not-verified; the vectors gain two cases (v as 1.0, issuedAt as 1.7641e12, both
+  verified) appended after the unchanged 140. Python cross-check rerun on all 142: agrees.
+  For phase 8: the cloud notes that a statement that is not a JSON object at all ends a send as
+  refused (unsupported-version), not held.
