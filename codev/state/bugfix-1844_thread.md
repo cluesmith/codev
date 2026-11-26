@@ -45,3 +45,20 @@ terminal"). Regression test: `task-0042`, `task-0000`, `experiment-0042`,
 zeros. It fails on main and passes with the fix. A second test pins the issue's own ids
 (`task-S0-L`, `task-_-LM`). That one already passes on main because #1740 fixed them;
 it is regression coverage only.
+
+## PR #1993 review (2026-11-25)
+
+- **codex:** REQUEST_CHANGES. The only issue was that the branch was 33 commits behind
+  main; it called the implementation and tests sound. I merged origin/main (clean, no
+  overlap with my files), then reran tsc and the focused suites.
+- **claude:** APPROVE, with non-blocking notes, all acted on:
+  - Named the numbered-generic change in the PR body: `air-0633-slug` →
+    `builder-air-633`, now in line with the spir/bugfix/pir branches.
+  - Added a literal assertion (`task-0042` → `builder-task-42`), so the test doesn't
+    use `buildAgentName` as the oracle on both sides.
+  - Added a `getOverview` test of the user-visible symptom: `task-0042`, `task-S0-L`
+    and `task-_-LM` with no global.db row, and the active-terminal set as spawn
+    registers it. All three must survive the filter. It fails on main's overview.ts
+    and passes with the fix.
+  - Did not comment on the issue: the reporter is external. I drafted a note for the
+    architect to post instead.
