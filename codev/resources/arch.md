@@ -751,7 +751,8 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/` | Serve Tower dashboard HTML |
-| `GET` | `/health` | Health check (uptime, memory, active projects) |
+| `GET` | `/health` | Health check (uptime, memory, active projects, process census) |
+| `GET` | `/health/live` | Liveness + version, no work done (#1977): what every CLI command's Tower check probes (falls back to `/health` on an older Tower) |
 | `GET` | `/api/workspaces` | List all workspaces with status |
 | `GET` | `/api/workspaces/:enc/status` | Get workspace status (terminals, gates) |
 | `POST` | `/api/workspaces/:enc/activate` | Activate workspace (creates `main` architect terminal) |
@@ -2227,7 +2228,7 @@ consult -m claude spec 42
 **How the key travels**:
 - **CLI / SDK / VS Code extension** read the file directly (possession proves same-OS-user) and present it as the `codev-tower-key` header, or a `codev-key.<KEY>` WebSocket subprotocol token
 - **Browser pages** cannot read files, so Tower injects `window.__CODEV_TOWER_KEY__` into the HTML shells it serves same-origin; those shells strip `Access-Control-Allow-Origin` so a cross-origin fetch can never read the key, and a Host allowlist blocks DNS rebinding
-- **Public allowlist is deliberately narrow**, and every entry exists because a *browser navigation* reaches it and cannot attach a header: `/health`, `/api/version`, the dashboard shell and its static assets, the annotator shell + vendor files (iframe / `<script>` / `<link>` loads), and `GET /api/tunnel/connect/callback` — the cloud OAuth redirect, which is nonce-authenticated instead (single-use, 5-min TTL, mintable only by an authenticated `POST /api/tunnel/connect`; #1570). Everything else under `api/` and `ws/` requires the key. `BRIDGE_MODE` refuses to start without a key at all
+- **Public allowlist is deliberately narrow**, and every entry exists because a *browser navigation* reaches it and cannot attach a header: `/health`, `/health/live`, `/api/version`, the dashboard shell and its static assets, the annotator shell + vendor files (iframe / `<script>` / `<link>` loads), and `GET /api/tunnel/connect/callback` — the cloud OAuth redirect, which is nonce-authenticated instead (single-use, 5-min TTL, mintable only by an authenticated `POST /api/tunnel/connect`; #1570). Everything else under `api/` and `ws/` requires the key. `BRIDGE_MODE` refuses to start without a key at all
 - **Reviewing a carve-out** means enumerating the header-less entry points, not just walking the API surface: #1421's 3-way consult and architect review both walked the routes and still missed the OAuth redirect, 401ing every fresh cloud registration until #1570
 
 **Complementary controls that predate the key** (still in force): `/api/tunnel/*` rejects tunnel-borne requests outright (PR #1374), and `via=tunnel/local` attribution logs every proxied request. The cloud edge (codevos.ai) still owns *remote user* authentication; the local key authenticates *local* actors to their own Tower.

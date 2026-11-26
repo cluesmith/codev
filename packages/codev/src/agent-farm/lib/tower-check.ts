@@ -1,7 +1,7 @@
 /**
  * The one Tower liveness gate every CLI command goes through (#1901).
  *
- * A bare `isRunning()` boolean turned every `/health` failure into "Tower is not running.
+ * A bare `isRunning()` boolean turned every health-probe failure into "Tower is not running.
  * Start it with: afx tower start". Under heavy load a live Tower accepts the connection at
  * once but its starved event loop misses the 10 s request timeout, so commands told people to
  * start a second Tower while the first was up. Here only a refused connection reads as "not
@@ -16,7 +16,7 @@ export const TOWER_RETRY_DELAY_MS = 1000;
 export type TowerCheck =
   | { state: 'running' }
   | { state: 'not-running'; message: string }
-  | { state: 'unresponsive'; message: string; error: string; elapsedMs: number };
+  | { state: 'unresponsive'; message: string; error: string; route: string; elapsedMs: number };
 
 export interface TowerCheckOptions {
   /** The command a "not running" message tells the reader to run. */
@@ -53,8 +53,9 @@ export async function checkTower(
       return {
         state: 'unresponsive',
         error: probe.error,
+        route: probe.route,
         elapsedMs,
-        message: `Tower did not answer /health (${probe.error}) after ${elapsedMs} ms; it appears to be up, retry`,
+        message: `Tower did not answer ${probe.route} (${probe.error}) after ${elapsedMs} ms; it appears to be up, retry`,
       };
     }
   }

@@ -60,7 +60,7 @@ describe('checkTower (#1901)', () => {
     const check = await checkTower(clientWith(fetchFn), { retryDelayMs: 0 });
     expect(check.state).toBe('unresponsive');
     if (check.state !== 'unresponsive') return;
-    expect(check.message).toMatch(/^Tower did not answer \/health \(fetch failed: ECONNRESET\) after \d+ ms; it appears to be up, retry$/);
+    expect(check.message).toMatch(/^Tower did not answer \/health\/live \(fetch failed: ECONNRESET\) after \d+ ms; it appears to be up, retry$/);
     expect(check.message).not.toContain('not running');
     expect(check.message).not.toContain('afx tower start');
     expect(fetchFn).toHaveBeenCalledTimes(2);

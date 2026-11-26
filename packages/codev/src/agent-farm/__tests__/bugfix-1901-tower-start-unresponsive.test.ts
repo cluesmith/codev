@@ -3,7 +3,7 @@
  *
  * The old start probed `/api/status` with a 2 s timeout and, when that missed, decided "port in
  * use but not responding", SIGTERMed every PID on the port and started a new Tower. Under load
- * that PID is the live Tower. Start now probes `/health` through `checkTower`: a refused port is
+ * that PID is the live Tower. Start now probes Tower's liveness route through `checkTower`: a refused port is
  * started on as before; a holder that accepted the connection but did not answer is left alone,
  * named, and the command exits non-zero. Replacing it is `afx tower stop`, which must still work.
  *
@@ -114,7 +114,7 @@ describe('afx tower start against a port it cannot get an answer from (#1901)', 
     expect(daemonSpawn).not.toHaveBeenCalled();
 
     const output = stderr.join('\n');
-    expect(output).toContain(`A process is listening on port ${port} but did not answer /health`);
+    expect(output).toContain(`A process is listening on port ${port} but did not answer /health/live within`);
     expect(output).toContain(`PID ${child.pid}: `);
     expect(output).toContain('createServer');
     expect(output).toContain('If the machine is busy, wait and run afx tower start again.');

@@ -46,6 +46,7 @@ beforeEach(() => {
 describe('isPublicRoute', () => {
   it('allows pre-auth probes and the dashboard shell (GET only)', () => {
     expect(isPublicRoute('GET', '/health')).toBe(true);
+    expect(isPublicRoute('GET', '/health/live')).toBe(true);
     expect(isPublicRoute('GET', '/api/version')).toBe(true);
     expect(isPublicRoute('GET', '/')).toBe(true);
     expect(isPublicRoute('GET', '/index.html')).toBe(true);
@@ -68,6 +69,7 @@ describe('isPublicRoute', () => {
     expect(isPublicRoute('GET', '/api/terminals')).toBe(false);
     expect(isPublicRoute('GET', '/api/overview')).toBe(false);
     expect(isPublicRoute('POST', '/health')).toBe(false);
+    expect(isPublicRoute('POST', '/health/live')).toBe(false);
     expect(isPublicRoute('POST', '/')).toBe(false);
     expect(isPublicRoute('DELETE', '/workspace/ENC/assets/app.js')).toBe(false);
   });

@@ -7,7 +7,7 @@
 import type * as http from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX, TOWER_LIVENESS_ROUTE } from '@cluesmith/codev-types';
 import { matchIdePrefix } from '../lib/ide-prefix.js';
 
 /**
@@ -150,6 +150,7 @@ export function isPublicRoute(method: string, pathname: string): boolean {
   if (method !== 'GET') return false;
 
   if (pathname === '/health') return true;
+  if (pathname === TOWER_LIVENESS_ROUTE) return true;
   if (pathname === '/api/version') return true;
   if (pathname === '/' || pathname === '/index.html') return true;
 
