@@ -457,6 +457,17 @@ describe('OverviewCache mode selection from .codev/config.json (Spec 1647)', () 
     expect(count('overview-bundle')).toBe(2);
   });
 
+  it('a merged PR without a url (optional on its contract) links nothing, in either mode', async () => {
+    const { url: _url, ...mergedWithoutUrl } = MERGED;
+    fake.behaviour['overview-bundle'] = async () => ok(bundle({ recentlyMerged: [mergedWithoutUrl] }));
+    fake.behaviour['recently-merged'] = async () => ok([mergedWithoutUrl]);
+    for (const ws of [workspace('bundled'), workspace('four-call', { 'overview-bundle': null })]) {
+      const data = await new OverviewCache({ now }).getOverview(ws);
+      expect(data.recentlyClosed.map(r => r.id)).toEqual(['41']);
+      expect(data.recentlyClosed[0]).not.toHaveProperty('prUrl');
+    }
+  });
+
   it('the payload is the same in both modes for the same data, key set included', async () => {
     const bundled = await new OverviewCache({ now }).getOverview(workspace('bundled'));
     const fourCall = await new OverviewCache({ now }).getOverview(workspace('four-call', { 'overview-bundle': null }));

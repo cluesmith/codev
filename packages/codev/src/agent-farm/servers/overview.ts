@@ -19,7 +19,7 @@ import {
   parseArea,
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem, OverviewConcept } from '../../lib/github.js';
-import type { OverviewBundleResult } from '../../lib/forge-contracts.js';
+import type { MergedPrItem, OverviewBundleResult } from '../../lib/forge-contracts.js';
 import { ForgeRateLimiter, budgetKeyFor, type RateLimitProbe } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
@@ -1052,7 +1052,7 @@ type SectionOutcomes = [
   FetchOutcome<ForgePR[]>,
   FetchOutcome<ForgeIssueListItem[]>,
   FetchOutcome<ForgeIssueListItem[]>,
-  FetchOutcome<ForgePR[]>,
+  FetchOutcome<MergedPrItem[]>,
 ];
 
 /**
@@ -1072,8 +1072,7 @@ function splitBundle(bundle: FetchOutcome<OverviewBundleResult>): SectionOutcome
     section(b => b.prs),
     section(b => b.issues),
     section(b => b.recentlyClosed),
-    // The merged section is read only for each PR's body, title and url, as in four-call mode.
-    section(b => b.recentlyMerged as ForgePR[] | null),
+    section(b => b.recentlyMerged),
   ];
 }
 
@@ -1092,7 +1091,7 @@ export class OverviewCache {
   private prCache = new Map<string, CacheEntry<ForgePR[]>>();
   private issueCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
   private closedCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
-  private mergedPRCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private mergedPRCache = new Map<string, CacheEntry<MergedPrItem[]>>();
   /** All four sections from one `overview-bundle` call, where configuration selects it (Spec 1647). */
   private bundleCache = new Map<string, CacheEntry<OverviewBundleResult>>();
   private currentUserCache = new Map<string, CacheEntry<string>>();
@@ -1286,7 +1285,8 @@ export class OverviewCache {
       if (mergedPRs) {
         for (const pr of mergedPRs) {
           const linkedIssue = parseLinkedIssue(pr.body || '', pr.title);
-          if (linkedIssue !== null) {
+          // `url` is optional on the recently-merged contract; a PR without one links nothing.
+          if (linkedIssue !== null && pr.url) {
             issueToPrUrl.set(linkedIssue, pr.url);
           }
         }
@@ -1393,7 +1393,7 @@ export class OverviewCache {
       this.cachedFetch<ForgePR[]>(this.prCache, cwd, 'pr-list', LIST_TTL_MS, true),
       this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, cwd, 'issue-list', LIST_TTL_MS, true),
       this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, cwd, 'recently-closed', SEARCH_TTL_MS, false),
-      this.cachedFetch<ForgePR[]>(this.mergedPRCache, cwd, 'recently-merged', SEARCH_TTL_MS, false),
+      this.cachedFetch<MergedPrItem[]>(this.mergedPRCache, cwd, 'recently-merged', SEARCH_TTL_MS, false),
     ]);
   }
 
@@ -1424,9 +1424,7 @@ export class OverviewCache {
     }
     if (rateLimitedUntil !== null) {
       // Suspended: a list still inside its TTL is served stale; an expired one is empty.
-      return Promise.resolve(withinTtl
-        ? { data: entry.data, rateLimitedUntil, backend, reason: entry.reason }
-        : { data: null, rateLimitedUntil, backend });
+      return Promise.resolve({ data: withinTtl ? entry.data : null, rateLimitedUntil, backend });
     }
     if (backend === null || budget === null) {
       return Promise.resolve({ data: null, rateLimitedUntil: null, backend: null });
