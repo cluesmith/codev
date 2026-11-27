@@ -1091,3 +1091,18 @@ Readings, for the architect (neither spec spells these out):
   `--all` case had left.
   As a regression check on the receiver's message path, phase 9's `peer-send.e2e.test.ts`:
   20 of 20 in 59.2 s at load 2.9.
+- **Phase 10 review (iter 1): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** The
+  codex point was taken and nothing was disputed. Response:
+  `1967-phase_10-iter1-rebuttals.md`.
+  - **Taken (codex 1): a query's relay call records its payload size**, as contract section
+    8 requires. A refusal before any call still records null, as a message's does. The new
+    checks fail with the fix removed. Layer B checks the same size at both ends.
+  - **Taken (claude 3):** `shownLines([])` starts its width at 0.
+  - **Answered:**
+    - R's limit counts answered queries only, by the contract's step order. A peer with no
+      grant is therefore bounded by C's per-pair limit, not R's (claude 1).
+    - The query limit reads `deps.now()`, as a message's step 15 does (claude 2).
+    - The limit constant stays in `discovery.ts` (claude 4).
+    - `/api/peer/show` through the `/t/` proxy is intended (claude 5).
+  - **Verified.** Layer A 10 937 passed, 116 skipped, 241.9 s. Layer B discovery 10 of 10
+    in 27.2 s at load 1.2.

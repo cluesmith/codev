@@ -573,10 +573,12 @@ describe('Spec 1967 phase 10: afx peer show at the sending Tower', () => {
         peerSlug: 'devvm',
         messageId: call.requestId,
         toAddress: null,
+        payloadSize: call.payload.length,
         outcome: 'answered',
         reason: null,
       }),
     ]);
+    expect(call.payload.length).toBe(Buffer.byteLength(`{"sentAt":${T0},"what":"addresses"}`));
   });
 
   it('passes on a truncated answer', async () => {
@@ -621,7 +623,7 @@ describe('Spec 1967 phase 10: afx peer show at the sending Tower', () => {
         expect(shown, reason).toMatchObject({ outcome: 'refused', by: 'this-tower', reason, peer: null });
         if (shown.outcome === 'refused') expect(shown.message).toMatch(words);
         expect(s.calls).toEqual([]);
-        expect(s.records()[0]).toMatchObject({ kind: 'query', outcome: 'refused', reason });
+        expect(s.records()[0]).toMatchObject({ kind: 'query', outcome: 'refused', reason, messageId: null, payloadSize: null });
       }
       s.db.close();
       s = new Sending();
@@ -738,7 +740,13 @@ describe('Spec 1967 phase 10: afx peer show at the sending Tower', () => {
       await s.show();
       await s.show();
       const rows = s.records();
-      expect(rows[0]).toMatchObject({ kind: 'query', outcome: 'unavailable', reason: 'tower-offline', messageId: s.calls[0].requestId });
+      expect(rows[0]).toMatchObject({
+        kind: 'query',
+        outcome: 'unavailable',
+        reason: 'tower-offline',
+        messageId: s.calls[0].requestId,
+        payloadSize: s.calls[0].payload.length,
+      });
       expect(rows[1]).toMatchObject({ aggregate: true, count: 2, outcome: 'refused', reason: 'rate-limited', peerTowerId: DEVVM });
     });
   });
@@ -922,6 +930,7 @@ describe('Spec 1967 phase 10: GET /api/peer/show and afx peer show', () => {
     await peerShow({ tower: 'devvm' }, deps);
     expect(printed).toEqual(['afx://devvm/codev:architect:local    live', 'afx://devvm/codev:builder-spir-1940  not live']);
     expect(shownLines([{ address: 'afx://devvm/codev:architect:local', live: true }])).toEqual(['afx://devvm/codev:architect:local  live']);
+    expect(shownLines([])).toEqual([]);
   });
 
   it('afx peer show: nothing to message, and a trimmed answer, say so', async () => {

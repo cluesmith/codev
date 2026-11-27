@@ -411,8 +411,9 @@ export class Sender {
       this.showRefused({ reason: 'address', message: `'${tower}' is this Tower. What runs here: afx workspace list` });
     if (this.deps.registration()?.towerName === tower) return self();
 
+    // A refusal before any relay call is made records no payload, as a message's does.
     const refuse = (refusal: Refusal, peer: PeerNamed | null = null): PeerShowResult => {
-      this.recordQuery(peer?.towerId ?? null, tower, null, 'refused', refusal.reason);
+      this.recordQuery(peer?.towerId ?? null, tower, null, null, 'refused', refusal.reason);
       return this.showRefused(refusal, peer);
     };
 
@@ -443,7 +444,7 @@ export class Sender {
       return refuse(refusal, peer);
     }
     const answer = call.answer;
-    this.recordQuery(peer.towerId, peer.name, queryId, answer.outcome, answer.reason);
+    this.recordQuery(peer.towerId, peer.name, queryId, payload.bytes.length, answer.outcome, answer.reason);
 
     // An answer under a registration since replaced came through the cloud this Tower has left.
     const current = this.deps.registration();
@@ -481,12 +482,22 @@ export class Sender {
     return { outcome: 'refused', by: 'this-tower', reason: refusal.reason, message: refusal.message, retryAfterSec: null, peer };
   }
 
-  /** A query in the record: refused here, or its relay call and the answer. Its failure never changes the answer. */
-  private recordQuery(peerTowerId: string | null, peerSlug: string, queryId: string | null, outcome: ClassifiedAnswer['outcome'], reason: string | null): void {
+  /**
+   * A query in the record: refused here, or its relay call, with the payload's size, and the
+   * answer (contract section 8). Its failure never changes the answer.
+   */
+  private recordQuery(
+    peerTowerId: string | null,
+    peerSlug: string,
+    queryId: string | null,
+    payloadSize: number | null,
+    outcome: ClassifiedAnswer['outcome'],
+    reason: string | null,
+  ): void {
     try {
       recordOutbound(
         this.deps.db(),
-        { at: this.deps.now(), kind: 'query', peerTowerId, peerSlug, messageId: queryId, fromAddress: null, toAddress: null, payloadSize: null },
+        { at: this.deps.now(), kind: 'query', peerTowerId, peerSlug, messageId: queryId, fromAddress: null, toAddress: null, payloadSize },
         outcome,
         reason,
       );

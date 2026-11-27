@@ -406,7 +406,7 @@ export interface PeerShowOptions extends PeerPortOption {
 
 /** One address a line, ready to paste, then whether its agent has a live terminal. */
 export function shownLines(addresses: readonly PeerShownAddress[]): string[] {
-  const width = Math.max(...addresses.map((a) => a.address.length));
+  const width = Math.max(0, ...addresses.map((a) => a.address.length));
   return addresses.map((a) => `${a.address.padEnd(width)}  ${a.live ? 'live' : 'not live'}`);
 }
 

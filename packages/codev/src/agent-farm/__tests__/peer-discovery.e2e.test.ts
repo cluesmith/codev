@@ -54,6 +54,7 @@ interface RecordRow {
   peer_tower_id: string | null;
   message_id: string | null;
   to_address: string | null;
+  payload_size: number | null;
   outcome: string;
   reason: string | null;
 }
@@ -261,5 +262,8 @@ describe('Spec 1967 phase 10: afx peer show across Towers, end to end', () => {
     expect(outbound).toMatchObject({ direction: 'outbound', kind: 'query', peer_tower_id: b.towerId, to_address: null, outcome: 'answered', reason: null });
     expect(inbound).toMatchObject({ direction: 'inbound', kind: 'query', peer_tower_id: a.towerId, to_address: null, outcome: 'answered', reason: null });
     expect(inbound.message_id).toBe(outbound.message_id);
+    // The query's payload, `{"sentAt":…,"what":"addresses"}`, as sent and as received.
+    expect(outbound.payload_size).toBeGreaterThan(0);
+    expect(inbound.payload_size).toBe(outbound.payload_size);
   });
 });
