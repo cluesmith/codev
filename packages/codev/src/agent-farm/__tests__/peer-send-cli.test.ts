@@ -182,6 +182,9 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
     ['peer', 'remote-off', 'Refused by devvm: remote messaging is off there.'],
     ['peer', 'no-grant', 'Refused by devvm: mbp has no grant there for codev:architect:local. On devvm: afx peer grant mbp codev:architect:local'],
     ['cloud', 'peer-unsupported', 'Refused by Codev Cloud: devvm does not speak remote messaging. Upgrade Codev on devvm.'],
+    // A fresh send refused for rate, from either source (C4).
+    ['peer', 'rate-limited', 'Refused by devvm: mbp has sent it too many messages this minute; try again in 55 s.'],
+    ['cloud', 'rate-limited', 'Refused by Codev Cloud: too many messages from this Tower; try again in 40 s.'],
   ])('prints a refusal by %s (%s) in its own words, and exits non-zero', async (refusedBy, reason, message) => {
     towerAnswering({ send: () => refused(refusedBy, reason, message) });
 

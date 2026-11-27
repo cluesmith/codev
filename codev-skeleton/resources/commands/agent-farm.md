@@ -740,7 +740,7 @@ and `afx peer revoke` only narrow access and need nothing.
 | Command | What it does |
 |---|---|
 | `afx peer list` | The switch, then each of your other Towers: online or not (a hint, not a promise), and what it may message here. It works while the switch is off, so you can see what turning it on involves. A mark on a peer says it is not verifying this Tower's messages, that a clock is out of range, or that Codev Cloud fails its messages; a note says why a list is not a fresh one. |
-| `afx peer show <tower>` | Asks that Tower what runs there that this Tower may message, answered from its grants: one address a line, ready to paste into `afx send`, marked `live` or `not live`. An offline Tower, or one with its switch off, is refused; a query is never held. |
+| `afx peer show <tower>` | Asks that Tower what runs there that this Tower may message, answered from its grants: one address a line, ready to paste into `afx send`, marked `live` or `not live`. Only workspaces running there are listed: a stopped workspace is not, because a message cannot reach it until it starts; an agent of a running workspace with no live terminal is `not live`, and mail for it is held there. An offline Tower, or one with its switch off, is refused; a query is never held. |
 | `afx peer on` | Turns remote messaging on, and tells Codev Cloud. |
 | `afx peer off` | Turns it off: this Tower sends nothing to other Towers and accepts nothing. Mail from other Towers held here moves to held for release; mail waiting here for a peer stays, and is not sent while the switch is off. |
 | `afx peer grants [tower]` | This Tower's grants, or one Tower's. |
