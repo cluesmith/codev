@@ -36,6 +36,7 @@ export const scriptTestTimeoutMs = process.platform === 'win32' ? 120_000 : 30_0
 
 const FAKE_GH = `#!/bin/sh
 dir="$(dirname "$0")"
+printf '%s\\n' "start pid=$$ args=$1 $2" >> "$dir/log"
 # The overview cache runs several gh processes at once. Each call claims the lowest free
 # number by creating its directory: mkdir is atomic, so no two calls share a number and the
 # numbers have no gaps. (A lock around a read-modify-write of a count file lost a call
@@ -50,6 +51,8 @@ until mkdir "$dir/call.$n" 2>/dev/null; do
 done
 printf '%s\\000' "$@" > "$dir/call.$n/argv"
 echo "$$" > "$dir/call.$n/pid"
+# One appended line per invocation, for a failed call-count assertion's message.
+printf '%s\\n' "claimed pid=$$ n=$n 0=$0" >> "$dir/log"
 key=
 case "$1 $2" in
   'pr list') key=pr-list; for a in "$@"; do [ "$a" = merged ] && key=recently-merged; done ;;
@@ -130,7 +133,9 @@ export class FakeGh {
   /** What a failed call-count assertion needs: violations and the calls recorded so far. */
   diagnosis(extra: Record<string, unknown> = {}): string {
     const calls = fs.readdirSync(this.dir).filter(name => name.startsWith('call.')).sort();
-    return JSON.stringify({ ...extra, violations: this.violations(), calls });
+    const logFile = path.join(this.dir, 'log');
+    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').trim().split('\n') : [];
+    return JSON.stringify({ ...extra, violations: this.violations(), calls, log });
   }
 
   route(key: string, r: Route): void {
