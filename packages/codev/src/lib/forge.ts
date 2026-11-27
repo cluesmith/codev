@@ -251,6 +251,8 @@ export function resolveOverviewPlan(forgeConfig?: ForgeConfig | null): OverviewP
 
   const bundleSource = sources.get('overview-bundle');
   if (bundleSource === 'disabled') {
+    // Only a project null or a preset can disable it, so a missing provider means the
+    // project's own null; that arm exists for type narrowing and is otherwise unreachable.
     const provider = forgeConfig?.provider;
     const cause: FourCallCause = forgeConfig?.['overview-bundle'] === null || provider === undefined
       ? { kind: 'bundle-disabled' }

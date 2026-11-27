@@ -150,9 +150,13 @@ describe('doctor overview line text (Spec 1647)', () => {
   it.each<[ForgeConfig | null, string]>([
     [null, 'bundled'],
     [{ 'overview-bundle': 'b', 'issue-list': 'i' }, 'bundled (overview-bundle override; bypasses the issue-list override)'],
+    [{ 'overview-bundle': 'b', 'recently-merged': null },
+      'bundled (overview-bundle override; bypasses the disabled recently-merged)'],
     [{ 'overview-bundle': 'b', 'pr-list': 'p', 'issue-list': 'i', 'recently-merged': null },
       'bundled (overview-bundle override; bypasses the pr-list and issue-list overrides and the disabled recently-merged)'],
     [{ 'issue-list': 'i' }, 'four calls: issue-list overridden'],
+    [{ 'pr-list': 'p', 'issue-list': 'i', 'recently-closed': 'c' },
+      'four calls: pr-list, issue-list and recently-closed overridden'],
     [{ 'recently-merged': null }, 'four calls: recently-merged disabled'],
     [{ 'pr-list': 'p', 'issue-list': 'i', 'recently-closed': null, 'recently-merged': null },
       'four calls: pr-list and issue-list overridden, recently-closed and recently-merged disabled'],
@@ -204,5 +208,22 @@ describe('OverviewCache reads the projected TTLs (Spec 1647)', () => {
     clock = start + SEARCH_TTL_MS;
     await cache.getOverview(tmpDir);
     expect(count('recently-closed')).toBe(2);
+  });
+
+  it('an invalidated pr-list refetches at exactly INVALIDATE_DEBOUNCE_MS (the churn projection)', async () => {
+    const cache = new OverviewCache({ now: () => clock });
+    const start = clock;
+    await cache.getOverview(tmpDir);
+    clock = start + 1;
+    cache.invalidate();
+
+    clock = start + INVALIDATE_DEBOUNCE_MS - 1;
+    await cache.getOverview(tmpDir);
+    expect(count('pr-list')).toBe(1);
+
+    clock = start + INVALIDATE_DEBOUNCE_MS;
+    await cache.getOverview(tmpDir);
+    expect(count('pr-list')).toBe(2);
+    expect(INVALIDATE_DEBOUNCE_MS).toBeLessThan(LIST_TTL_MS); // the refetch is invalidation's, not the TTL's
   });
 });
