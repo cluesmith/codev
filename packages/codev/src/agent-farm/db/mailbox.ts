@@ -387,7 +387,8 @@ export function release(db: Database.Database, id: string, now: number = Date.no
   return db.transaction(() => {
     const changed = db
       .prepare(
-        `UPDATE mailbox SET release_hold = 0, updated_at = ? WHERE id = ? AND status = 'held' AND release_hold = 1 ${RETURNING_CHANGED}`
+        `UPDATE mailbox SET release_hold = 0, updated_at = ?
+         WHERE id = ? AND status = 'held' AND release_hold = 1 AND remote_tower_id IS NOT NULL ${RETURNING_CHANGED}`
       )
       .all(now, id) as ChangedRow[];
     mirrorChanged(db, changed, now);
@@ -723,7 +724,9 @@ export function dismissHeldWithKey(
 ): number {
   const info = db
     .prepare(
-      "UPDATE mailbox SET status = 'dismissed', release_hold = 0, updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
+      // A remote row never has a supersede_key; the last clause says so in the statement too,
+      // which is why this writer needs no accepted-once mirror (Spec 1967).
+      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held' AND remote_tower_id IS NULL"
     )
     .run(now, now, workspacePath, supersedeKey);
   return info.changes;
@@ -811,7 +814,8 @@ export function supersede(
 ): DbMailbox {
   const run = db.transaction(() => {
     db.prepare(
-      "UPDATE mailbox SET status = 'superseded', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
+      // Local rows only, as for dismissHeldWithKey: no remote row is ever superseded (Spec 1967).
+      "UPDATE mailbox SET status = 'superseded', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held' AND remote_tower_id IS NULL"
     ).run(now, now, workspacePath, supersedeKey);
     return enqueue(db, { ...input, workspacePath, supersedeKey }, now);
   });

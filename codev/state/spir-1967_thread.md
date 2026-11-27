@@ -289,9 +289,9 @@
     this cloud stated a relay" memory across a restart if it wants it.
   - `peer_outbox.seq` is acceptance order; `to_address` is stored for `afx inbox` and the
     record without parsing the payload.
-  - Remote rows need a non-null initial reason (`RemoteEnqueueInput.reason: MailboxReason`):
-    a `held` answer must carry one. **Phase 6** passes the one it would answer if its gate
-    attempt could not start (`busy`).
+  - ~~Remote rows need a non-null initial reason; phase 6 passes `busy`.~~ **Superseded in
+    review round 1 (below): phase 6 inserts with `reason: null`;** a duplicate is told `busy`
+    from `peer_accepted` until the first gate attempt sets the real reason.
   - The mirror is derived from the row's post-image (`UPDATE … RETURNING`), so the mapping lives
     in one place (`acceptedStateOf` via `reportedReason`), and the mirror statement is guarded
     (`state IS NOT ? OR reason IS NOT ?`), so a detail-only move or a no-op rewrites nothing.
@@ -349,3 +349,11 @@ store throws on an unknown switch state or a non-integer protocol, so raw cloud 
 a whole refresh); **phase 12** re-checks that the dashboard badge (which excludes held-for-release
 rows) and its popover list (which includes them) agree once phases 11 and 12 land.
 Layer A wall time is in the phase 3 commit: 45 tests, 1.36 to 1.50 s over three runs; now 51.
+
+### Phase 3, review round 2 (codex APPROVE, claude APPROVE)
+
+Both approved. Claude's three minor notes were cheap, so I took them before advancing:
+`dismissHeldWithKey` and `supersede` now say `AND remote_tower_id IS NULL` in SQL (and the
+first no longer sets `release_hold`, which a local row never carries), `release()` says
+`AND remote_tower_id IS NOT NULL` like `holdForRelease()`, and the superseded phase 6 note
+above is struck through. A test breaks both invariants by hand and finds neither row reached.

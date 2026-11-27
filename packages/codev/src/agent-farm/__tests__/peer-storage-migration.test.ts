@@ -778,6 +778,23 @@ describe('invariants of remote rows', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM mailbox WHERE remote_tower_id IS NOT NULL AND status != 'held'").get()).toEqual({ n: 0 });
     expect(acceptedOf(db, remote)).toMatchObject({ state: 'held', updatedAt: T0 });
   });
+
+  it('the key-based writers and release name their side in SQL, so a broken row still is not reached', () => {
+    const db = freshDb();
+    // Break the invariants by hand: a remote row with a key, a local row held for release.
+    const remote = addRemote(db);
+    db.prepare('UPDATE mailbox SET supersede_key = ? WHERE id = ?').run('cron-task', remote.id);
+    const local = mailbox.enqueue(db, { workspacePath: WS, toAgent: 'main', body: 'b', formattedMessage: 'f', reason: 'busy' }, T0);
+    db.prepare('UPDATE mailbox SET release_hold = 1 WHERE id = ?').run(local.id);
+
+    expect(mailbox.dismissHeldWithKey(db, WS, 'cron-task', T0 + 1)).toBe(0);
+    mailbox.supersede(db, WS, 'cron-task', { workspacePath: WS, toAgent: 'main', body: 'b2', formattedMessage: 'f2' }, T0 + 2);
+    expect(mailboxRow(db, remote.id)).toMatchObject({ status: 'held' });
+    expect(acceptedOf(db, remote)).toMatchObject({ state: 'held', updatedAt: T0 });
+
+    expect(mailbox.release(db, local.id, T0 + 3)).toBe(false);
+    expect(mailboxRow(db, local.id)).toMatchObject({ status: 'held', release_hold: 1 });
+  });
 });
 
 describe('retention', () => {
@@ -1077,8 +1094,8 @@ describe('structure: every mailbox writer is accounted for', () => {
   const NOT_MIRRORED: Record<string, string> = {
     markEscalated: 'the escalated flag only',
     markEscalatedDelivered: 'the escalated flag only',
-    dismissHeldWithKey: 'never reaches a remote row: those have no supersede_key',
-    supersede: 'never reaches a remote row: those have no supersede_key',
+    dismissHeldWithKey: 'local rows only (remote_tower_id IS NULL in its statement); remote rows have no supersede_key',
+    supersede: 'local rows only (remote_tower_id IS NULL in its statement); remote rows have no supersede_key',
     pruneTerminal: 'deletes the row; peer_accepted outlives it by design',
   };
 
