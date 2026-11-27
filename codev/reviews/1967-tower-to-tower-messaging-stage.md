@@ -3,6 +3,21 @@
 *Started during implementation to hold findings as they are ruled on; the review phase completes
 it.*
 
+## Readings neither spec states
+
+- **A re-registration drops the cached peer list (phase 7; architect ruling, 2026-11-27T06:36Z).**
+  - **What drops it.** When this Tower's registration changes its server URL or its Tower id,
+    three things are dropped before anything reads them: the cached peer list, its former names
+    and the relay evidence.
+  - **What keeps it.** A new key for the same Tower on the same cloud, as `afx tower connect
+    --reauth` gives, keeps all three.
+  - **What stays regardless.** Grants and the switch stay, because a person set them.
+  - **The mechanism.** `peer_settings.listing_scope`, `forgetListingUnlessFor`, and
+    `PeerList.scoped()`.
+  - **The ruling.** Neither spec states this. The ruling is the architect's, not the owner's;
+    the owner has been told and may overrule. The wire contract does not change, so nothing goes
+    to the cloud side.
+
 ## Known residuals
 
 - **A cloud-supplied reason can reach the status (phase 5, architect ruling 2026-11-27T03:36Z).**

@@ -822,3 +822,15 @@ Surprises:
     error already in `tower-tunnel.test.ts`, in its `maskApiKey` mock.
   - **Carried to phase 8 (claude).** The outbox must tie a relay answer to the registration
     its call was made under. `CloudClient.relay` has no production caller in phase 7.
+- **Porch force-advanced phase 7** after the third review round, at its 3-iteration ceiling.
+  Consult never re-reviewed the iteration 3 fix (`3cd856ef1`). I told the architect, who read
+  its source diff, ran the three test files it touches (86 passed) and found nothing to change
+  (main, 2026-11-27T06:36Z).
+- **Architect ruling (main, 2026-11-27T06:36Z) on a re-registration: it stands as built.**
+  - A changed server URL or Tower id drops the cached list, its former names and the relay
+    evidence.
+  - A new key alone keeps them.
+  - Grants and the switch stay, because a person set them.
+  - This is the architect's ruling, not the owner's; the owner has been told and may overrule.
+  - It is recorded in the review document as a reading neither spec states. The wire contract
+    does not change, so nothing goes to the cloud side.
