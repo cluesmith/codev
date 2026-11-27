@@ -151,6 +151,10 @@ Verifies that all required dependencies are installed and properly configured:
 - Nothing reaps these automatically, so doctor surfaces each one together with the exact `rm -rf` command and leaves the decision to you. It never deletes anything.
 - Backups younger than 7 days are listed but not counted as warnings; the section is omitted entirely when there are none.
 
+**Forge Concepts (inside a project):**
+- Every forge concept with its source (`default`, `preset`, `override` or `disabled`) and whether the executable it needs is installed.
+- An informational `overview path` line, never a warning. It says whether Tower fetches this workspace's overview lists in one `overview-bundle` call (`bundled`) or in four calls, and why. It also gives the forge calls per hour that path projects for one watched workspace (`~20` bundled, `~52` on four calls). That is the idle steady state, a floor that invalidation can raise. Nothing is probed, and other workspaces are not counted.
+
 **Exit Codes:**
 - `0` - All OK or warnings only
 - `1` - Required dependencies missing

@@ -23,6 +23,9 @@ import type { MergedPrItem, OverviewBundleResult } from '../../lib/forge-contrac
 import { ForgeRateLimiter, budgetKeyFor, type RateLimitProbe } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
+import {
+  LIST_TTL_MS, SEARCH_TTL_MS, USER_TTL_MS, INVALIDATE_DEBOUNCE_MS, FAILURE_WINDOW_MIN_MS, FAILURE_WINDOW_MAX_MS,
+} from './overview-budget.js';
 import type {
   PlanPhase,
   OverviewBuilder,
@@ -1059,18 +1062,6 @@ export interface OverviewCacheOptions {
   /** Reset probe run once per fresh suspension (Tower passes the gh probe). */
   probe?: RateLimitProbe;
 }
-
-/** Open lists: what porch/VS Code invalidation refreshes. */
-const LIST_TTL_MS = 180_000;
-/** The two 24 h searches: invalidation never touches these. */
-const SEARCH_TTL_MS = 600_000;
-/** GitHub identity is session-stable. */
-const USER_TTL_MS = 3_600_000;
-/** A list refetches at most once per minute per workspace because of invalidation. */
-const INVALIDATE_DEBOUNCE_MS = 60_000;
-/** Failure window: 60 s, doubling per window (not per failed command) to 15 min. */
-const FAILURE_WINDOW_MIN_MS = 60_000;
-const FAILURE_WINDOW_MAX_MS = 15 * 60_000;
 
 export class OverviewCache {
   private prCache = new Map<string, CacheEntry<ForgePR[]>>();

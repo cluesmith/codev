@@ -267,3 +267,32 @@ Claude's non-blocking notes:
   `getForgeCommand`'s existing treatment of an empty override for every concept, not new here.
 - Noted for the PR body: a failed invalidation-driven refresh keeps serving still-fresh open lists
   with `forgeStatus: 'ok'` is the owner ruling, pinned by its own test.
+
+## 2026-11-27 — Phase 4 projection_doctor_docs: built
+- `servers/overview-budget.ts` (new, no imports) owns `LIST_TTL_MS`, `SEARCH_TTL_MS`, `USER_TTL_MS`,
+  `INVALIDATE_DEBOUNCE_MS`, `FAILURE_WINDOW_MIN_MS/MAX_MS` and `projectHourlyForgeCalls(path, ttls)`:
+  bundle = 3600 s / LIST_TTL = 20; four-call = 2 × 20 + 2 × 3600 s / SEARCH_TTL = 52 (identity
+  excluded). `overview.ts` imports them; the ride-along age stays derived (`SEARCH_TTL_MS -
+  LIST_TTL_MS`), no new constant.
+- `codev doctor`: after the concept rows, one informational row,
+  `○ overview path        bundled: ~20 forge calls/h per watched workspace (idle steady state, a floor that invalidation can raise)`,
+  or `four calls (<resolveOverviewPath reason>): ~52 …`. Never a warning; no rate_limit probe, no
+  cross-workspace total. The two stale "all 18 concepts" comments are now "every known concept".
+- Tests: `spec-1995-overview-budget.test.ts` (5: defaults, doubled LIST_TTL halves the bundle,
+  changed SEARCH_TTL moves only four-call, the module imports nothing, overview.ts defines none of
+  the TTLs). **Added beyond the plan:** an idle-hour test in the cache harness on both paths asserting
+  the real call count equals `projectHourlyForgeCalls(path)`, so the projection is pinned to cache
+  behaviour, not only to arithmetic. `doctor.test.ts`: the forge mock passes the real
+  `resolveOverviewPath` through, and the three spec-19 cases run the real `resolveAllConcepts`
+  (default github, gitlab, an `issue-list` override). The hybrid block's `runDoctor` moved to file
+  scope to share it; the chalk mock gained `cyan` (the override row uses it, no test had hit it).
+- By hand, worktree build: this repo → bundled, 20/h; scratch `provider: gitlab` →
+  `overview-bundle disabled`, four calls (provider gitlab disables overview-bundle), 52/h; scratch
+  `issue-list` override → four calls (forge config overrides issue-list), 52/h. No overview warning.
+- Docs: forge.md gains a "Tower Overview" section (inputs, conformance incl. `windowsError`, when
+  Tower uses it, disabled on every non-GitHub preset, override/disable, hybrid note, gh ≥ 2.0.0 +
+  jq, user-only reviewRequests), the any-layer null note under "Disabling Concepts", and a real
+  doctor example in place of the stale one (it showed a format doctor no longer prints).
+  arch.md: 21 concepts, the overview path note, the TTL module as the single cadence source, and the
+  key-wise forge merge. codev.md + skeleton mirror: a "Forge Concepts" doctor block. Re-grepped
+  codev/, codev-skeleton/, src for stale concept counts: none.

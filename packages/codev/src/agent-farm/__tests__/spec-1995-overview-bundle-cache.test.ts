@@ -56,6 +56,7 @@ vi.mock('../db/index.js', async (importOriginal) => {
 });
 
 import { OverviewCache } from '../servers/overview.js';
+import { projectHourlyForgeCalls } from '../servers/overview-budget.js';
 
 // =============================================================================
 // Fixtures
@@ -292,6 +293,22 @@ describe('Spec 1995 — bundle path cadence', () => {
     } finally {
       fs.rmSync(other, { recursive: true, force: true });
     }
+  });
+});
+
+// =============================================================================
+// Projection (18): the cache spends what doctor reports
+// =============================================================================
+
+describe('Spec 1995 — an idle hour spends exactly projectHourlyForgeCalls (18)', () => {
+  it.each([['bundle', BUNDLE], ['four-call', FOUR_CALL]] as const)('%s path', async (kind, overviewPath) => {
+    fake.path = overviewPath;
+    const cache = newCache();
+    await cache.getOverview(ws);
+    await pollUntil(cache, HOUR - POLL);
+
+    const listCalls = fake.calls.filter(c => c.concept !== 'user-identity');
+    expect(listCalls).toHaveLength(projectHourlyForgeCalls(kind));
   });
 });
 
