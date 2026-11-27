@@ -22,8 +22,8 @@
  * profile. agy is not a harness a launch script can name, and the gate matches it by the
  * command's own name, so the agy one runs the echo program from an executable named `agy`.
  *
- * Phase 7 brings the peer listing from the cloud. Until then the grant routes find the
- * sending Tower in a listing this test writes into Tower b's own throwaway database.
+ * Tower b lists its peers from the stand-in as it does from the cloud (phase 7), through
+ * its own `GET /api/peer/towers`: the grant routes find the sending Tower in that listing.
  *
  * On demand, after `pnpm build`, never in porch's tests check:
  *
@@ -35,9 +35,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
 import { RingBuffer } from '../../terminal/ring-buffer.js';
-import { writeListing } from '../peer/store.js';
 import { INERT_SCRIPT, makeWorkspace, startTwoTowers, writeInertAgent, type TwoTowers } from './helpers/two-towers.js';
 import { messagePayload } from './helpers/stand-in-relay.js';
 import { waitFor } from './helpers/tower-test-utils.js';
@@ -143,21 +141,15 @@ describe('Spec 1967 phase 6: receiving a message on a real Tower', () => {
     ws = makeWorkspace(join(root, 'b', 'codev'), writeInertAgent(root));
     await b.activate(ws);
 
-    // The listing phase 7 will fetch: Tower a, online, on protocol 1.
-    const db = new Database(b.dbPath);
-    try {
-      writeListing(
-        db,
-        {
-          relay: { protocols: [1] },
-          limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
-          towers: [{ towerId: a.towerId, slug: a.slug, online: true, protocols: [1], remoteMessaging: 'off' }],
-        },
-        Date.now(),
-      );
-    } finally {
-      db.close();
-    }
+    // Tower b's peer list, fetched from the stand-in: Tower a, online, on protocol 1.
+    const listed = await b.json('GET', '/api/peer/towers');
+    expect(listed.status).toBe(200);
+    expect(listed.body).toMatchObject({
+      tunnel: 'up',
+      relay: { state: 'available', why: null },
+      listing: { fresh: true, problem: null },
+      towers: [{ towerId: a.towerId, name: a.slug, online: true, protocols: [1] }],
+    });
 
     const on = await b.json('PUT', '/api/peer/switch', { state: 'on', humanApproved: true });
     expect(on.status).toBe(200);

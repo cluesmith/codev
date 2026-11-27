@@ -671,3 +671,105 @@ the review round below.)
     the thread, the plan or the code. The spec's "owner ruling, decision main-53" is correct:
     pending-decisions.md shows main-53 ruled by the owner through the Decisions tab at 20:33
     UTC, the decision that started this project.
+
+## Phase 7: the peer list and the cloud client (2026-11-27)
+
+Built:
+- `contract.ts` now has sections 2 and 3 as S reads them: the three route paths, the
+  switch-state report body, a strict listing reader (`readPeerListing`), and the listing and
+  report answers (`classifyListingAnswer`, `classifySwitchReportAnswer`).
+- `peer/cloud-client.ts` makes all three Tower→cloud calls:
+  - the TLS rule;
+  - S's 20 s timeout, counting the body;
+  - no redirect followed, and the answer caps;
+  - the listing budget (10 s on demand, 30 s while holding mail), with a call in flight shared;
+  - switch-report retries at 5 s, 30 s and 2 min.
+- `peer/peer-list.ts` covers whether the cloud has a relay, the cached listing, the own name
+  (G4) and name resolution (C13).
+- `peer/cloud-wiring.ts` holds the one-per-process client and list, and the tunnel's hooks
+  into them.
+- Routes:
+  - `GET /api/peer/towers`;
+  - `cloud` in the limits answer;
+  - `cloudReport` on a switch change;
+  - the grant, revoke and grants routes refresh once on a name the cache does not have.
+- CLI:
+  - `afx peer list`, whose step 1 output matches the walkthrough to the character;
+  - `afx peer limits` shows the cloud's limits;
+  - `afx peer on` and `off` add a note when the tunnel is down or the report could not start.
+
+Decisions, for the architect's reading:
+- **The singletons live in `peer/cloud-wiring.ts`**, not in tower-tunnel or tower-routes.
+  Seven test files mock `tower-tunnel.js` with an explicit export list. This is the trap
+  phase 6 hit with `tower-messages.js`. `cloud-wiring` imports nothing from the tunnel
+  module: the tunnel lends it the live session.
+- **A listing that does not fit is refused whole**, and the cached list stands:
+  - the WARN names the field, never a value;
+  - ids and names must be unique across the entries, this Tower's own included;
+  - a listing whose `self.towerId` is not this Tower's is not used. "This Tower" is the
+    registration as read once the answer is in, so a re-registration as another Tower during
+    the call cannot cache the old Tower's list. `adoptOwnName` keeps its own `tower_id` guard
+    as a second check.
+- **1 MiB listing cap.** This is a Tower-side bound, not a contract value.
+- **`redirect: 'manual'`.** A 3xx is an answer without the body, so the key never goes to
+  another host.
+- **When a switch report is retried:**
+  - on no answer, a 5xx, or a 429 (waiting the longer of the interval and `retryAfterSec`);
+  - on a bodyless answer after a relay was stated, which section 6 calls the cloud
+    unreachable;
+  - not on 400, 401, or no relay.
+- **How reports are ordered and cancelled:**
+  - one call at a time, so changes arrive in order;
+  - a change made during a call is sent after it;
+  - a newer change replaces a pending retry;
+  - each `auth_ok` cancels the pending report, because that `auth` stated the switch;
+  - if the switch changed after the `auth` was sent, `auth_ok` reports it then (a race
+    otherwise lost until the next reconnect).
+- **A report goes only while the tunnel is up and its session has a relay.** The route never
+  waits on it. The CLI adds a line only for `tunnel-down` or `failed`, so walkthrough steps 2
+  and 3 print as before.
+- **Whether the cloud has a relay: the TLS rule first, then the latest statement.**
+  - The statements are the last `auth_ok`, the last listing, and an old cloud's bodyless 404,
+    taken in the order they arrived.
+  - A listing cached before this process started counts as the oldest.
+- **`afx peer limits` reads only the cached listing.** It is not one of section 3's on-demand
+  callers. Before any listing it says the cloud's limits are not known yet.
+- **`afx peer list` follows walkthrough step 1 literally.** I first had an "Allow a Tower
+  with: …" hint line under the towers and removed it, because step 1 shows none.
+- **A name current in the cache resolves with no call (C13).** Only a name not current there
+  refreshes the list, within the 10 s budget.
+
+Tests (layer A):
+- `peer-contract`: the listing reader and both answers.
+- `peer-cloud-client` (23).
+- `peer-list` (23). This includes walkthrough step 1 end to end, through the real route, the
+  SDK and the stand-in, with devvm online over a bare tunnel session.
+- `peer-cloud-wiring` (7).
+- `peer-commands`: list, report and refresh-on-unknown.
+- `peer-routes-wiring`: the towers route. A fetch spy proves the TLS rule keeps every call
+  from being made.
+
+Runs:
+- Layer A wall time: the six phase 7 files, 227 tests, took 1.57 to 1.99 s over 3 runs.
+- Porch's two commands: build green; the layer A suite gave 473 files and 10,676 tests in
+  288 s.
+- Layer B on demand (load 3.66 at start): `peer-receive.e2e`, `two-towers-harness.e2e` and
+  `peer-entry-point.e2e`, 19/19 in 26 s.
+- That layer B run was before the self-check change above, which is layer A only. After the
+  change, its four affected layer A files ran again: 75 tests, green.
+
+Earlier-phase tests changed by intent:
+- `peer-commands`: a cloud stub, and the limits output gains the cloud's lines.
+- `peer-routes-wiring`: the mocked `server_url` is now `http://cloud.example`, so no call
+  leaves, and the limits answer gains `cloud`.
+- `peer-receiver`: a cloud stub in the routes' deps.
+- `peer-receive.e2e` (layer B): Tower b now fetches its listing from the stand-in through its
+  own `GET /api/peer/towers`, instead of the test writing one into b's database.
+
+Surprises:
+- `fetch`'s body type takes no `Uint8Array<ArrayBufferLike>`. The body is copied onto an
+  ArrayBuffer of its own.
+- The stand-in's `rotateKey` changes the tower object in place, so a test client keeps the
+  key it was built with, as a registration does.
+- In bypass mode, Bash's cwd moved into `packages/codev` twice. Every command since uses an
+  absolute `cd`.

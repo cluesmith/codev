@@ -1,8 +1,9 @@
 /**
- * `afx peer on|off|grants|grant|revoke|limits` (Spec 1967; approved spec Decision 9).
+ * `afx peer on|off|list|grants|grant|revoke|limits` (Spec 1967; approved spec Decision 9).
  *
- * The receiving Tower's own decisions about who may message whom. Tower holds the switch and
- * the grants and makes every check; these commands only ask it, and print what it answered.
+ * The receiving Tower's own decisions about who may message whom, and the list of my other
+ * Towers. Tower holds the switch, the grants and the peer list and makes every check; these
+ * commands only ask it, and print what it answered.
  *
  * Two of them widen trust and are a human's: `afx peer on` and `afx peer grant` take
  * `--a-human-explicitly-approved-this`, the flag `porch approve` takes. Without it they
@@ -14,10 +15,14 @@
  */
 
 import type {
+  PeerCloudRelay,
   PeerGrantChange,
   PeerGrantModeName,
   PeerGrantView,
+  PeerListedTowerView,
+  PeerSwitchReport,
   PeerSwitchResponse,
+  PeerTowersResponse,
 } from '@cluesmith/codev-types';
 import type { PeerRouteResult, TowerClient as SdkTowerClient } from '@cluesmith/codev-sdk/tower-client';
 import { getTowerClient } from '../lib/tower-client.js';
@@ -28,7 +33,7 @@ import { HUMAN_APPROVAL_FLAG } from '../peer/switch.js';
 /** The Tower calls these commands make. */
 export type PeerClient = Pick<
   SdkTowerClient,
-  'getPeerSwitch' | 'setPeerSwitch' | 'getPeerGrants' | 'addPeerGrants' | 'revokePeerGrants' | 'getPeerLimits'
+  'getPeerSwitch' | 'setPeerSwitch' | 'getPeerGrants' | 'addPeerGrants' | 'revokePeerGrants' | 'getPeerLimits' | 'getPeerTowers'
 >;
 
 /** Where the commands print. */
@@ -79,9 +84,32 @@ function modeText(mode: PeerGrantModeName): string {
   return mode === 'hold' ? 'hold for release' : 'deliver';
 }
 
+/** A time as the commands print it. */
+function at(epochMs: number): string {
+  return new Date(epochMs).toISOString();
+}
+
 // ===========================================================================
 // afx peer on / off
 // ===========================================================================
+
+/**
+ * What the commands add when a switch change could not be told to Codev Cloud now. The
+ * usual case, a report under way, and the cases with nothing to tell, print nothing.
+ */
+function reportNote(report: PeerSwitchReport | null): string | null {
+  switch (report) {
+    case 'tunnel-down':
+      return "This Tower's tunnel is down: Codev Cloud learns of the change when it reconnects.";
+    case 'failed':
+      return 'Codev Cloud could not be told of the change now (see the Tower log); it learns of it when the tunnel next connects.';
+    case 'reporting':
+    case 'not-connected':
+    case 'no-relay':
+    case null:
+      return null;
+  }
+}
 
 export interface PeerOnOptions extends PeerPortOption {
   humanApproved?: boolean;
@@ -103,6 +131,8 @@ export async function peerOn(options: PeerOnOptions, deps: PeerDeps = defaultDep
   deps.out.success(
     answer.changed ? `Remote messaging is on for ${name}. ${grants}` : `Remote messaging was already on for ${name}. ${grants}`,
   );
+  const note = reportNote(answer.cloudReport);
+  if (note !== null) deps.out.info(note);
 }
 
 export async function peerOff(options: PeerPortOption, deps: PeerDeps = defaultDeps(options)): Promise<void> {
@@ -113,6 +143,83 @@ export async function peerOff(options: PeerPortOption, deps: PeerDeps = defaultD
     return;
   }
   deps.out.success(`Remote messaging is off for ${name}. It sends nothing to other Towers and accepts nothing from them.`);
+  const note = reportNote(answer.cloudReport);
+  if (note !== null) deps.out.info(note);
+}
+
+// ===========================================================================
+// afx peer list
+// ===========================================================================
+
+/** What one Tower may message here, as the list prints it: its grants, or nothing. */
+function mayMessageText(tower: PeerListedTowerView): string {
+  if (tower.mayMessage.length === 0) return 'nothing';
+  return tower.mayMessage.map((g) => `${g.recipient} (${modeText(g.mode)})`).join(', ');
+}
+
+/** One line per Tower, in aligned columns: name, owner, the online hint, what it may message here. */
+export function towerLines(towers: readonly PeerListedTowerView[]): string[] {
+  const rows = towers.map((t) => [t.name, 'you', t.online ? 'online' : 'offline', `may message this Tower: ${mayMessageText(t)}`]);
+  const widths = [0, 1, 2].map((i) => Math.max(...rows.map((r) => r[i].length)));
+  return rows.map((r) => r.map((c, i) => (i < 3 ? c.padEnd(widths[i]) : c)).join('  '));
+}
+
+function relayNote(relay: PeerCloudRelay): string | null {
+  if (relay.state !== 'none') return null;
+  switch (relay.why) {
+    case 'insecure':
+      return "This Codev Cloud has no relay here: its server URL is plain http: on a host that is not this machine, so no peer call is made. Connect over https: with: afx tower connect --service <https://…>";
+    case 'unsupported':
+      return "This Codev Cloud's relay speaks no protocol version this Tower speaks: remote messaging is unavailable.";
+    case 'malformed':
+      return "This Codev Cloud's relay was not in the expected form: remote messaging is unavailable.";
+    case 'stated-none':
+    case 'old-cloud':
+    case null:
+      return 'This Codev Cloud has no relay: remote messaging is unavailable.';
+  }
+}
+
+/** Why the list shown is not a fresh one, and what to do; `null` when it is fresh or recent enough. */
+function listingNote(answer: PeerTowersResponse): string | null {
+  const { problem, refreshedAt, retryAfterSec } = answer.listing;
+  const from = refreshedAt === null ? 'and this Tower has not listed its peers yet' : `this is the list from ${at(refreshedAt)}`;
+  switch (problem) {
+    case 'not-connected':
+      return 'This Tower is not connected to Codev Cloud. Connect it with: afx tower connect';
+    case 'not-registered':
+      return "This Tower's registration was removed from Codev Cloud. Register it again with: afx tower connect --reauth";
+    case 'unauthenticated':
+      return `Codev Cloud refused this Tower's key; ${from}. Run: afx tower connect --reauth`;
+    case 'cloud-unreachable':
+      return `Codev Cloud is unreachable; ${from}.`;
+    case 'rate-limited':
+      return `Codev Cloud is limiting this Tower's calls; ${from}.${retryAfterSec === null ? '' : ` Try again in ${retryAfterSec} s.`}`;
+    case 'bad-listing':
+      return `Codev Cloud's peer list was not in the expected form (see the Tower log); ${from}.`;
+    case 'no-relay':
+    case 'recent':
+    case null:
+      return null;
+  }
+}
+
+/**
+ * `afx peer list`: whether remote messaging is on here, then each of my other Towers with
+ * the online hint and what it may message here. It works whatever the switch says, so the
+ * owner can see what turning it on will involve.
+ */
+export async function peerList(options: PeerPortOption, deps: PeerDeps = defaultDeps(options)): Promise<void> {
+  const answer = answerOf(await deps.client.getPeerTowers(), 'has no peer list');
+  deps.out.line(answer.remoteMessaging === 'on' ? 'Remote messaging: on' : 'Remote messaging: off — a human turns it on with: afx peer on');
+  for (const line of towerLines(answer.towers)) deps.out.line(line);
+  if (answer.towers.length === 0 && answer.listing.refreshedAt !== null) deps.out.line('No other Towers are on your Codev Cloud account.');
+
+  const notes = [listingNote(answer), relayNote(answer.relay)];
+  if (answer.tunnel === 'down' && answer.listing.problem !== 'not-connected' && answer.listing.problem !== 'not-registered') {
+    notes.push("This Tower's own tunnel is down: it can send, but cannot receive; mail for it waits at its senders.");
+  }
+  for (const note of notes) if (note !== null) deps.out.info(note);
 }
 
 // ===========================================================================
@@ -260,10 +367,18 @@ export async function peerRevoke(options: PeerRevokeOptions, deps: PeerDeps = de
 
 export async function peerLimits(options: PeerPortOption, deps: PeerDeps = defaultDeps(options)): Promise<void> {
   const answer = answerOf(await deps.client.getPeerLimits(), 'has no peer limits');
-  const { tower } = answer;
+  const { tower, cloud } = answer;
   deps.out.line("This Tower's limits (set under peer.limits in ~/.codev/config.json):");
   deps.out.line(`  Messages accepted from one peer   ${tower.acceptedPerPeerPerMinute} a minute`);
   deps.out.line(`  Undelivered from one peer         ${tower.undeliveredPerPeer}`);
   deps.out.line(`  Waiting here for one peer         ${tower.waitingPerPeer}`);
   deps.out.line(`  Record of attempts kept for       ${answer.recordRetentionDays} days (peer.recordRetentionDays, at least 30)`);
+  if (cloud === null) {
+    deps.out.line("Codev Cloud's limits: not known yet. This Tower learns them from its peer list: afx peer list");
+    return;
+  }
+  deps.out.line(`Codev Cloud's limits (approximate, the cloud's to change; from its peer list at ${at(cloud.listedAt)}):`);
+  deps.out.line(`  Messages from this Tower          ${cloud.limits.messagesPerTowerPerMinute} a minute`);
+  deps.out.line(`  Messages to one Tower             ${cloud.limits.messagesPerPairPerMinute} a minute`);
+  deps.out.line(`  Discovery queries to one Tower    ${cloud.limits.queriesPerPairPerMinute} a minute`);
 }

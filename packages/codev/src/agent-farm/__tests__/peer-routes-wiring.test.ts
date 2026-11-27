@@ -6,7 +6,10 @@
  * dispatch, and the production dependencies read what they should, the global database for
  * the switch and grants, the registry (`known_workspaces`, `architect`) for workspaces and
  * architects, the cloud config for this Tower's own name, and the user's config for the
- * limits. The tunnel marker is honoured through the real dispatch.
+ * limits. The tunnel marker is honoured through the real dispatch. The cloud behind the
+ * peer list is `peer/cloud-wiring.ts`'s, as production builds it; the cloud config's server
+ * URL is plain HTTP on a host that is not this machine, so the TLS rule keeps every call to
+ * it from being made (phase 7).
  *
  * Standard tower-routes harness: the database seam returns an in-memory database seeded with
  * the real schema, and the rest of tower-routes' import graph is stubbed. Served on a
@@ -29,7 +32,7 @@ vi.mock('../db/index.js', () => ({ getGlobalDb: () => holder.db, getDb: () => ho
 
 // This Tower's own identity, and the user's config, as production reads them.
 vi.mock('../lib/cloud-config.js', () => ({
-  readCloudConfig: () => ({ tower_id: '01JSELF0000000000000000AAA', tower_name: 'ana-s-mbp', api_key: 'ctk_x', server_url: 'https://cloud.example' }),
+  readCloudConfig: () => ({ tower_id: '01JSELF0000000000000000AAA', tower_name: 'ana-s-mbp', api_key: 'ctk_x', server_url: 'http://cloud.example' }),
 }));
 vi.mock('../../lib/config.js', async (importActual) => ({
   ...(await importActual<typeof import('../../lib/config.js')>()),
@@ -208,8 +211,49 @@ describe('the peer routes through handleRequest', () => {
   it("read this Tower's limits from the user's config, with the retention raised to 30 days", async () => {
     expect(await call('GET', '/api/peer/limits')).toEqual({
       status: 200,
-      body: { tower: { acceptedPerPeerPerMinute: 20, undeliveredPerPeer: 50, waitingPerPeer: 50 }, recordRetentionDays: 30 },
+      body: {
+        tower: { acceptedPerPeerPerMinute: 20, undeliveredPerPeer: 50, waitingPerPeer: 50 },
+        recordRetentionDays: 30,
+        cloud: { limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, listedAt: expect.any(Number) },
+      },
     });
+  });
+
+  it("list the peers from the cached listing, with no call to a cloud the TLS rule refuses, and what each may message here", async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    try {
+      await call('POST', '/api/peer/grants', { tower: 'devvm', addresses: ['codev:architect:review'], humanApproved: true });
+      const answer = await call('GET', '/api/peer/towers');
+      expect(answer).toEqual({
+        status: 200,
+        body: {
+          remoteMessaging: 'off',
+          towerName: 'ana-s-mbp',
+          tunnel: 'down',
+          relay: { state: 'none', why: 'insecure' },
+          listing: { fresh: false, refreshedAt: expect.any(Number), problem: 'no-relay', retryAfterSec: null },
+          towers: [
+            {
+              towerId: DEVVM,
+              name: 'devvm',
+              online: true,
+              protocols: [1],
+              remoteMessaging: 'on',
+              mayMessage: [expect.objectContaining({ recipient: 'codev:architect:review', mode: 'deliver' })],
+            },
+          ],
+        },
+      });
+      // The switch report goes nowhere either: the tunnel is down.
+      expect(await call('PUT', '/api/peer/switch', { state: 'on', humanApproved: true })).toMatchObject({
+        status: 200,
+        body: { changed: true, cloudReport: 'tunnel-down' },
+      });
+      // The test's own calls to this Tower are the only fetches made.
+      expect(fetch.mock.calls.every(([url]) => String(url).startsWith(`http://127.0.0.1:${port}/`))).toBe(true);
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   it('answer an unknown peer path with a coded 404, so a client can tell it from an older Tower', async () => {

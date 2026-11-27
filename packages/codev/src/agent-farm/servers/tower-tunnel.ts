@@ -26,6 +26,7 @@ import { getGlobalDb } from '../db/index.js';
 import { readSwitch } from '../peer/switch.js';
 import { createReceiver } from '../peer/receiver.js';
 import { recordEntryEvent } from '../peer/records.js';
+import { onTunnelAuthOk, setTunnelSessionSource, shutdownPeerCloud } from '../peer/cloud-wiring.js';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import { liveGrantWorld, resolveRemoteRecipient } from './tower-messages.js';
 import { deliverRemoteWithin, notifyHeldStateChanged } from './mailbox-wiring.js';
@@ -145,6 +146,8 @@ function stopMetadataRefresh(): void {
 
 /** Whether the last read of the switch for `auth` failed, so its ERROR is logged once per failing run. */
 let switchReadFailing = false;
+/** The switch as the last `auth` stated it, for the `auth_ok` that answers it. */
+let lastStatedSwitch: PeerSwitchState | null = null;
 
 /** A database error as a log line may name it: its class, and its code when it has the shape of one. */
 function describeDbError(err: unknown): string {
@@ -164,6 +167,7 @@ function readSwitchForAuth(): PeerSwitchState {
   try {
     const state = readSwitch(getGlobalDb()).state;
     switchReadFailing = false;
+    lastStatedSwitch = state;
     return state;
   } catch (err) {
     const cause = `global.db could not be read (${describeDbError(err)})`;
@@ -267,6 +271,13 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
   client.onAuthOk((identity) => {
     adoptCloudIdentity(config, identity);
     logRelay(config, identity);
+    // The peer list learns what this session stated of a relay; a switch change made while
+    // the `auth` was in flight is reported now (Spec 1967, contract sections 1 and 2).
+    try {
+      onTunnelAuthOk(identity.relay, lastStatedSwitch);
+    } catch (err) {
+      _deps?.log('ERROR', `Peer: could not take in the connection's relay state: ${(err as Error).message}`);
+    }
   });
 
   // Gather and set initial metadata before connecting
@@ -414,6 +425,8 @@ export async function initTunnel(
   _deps = deps;
   _getInstances = callbacks.getInstances;
   switchReadFailing = false;
+  lastStatedSwitch = null;
+  setTunnelSessionSource(getTunnelPeerSession, logToTower);
 
   // Auto-connect tunnel if registered
   try {
@@ -449,6 +462,7 @@ export function getTunnelPeerSession(): TunnelPeerSession | null {
 export function shutdownTunnel(): void {
   stopMetadataRefresh();
   stopConfigWatcher();
+  shutdownPeerCloud();
   if (tunnelClient) {
     _deps?.log('INFO', 'Disconnecting tunnel...');
     tunnelClient.disconnect();

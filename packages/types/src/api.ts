@@ -1,4 +1,5 @@
 import type { ServedAgentState } from './agent-state.js';
+import type { PeerCloudLimits, PeerListedSwitchState } from './peer-wire.js';
 
 /**
  * Tower API response shapes.
@@ -836,9 +837,9 @@ export interface AddressBookResponse {
   workspaces: AddressBookWorkspace[];
 }
 
-// --- Peers: the remote-messaging switch and grants (Spec 1967; /api/peer/…) ---
+// --- Peers: the remote-messaging switch, grants and the peer list (Spec 1967; /api/peer/…) ---
 //
-// The local routes behind `afx peer on|off|grants|grant|revoke|limits`. A refusal is the
+// The local routes behind `afx peer on|off|list|grants|grant|revoke|limits`. A refusal is the
 // usual Tower error body, `{ error, message }`. The codes: `INVALID_PARAMS` (400),
 // `HUMAN_APPROVAL_REQUIRED` (403: turning the switch on and adding a grant are a human's
 // acts), `NOT_OVER_TUNNEL` (403: neither is accepted from Codev Cloud's tunnel),
@@ -858,7 +859,19 @@ export interface PeerSwitchResponse {
   towerName: string | null;
   /** How many grants this Tower holds. */
   grantCount: number;
+  /**
+   * What this Tower did to tell Codev Cloud of the change (contract section 2); `null` when
+   * nothing changed. `reporting`: the report is under way, retried if it fails. `tunnel-down`:
+   * not reported now, and the next connection states it. `not-connected`: this Tower has no
+   * registration, or the cloud removed it. `no-relay`: the cloud has no relay, so there is
+   * nothing to tell. `failed`: the report could not be started (see the Tower log); the next
+   * connection states the switch.
+   */
+  cloudReport: PeerSwitchReport | null;
 }
+
+/** See {@link PeerSwitchResponse.cloudReport}. */
+export type PeerSwitchReport = 'reporting' | 'tunnel-down' | 'not-connected' | 'no-relay' | 'failed';
 
 /** Body of `PUT /api/peer/switch`. `on` is refused unless `humanApproved` is `true`. */
 export interface PeerSwitchRequest {
@@ -971,6 +984,77 @@ export interface PeerLimitsResponse {
   tower: PeerTowerLimits;
   /** Days this Tower keeps its record of cross-Tower attempts: the configured value, raised to 30. */
   recordRetentionDays: number;
+  /** Codev Cloud's own limits, as its last peer list gave them; `null` if this Tower has never listed its peers. */
+  cloud: { limits: PeerCloudLimits; listedAt: number } | null;
+}
+
+/**
+ * Why `GET /api/peer/towers` answered from this Tower's cached list rather than a fresh one:
+ * - `not-connected`: no registration with Codev Cloud (`afx tower connect`);
+ * - `not-registered`: the registration was removed from Codev Cloud (`afx tower connect --reauth`);
+ * - `no-relay`: the cloud has no relay, so it was not asked;
+ * - `cloud-unreachable`: no answer, or an answer that was not the cloud's;
+ * - `unauthenticated`: the cloud refused this Tower's key;
+ * - `rate-limited`: the cloud is limiting this Tower's calls (`retryAfterSec` with it);
+ * - `bad-listing`: the cloud's list did not fit the contract, and was not used;
+ * - `recent`: the list was fetched moments ago, within the call budget (contract section 3).
+ */
+export type PeerListProblem =
+  | 'not-connected'
+  | 'not-registered'
+  | 'no-relay'
+  | 'cloud-unreachable'
+  | 'unauthenticated'
+  | 'rate-limited'
+  | 'bad-listing'
+  | 'recent';
+
+/**
+ * Whether Codev Cloud has a relay, as this Tower knows it: `available`; `none`, with why;
+ * or `unknown` when the cloud has never said either way.
+ */
+export interface PeerCloudRelay {
+  state: 'available' | 'none' | 'unknown';
+  /**
+   * With `none`: `insecure` (the server URL is plain HTTP and not loopback), `stated-none`
+   * (the cloud said it has none), `old-cloud` (it predates the relay), `unsupported` (its
+   * relay speaks no version this Tower speaks), `malformed` (its handshake's relay did not fit).
+   */
+  why: 'insecure' | 'stated-none' | 'old-cloud' | 'unsupported' | 'malformed' | null;
+}
+
+/** One of my other Towers, as `GET /api/peer/towers` lists it. */
+export interface PeerListedTowerView {
+  towerId: string;
+  /** Its current name. */
+  name: string;
+  /** A live session at Codev Cloud when it was listed: a hint, never a promise. */
+  online: boolean;
+  /** The protocol versions its session stated. */
+  protocols: number[];
+  /** Its own switch, as the cloud last heard it. */
+  remoteMessaging: PeerListedSwitchState;
+  /** What it may message on this Tower: its grants here. Empty when nothing. */
+  mayMessage: PeerGrantView[];
+}
+
+/** `GET /api/peer/towers`: my other Towers, fetched from Codev Cloud within the call budget, else cached. */
+export interface PeerTowersResponse {
+  remoteMessaging: 'on' | 'off';
+  /** This Tower's own name; `null` if it has never been registered. */
+  towerName: string | null;
+  /** This Tower's own tunnel. While it is down this Tower can send but not receive. */
+  tunnel: 'up' | 'down';
+  relay: PeerCloudRelay;
+  /** Whether the towers below were fetched now, and if not, why. */
+  listing: {
+    fresh: boolean;
+    /** When the list below was fetched; `null` if this Tower has never listed its peers. */
+    refreshedAt: number | null;
+    problem: PeerListProblem | null;
+    retryAfterSec: number | null;
+  };
+  towers: PeerListedTowerView[];
 }
 
 // --- Tunnel (GET /api/tunnel/status) ---

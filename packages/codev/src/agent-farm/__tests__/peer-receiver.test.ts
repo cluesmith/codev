@@ -709,6 +709,13 @@ describe('eager withdrawal through the peer routes', () => {
       world: () => f.world,
       ownTower: () => ({ name: 'devvm', towerId: SELF }),
       settings: () => resolvePeerSettings({}),
+      // No cloud behind these routes: the listing is the one seeded here, and nothing is reported.
+      cloud: () => ({
+        refreshListing: async () => ({ fresh: false, problem: 'not-connected', retryAfterSec: null, listing: store.readListing(f.db) }),
+        relay: () => ({ state: 'unknown', why: null }),
+        reportSwitch: () => 'not-connected',
+        tunnelUp: () => false,
+      }),
       log: () => {},
     };
     const handler = createPeerRouteHandler(deps);

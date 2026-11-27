@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -793,9 +793,14 @@ export class TowerClient {
     return this.peerPost<PeerRevokeResponse>('/api/peer/grants/revoke', 'POST', request);
   }
 
-  /** The limits this Tower enforces itself. */
+  /** The limits this Tower enforces itself, and Codev Cloud's as its last peer list gave them. */
   getPeerLimits(): Promise<PeerRouteResult<PeerLimitsResponse>> {
     return this.peerCall<PeerLimitsResponse>('/api/peer/limits');
+  }
+
+  /** My other Towers: Tower asks Codev Cloud, within its call budget, and answers from its cache otherwise. */
+  getPeerTowers(): Promise<PeerRouteResult<PeerTowersResponse>> {
+    return this.peerCall<PeerTowersResponse>('/api/peer/towers');
   }
 
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {

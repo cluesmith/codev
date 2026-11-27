@@ -23,11 +23,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
-import type { PeerListingTower } from '@cluesmith/codev-types';
+import type { PeerCloudRelay, PeerListingTower, PeerListProblem, PeerSwitchReport, PeerSwitchState } from '@cluesmith/codev-types';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as store from '../peer/store.js';
 import { createPeerRouteHandler, type PeerRouteDeps } from '../servers/peer-routes.js';
-import { peerGrant, peerGrants, peerLimits, peerOff, peerOn, peerRevoke, type PeerDeps } from '../commands/peer.js';
+import { peerGrant, peerGrants, peerLimits, peerList, peerOff, peerOn, peerRevoke, type PeerDeps } from '../commands/peer.js';
 import { resolvePeerSettings, type CodevConfig } from '../../lib/config.js';
 import type { RegisteredWorkspace } from '../utils/workspace-address.js';
 
@@ -37,7 +37,26 @@ const OTHER = '/work/other';
 const MBP = '01JMBP000000000000000000AA';
 const DEVVM = '01JDEVVM0000000000000000AA';
 
+/**
+ * The cloud behind the routes, as a test sets it: what a refresh comes to (by default the
+ * cached list, the cloud unreachable), the relay, the tunnel, and what a switch report does.
+ * `peer-list.test.ts` runs the same routes against the stand-in relay.
+ */
+interface CloudStub {
+  refreshProblem: PeerListProblem | null;
+  retryAfterSec: number | null;
+  /** Run before a refresh answers, as a fetched listing would be written. */
+  onRefresh: (() => void) | null;
+  refreshes: number;
+  relay: PeerCloudRelay;
+  tunnelUp: boolean;
+  report: PeerSwitchReport | 'throws';
+  reported: PeerSwitchState[];
+}
+
 interface Harness {
+  cloud: CloudStub;
+  logged: string[];
   db: Database.Database;
   architects: Map<string, string[]>;
   registered: RegisteredWorkspace[];
@@ -76,13 +95,39 @@ beforeEach(async () => {
   ];
   const config = { value: {} as CodevConfig };
   const clock = { now: T0 + 60_000 };
+  const cloud: CloudStub = {
+    refreshProblem: 'cloud-unreachable',
+    retryAfterSec: null,
+    onRefresh: null,
+    refreshes: 0,
+    relay: { state: 'available', why: null },
+    tunnelUp: true,
+    report: 'reporting',
+    reported: [],
+  };
+  const logged: string[] = [];
   const deps: PeerRouteDeps = {
     db: () => db,
     now: () => clock.now,
     world: () => ({ registered, running: [CODEV, OTHER], architectsOf: (ws) => architects.get(ws) ?? [] }),
     ownTower: () => ({ name: 'ana-s-mbp', towerId: '01JSELF0000000000000000AAA' }),
     settings: () => resolvePeerSettings(config.value),
-    log: () => {},
+    cloud: () => ({
+      refreshListing: async () => {
+        cloud.refreshes++;
+        cloud.onRefresh?.();
+        const fresh = cloud.refreshProblem === null;
+        return { fresh, problem: cloud.refreshProblem, retryAfterSec: cloud.retryAfterSec, listing: store.readListing(db) };
+      },
+      relay: () => cloud.relay,
+      tunnelUp: () => cloud.tunnelUp,
+      reportSwitch: (state) => {
+        if (cloud.report === 'throws') throw new Error('cloud-config.json is not valid JSON');
+        cloud.reported.push(state);
+        return cloud.report;
+      },
+    }),
+    log: (level, message) => logged.push(`${level} ${message}`),
   };
   const handler = createPeerRouteHandler(deps);
   server = http.createServer((req, res) => {
@@ -93,6 +138,8 @@ beforeEach(async () => {
   const client = new TowerClient({ host: '127.0.0.1', port });
   const printed: string[] = [];
   harness = {
+    cloud,
+    logged,
     db,
     architects,
     registered,
@@ -437,6 +484,10 @@ describe('afx peer limits', () => {
       '  Undelivered from one peer         50',
       '  Waiting here for one peer         50',
       '  Record of attempts kept for       30 days (peer.recordRetentionDays, at least 30)',
+      `Codev Cloud's limits (approximate, the cloud's to change; from its peer list at ${new Date(T0).toISOString()}):`,
+      '  Messages from this Tower          60 a minute',
+      '  Messages to one Tower             30 a minute',
+      '  Discovery queries to one Tower    10 a minute',
     ]);
   });
 
@@ -450,6 +501,134 @@ describe('afx peer limits', () => {
   it('reports a malformed setting, naming it', async () => {
     harness.config.value = { peer: { limits: { waitingPerPeer: 0 } } };
     expect((await run((d) => peerLimits({}, d))).error).toContain('peer.limits.waitingPerPeer must be a whole number of at least 1');
+  });
+});
+
+describe('afx peer list', () => {
+  const ISO_T0 = new Date(T0).toISOString();
+
+  it('prints the switch, then one line per Tower: the name, the owner, the online hint and what it may message here', async () => {
+    harness.cloud.refreshProblem = null;
+    store.writeListing(
+      harness.db,
+      {
+        relay: { protocols: [1] },
+        limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
+        towers: [tower(DEVVM, 'devvm'), { ...tower(MBP, 'mbp'), online: false }],
+      },
+      harness.clock.now,
+    );
+    await run((d) => peerGrant({ tower: 'mbp', addresses: ['codev:architect:local'], ...HUMAN }, d));
+    await run((d) => peerGrant({ tower: 'mbp', workspace: 'other', hold: true, ...HUMAN }, d));
+    expect(await run((d) => peerList({}, d))).toEqual({
+      error: null,
+      printed: [
+        'Remote messaging: off — a human turns it on with: afx peer on',
+        'devvm  you  online   may message this Tower: nothing',
+        'mbp    you  offline  may message this Tower: codev:architect:local (deliver), every architect in other (hold for release)',
+      ],
+    });
+    await run((d) => peerOn(HUMAN, d));
+    expect((await run((d) => peerList({}, d))).printed[0]).toBe('Remote messaging: on');
+  });
+
+  it('says when the list is a cached one, and why, with what to do', async () => {
+    const notes = async () => (await run((d) => peerList({}, d))).printed.filter((line) => line.startsWith('[info]'));
+    harness.cloud.refreshProblem = 'cloud-unreachable';
+    expect(await notes()).toEqual([`[info] Codev Cloud is unreachable; this is the list from ${ISO_T0}.`]);
+    harness.cloud.refreshProblem = 'rate-limited';
+    harness.cloud.retryAfterSec = 20;
+    expect(await notes()).toEqual([`[info] Codev Cloud is limiting this Tower's calls; this is the list from ${ISO_T0}. Try again in 20 s.`]);
+    harness.cloud.refreshProblem = 'unauthenticated';
+    expect(await notes()).toEqual([`[info] Codev Cloud refused this Tower's key; this is the list from ${ISO_T0}. Run: afx tower connect --reauth`]);
+    harness.cloud.refreshProblem = 'not-connected';
+    harness.cloud.tunnelUp = false;
+    // Not connected says so once; the tunnel being down follows from it.
+    expect(await notes()).toEqual(['[info] This Tower is not connected to Codev Cloud. Connect it with: afx tower connect']);
+    harness.cloud.refreshProblem = 'recent';
+    harness.cloud.tunnelUp = true;
+    expect(await notes()).toEqual([]);
+  });
+
+  it('says when the cloud has no relay, and when this Tower can send but not receive', async () => {
+    harness.cloud.refreshProblem = null;
+    harness.cloud.relay = { state: 'none', why: 'stated-none' };
+    harness.cloud.tunnelUp = false;
+    const printed = (await run((d) => peerList({}, d))).printed;
+    expect(printed.filter((line) => line.startsWith('[info]'))).toEqual([
+      '[info] This Codev Cloud has no relay: remote messaging is unavailable.',
+      "[info] This Tower's own tunnel is down: it can send, but cannot receive; mail for it waits at its senders.",
+    ]);
+    harness.cloud.relay = { state: 'none', why: 'insecure' };
+    harness.cloud.tunnelUp = true;
+    expect((await run((d) => peerList({}, d))).printed.at(-1)).toContain('its server URL is plain http: on a host that is not this machine');
+  });
+
+  it('says so when the account has no other Tower, and when this Tower has never listed its peers', async () => {
+    harness.cloud.refreshProblem = null;
+    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [] }, harness.clock.now);
+    expect((await run((d) => peerList({}, d))).printed).toEqual([
+      'Remote messaging: off — a human turns it on with: afx peer on',
+      'No other Towers are on your Codev Cloud account.',
+    ]);
+  });
+});
+
+describe('reporting a switch change to Codev Cloud', () => {
+  it('reports each change, and only a change, with nothing more printed while the report is under way', async () => {
+    expect((await run((d) => peerOn(HUMAN, d))).printed).toHaveLength(1);
+    await run((d) => peerOn(HUMAN, d));
+    expect((await run((d) => peerOff({}, d))).printed).toHaveLength(1);
+    await run((d) => peerOff({}, d));
+    expect(harness.cloud.reported).toEqual(['on', 'off']);
+    const answer = await harness.raw('GET', '/api/peer/switch');
+    expect(answer.body.cloudReport).toBeNull();
+  });
+
+  it('says the cloud learns of it on reconnect when the tunnel is down', async () => {
+    harness.cloud.report = 'tunnel-down';
+    expect((await run((d) => peerOn(HUMAN, d))).printed).toEqual([
+      '[ok] Remote messaging is on for ana-s-mbp. No Tower may message it yet. Allow one with: afx peer grant <tower> …',
+      "[info] This Tower's tunnel is down: Codev Cloud learns of the change when it reconnects.",
+    ]);
+  });
+
+  it('keeps the change when the report cannot even start, and says so', async () => {
+    harness.cloud.report = 'throws';
+    const on = await harness.raw('PUT', '/api/peer/switch', { state: 'on', humanApproved: true });
+    expect(on).toMatchObject({ status: 200, body: { state: 'on', changed: true, cloudReport: 'failed' } });
+    expect(store.readRemoteMessaging(harness.db).state).toBe('on');
+    expect(harness.logged).toContain('ERROR Peer: the switch change could not be reported to Codev Cloud: cloud-config.json is not valid JSON');
+    expect((await run((d) => peerOff({}, d))).printed.at(-1)).toBe(
+      '[info] Codev Cloud could not be told of the change now (see the Tower log); it learns of it when the tunnel next connects.',
+    );
+  });
+});
+
+describe('a grant naming a Tower that is not in the cached list', () => {
+  it('refreshes the list once and finds a Tower new to it', async () => {
+    harness.cloud.onRefresh = () =>
+      store.writeListing(
+        harness.db,
+        {
+          relay: { protocols: [1] },
+          limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
+          towers: [tower(MBP, 'mbp'), tower(DEVVM, 'devvm'), tower('01JSTUDIO00000000000000AA', 'studio')],
+        },
+        harness.clock.now,
+      );
+    const granted = await run((d) => peerGrant({ tower: 'studio', addresses: ['codev:architect:local'], ...HUMAN }, d));
+    expect(granted.error).toBeNull();
+    expect(harness.cloud.refreshes).toBe(1);
+    expect(store.listGrants(harness.db).map((g) => g.peerTowerId)).toEqual(['01JSTUDIO00000000000000AA']);
+  });
+
+  it('refuses a name still unknown after the refresh, and does not refresh for a listed one', async () => {
+    const refused = await run((d) => peerGrant({ tower: 'nowhere', all: true, ...HUMAN }, d));
+    expect(refused.error).toBe(`No Tower named 'nowhere' is in this Tower's peer list (its peer list was last refreshed ${new Date(T0).toISOString()}). (UNKNOWN_TOWER)`);
+    expect(harness.cloud.refreshes).toBe(1);
+    await run((d) => peerGrant({ tower: 'devvm', all: true, ...HUMAN }, d));
+    expect(harness.cloud.refreshes).toBe(1);
   });
 });
 

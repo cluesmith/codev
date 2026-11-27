@@ -10,6 +10,8 @@
  *   field rules of section 4, and the payload hash;
  * - the answer: R's encoding, and S's reading of whatever comes back, including the mapping
  *   from an HTTP status to an outcome and who decided;
+ * - the cloud's three routes as S calls them: their paths, the switch-state report's body,
+ *   the listing read strictly, and what S makes of each route's answer;
  * - the order of S's own refusals, as a list of named checks.
  *
  * No other production file builds a contract header, parses a statement or maps a status
@@ -35,10 +37,14 @@ import {
   PEER_PROTOCOLS_SPOKEN,
   type PeerAnswer,
   type PeerAnswerReason,
+  type PeerCloudLimits,
   type PeerCloudRefusalReason,
   type PeerDiscoveredAddress,
   type PeerHandshake,
   type PeerHeldReason,
+  type PeerListedSwitchState,
+  type PeerListing,
+  type PeerListingTower,
   type PeerMessagePayload,
   type PeerOutcome,
   type PeerQueryPayload,
@@ -50,7 +56,7 @@ import {
   type PeerWireAddress,
   type PeerWireSenderAddress,
 } from '@cluesmith/codev-types';
-import { isAddressComponent, MAX_ADDRESS_LENGTH, tryFormatAddress } from '@cluesmith/codev-sdk/address';
+import { isAddressComponent, MAX_ADDRESS_LENGTH, parseTowerRef, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 
 // ===========================================================================
 // Names on the wire
@@ -858,7 +864,10 @@ const CLOUD_ANSWERS: Readonly<
   504: { outcome: 'unavailable', reasons: ['no-answer'] },
 };
 
-/** What came back from a relay call, as the cloud client saw it. */
+/**
+ * What came back from a call to one of the cloud's peer routes (the relay, the listing or
+ * the switch-state report), as the cloud client saw it.
+ */
 export type RelayCallResult =
   /** No answer at all: a connection error, or nothing within S's 20-second call timeout. */
   | { answered: false }
@@ -1009,6 +1018,195 @@ export function classifyRelayAnswer(
     return { decidedBy: 'none', status: 404, outcome: 'refused', reason: 'no-relay', answer: null };
   }
   return cloudUnreachable(call.status);
+}
+
+// ===========================================================================
+// Sections 2 and 3: the switch-state report and the peer listing
+// ===========================================================================
+
+/** The cloud's peer routes, each relative to the cloud's server URL. */
+export const PEER_CLOUD_PATHS = {
+  relay: '/api/peer/relay',
+  towers: '/api/peer/towers',
+  state: '/api/peer/state',
+} as const;
+
+/** The body of `PUT /api/peer/state` (section 2). */
+export function encodeSwitchStateReport(state: PeerSwitchState): Uint8Array {
+  return utf8Encoder.encode(JSON.stringify({ remoteMessaging: state }));
+}
+
+const LISTED_SWITCH_STATES: readonly PeerListedSwitchState[] = ['on', 'off', 'unknown'];
+const LISTING_LIMIT_FIELDS = ['messagesPerTowerPerMinute', 'messagesPerPairPerMinute', 'queriesPerPairPerMinute'] as const;
+
+export type ListingReadResult = { ok: true; listing: PeerListing } | { ok: false; problem: string };
+
+/**
+ * A Tower's name as the listing carries it: the slug rule (as a statement's `fromTowerSlug`)
+ * and the shared Tower-name rule, written exactly, so that every listed name can be written
+ * in an address and parses back to itself.
+ */
+function isListedTowerName(value: unknown): value is string {
+  if (typeof value !== 'string' || !SLUG_PATTERN.test(value)) return false;
+  const parsed = parseTowerRef(value);
+  return parsed.ok && parsed.ref.owner === undefined && parsed.ref.tower === value;
+}
+
+function isProtocolList(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((v) => isJsonInteger(v, 1));
+}
+
+/**
+ * A `200` listing's body read strictly (section 3), or the first thing about it that does
+ * not fit. Unknown fields are ignored and left out. Every listed name must be a Tower name,
+ * and the listing must name each Tower once: no two entries with one id or one name, and
+ * none with the caller's own id or name. The problem names a field, never its value.
+ */
+export function readPeerListing(bytes: Uint8Array): ListingReadResult {
+  const bad = (problem: string): ListingReadResult => ({ ok: false, problem });
+  const parsed = parseJsonObject(bytes);
+  if (!parsed.ok) return bad('the body is not one JSON object');
+  if (parsed.duplicateKeys) return bad('the body repeats a key');
+  const body = parsed.value;
+  if (body.v !== PEER_PROTOCOL_VERSION) return bad('v is not 1');
+
+  let relay: PeerListing['relay'];
+  if (body.relay === null) relay = null;
+  else if (isPlainObject(body.relay) && isProtocolList(body.relay.protocols)) relay = { protocols: [...body.relay.protocols] };
+  else return bad('relay is neither null nor an object with a list of protocol versions');
+
+  const self = body.self;
+  if (!isPlainObject(self) || !matches(CLOUD_ID_PATTERN)(self.towerId) || !isListedTowerName(self.slug)) {
+    return bad('self is not an object with a Tower id and a Tower name');
+  }
+
+  if (!isPlainObject(body.limits)) return bad('limits is not an object');
+  const limits = {} as PeerCloudLimits;
+  for (const field of LISTING_LIMIT_FIELDS) {
+    const value = body.limits[field];
+    if (!isJsonInteger(value, 0)) return bad(`limits.${field} is not a non-negative integer`);
+    limits[field] = value;
+  }
+
+  if (!Array.isArray(body.towers)) return bad('towers is not an array');
+  const towers: PeerListingTower[] = [];
+  const ids = new Set<string>([self.towerId as string]);
+  const names = new Set<string>([self.slug as string]);
+  for (const [i, entry] of body.towers.entries()) {
+    const at = `towers[${i}]`;
+    if (!isPlainObject(entry)) return bad(`${at} is not an object`);
+    if (!matches(CLOUD_ID_PATTERN)(entry.towerId)) return bad(`${at}.towerId is not a Tower id`);
+    if (!isListedTowerName(entry.slug)) return bad(`${at}.slug is not a Tower name`);
+    if (typeof entry.online !== 'boolean') return bad(`${at}.online is not true or false`);
+    if (!isProtocolList(entry.protocols)) return bad(`${at}.protocols is not a list of protocol versions`);
+    if (!LISTED_SWITCH_STATES.includes(entry.remoteMessaging as PeerListedSwitchState)) {
+      return bad(`${at}.remoteMessaging is not "on", "off" or "unknown"`);
+    }
+    if (ids.has(entry.towerId as string)) return bad(`${at}.towerId repeats this Tower's or another entry's`);
+    if (names.has(entry.slug as string)) return bad(`${at}.slug repeats this Tower's or another entry's`);
+    ids.add(entry.towerId as string);
+    names.add(entry.slug as string);
+    towers.push({
+      towerId: entry.towerId as string,
+      slug: entry.slug as string,
+      online: entry.online,
+      protocols: [...entry.protocols],
+      remoteMessaging: entry.remoteMessaging as PeerListedSwitchState,
+    });
+  }
+  return {
+    ok: true,
+    listing: { v: PEER_PROTOCOL_VERSION, relay, self: { towerId: self.towerId as string, slug: self.slug as string }, limits, towers },
+  };
+}
+
+/** Why a call to the listing or the switch-state report did not succeed. */
+export type CloudRouteFailureReason =
+  /** C's answer with the contract's body: the key did not authenticate. */
+  | 'unauthenticated'
+  /** C's answer with the contract's body: a limit tripped, `retryAfterSec` with it. */
+  | 'rate-limited'
+  /** C's answer with the contract's body: the switch-state report's body did not fit. */
+  | 'malformed'
+  /** A `200` listing whose body does not fit section 3. */
+  | 'bad-listing'
+  | PeerLocalAnswerReason;
+
+export interface CloudRouteFailure {
+  ok: false;
+  /** The HTTP status, or `null` when there was no answer. */
+  status: number | null;
+  reason: CloudRouteFailureReason;
+  retryAfterSec: number | null;
+  /** Worth trying again (section 2's rule for the report): no answer, a 5xx or a `429`, or the cloud unreachable. */
+  retryable: boolean;
+  /** For `bad-listing`: what did not fit, naming a field and never its value. */
+  problem?: string;
+}
+
+export type ListingAnswer = { ok: true; listing: PeerListing } | CloudRouteFailure;
+export type SwitchReportAnswer = { ok: true } | CloudRouteFailure;
+
+/** The statuses each route answers with the contract's body, and the reasons each may carry. */
+const ROUTE_ANSWERS: Readonly<Record<'listing' | 'state', Readonly<Record<number, readonly CloudRouteFailureReason[]>>>> = {
+  listing: { 401: ['unauthenticated'], 429: ['rate-limited'] },
+  state: { 400: ['malformed'], 401: ['unauthenticated'], 429: ['rate-limited'] },
+};
+
+/**
+ * A failed call to the listing or the switch-state report, as section 6 reads an answer:
+ * C's body for a status the route gives, else an answer without the body, which before
+ * the cloud has ever stated a relay means no relay for a `404`, and the cloud unreachable
+ * for anything else.
+ */
+function cloudRouteFailure(
+  call: RelayCallResult,
+  route: 'listing' | 'state',
+  relayStated: boolean,
+): CloudRouteFailure {
+  if (!call.answered) return { ok: false, status: null, reason: 'cloud-unreachable', retryAfterSec: null, retryable: true };
+  const retryableStatus = call.status >= 500 || call.status === 429;
+  const reasons = ROUTE_ANSWERS[route][call.status];
+  if (reasons !== undefined) {
+    const answer = readAnswerBody(call, { decidedBy: 'cloud', status: call.status });
+    const reason = answer === null ? null : reasonOf(answer);
+    if (answer !== null && reasons.includes(reason as CloudRouteFailureReason)) {
+      const retryAfterSec = 'retryAfterSec' in answer && answer.retryAfterSec !== undefined ? answer.retryAfterSec : null;
+      return { ok: false, status: call.status, reason: reason as CloudRouteFailureReason, retryAfterSec, retryable: retryableStatus };
+    }
+  }
+  if (!relayStated && call.status === 404) {
+    return { ok: false, status: 404, reason: 'no-relay', retryAfterSec: null, retryable: false };
+  }
+  return { ok: false, status: call.status, reason: 'cloud-unreachable', retryAfterSec: null, retryable: true };
+}
+
+/**
+ * `GET /api/peer/towers` from S's side (sections 3 and 6): a `200` whose body fits is the
+ * listing; a `200` that does not fit is `bad-listing`; anything else is read as
+ * {@link cloudRouteFailure} reads it. `relayStated` is as for {@link classifyRelayAnswer}.
+ * The contract sets no size for a listing; `maxBytes` is the reader's own bound.
+ */
+export function classifyListingAnswer(call: RelayCallResult, context: { relayStated: boolean; maxBytes: number }): ListingAnswer {
+  if (call.answered && call.status === 200) {
+    const unfit = (problem: string): ListingAnswer => ({ ok: false, status: 200, reason: 'bad-listing', retryAfterSec: null, retryable: false, problem });
+    if (!isMediaTypeJson(call.contentType)) return unfit('the media type is not application/json');
+    if (call.body.length > context.maxBytes) return unfit(`the body is longer than ${context.maxBytes} bytes`);
+    const read = readPeerListing(call.body);
+    return read.ok ? { ok: true, listing: read.listing } : unfit(read.problem);
+  }
+  return cloudRouteFailure(call, 'listing', context.relayStated);
+}
+
+/**
+ * `PUT /api/peer/state` from S's side (sections 2 and 6): `204` is done. A failure is
+ * retryable on no answer, a 5xx or a `429` (with or without the body), and on an answer
+ * without the body once a relay has been stated (the cloud unreachable, as section 6 holds
+ * it); never on C's `400` or `401`, or on no relay.
+ */
+export function classifySwitchReportAnswer(call: RelayCallResult, context: { relayStated: boolean }): SwitchReportAnswer {
+  if (call.answered && call.status === 204) return { ok: true };
+  return cloudRouteFailure(call, 'state', context.relayStated);
 }
 
 // ===========================================================================

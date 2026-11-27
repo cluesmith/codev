@@ -1,15 +1,16 @@
 /**
- * The local Tower routes behind `afx peer on|off|grants|grant|revoke|limits` (Spec 1967).
+ * The local Tower routes behind `afx peer on|off|list|grants|grant|revoke|limits` (Spec 1967).
  *
- * Reached only through `handleRequest`'s key check, like every other route. These are the
+ * Reached only through `handleRequest`'s key check, like every other route. Most are the
  * receiving Tower's own decisions about who may message whom, made by its owner:
  *
  *   GET  /api/peer/switch         the remote-messaging switch
- *   PUT  /api/peer/switch         turn it on (a human's act) or off
+ *   PUT  /api/peer/switch         turn it on (a human's act) or off; the change is reported to Codev Cloud
+ *   GET  /api/peer/towers         my other Towers, from Codev Cloud within its call budget, else cached
  *   GET  /api/peer/grants         this Tower's grants [?tower=<tower-ref>]
  *   POST /api/peer/grants         add grants (a human's act)
  *   POST /api/peer/grants/revoke  remove grants
- *   GET  /api/peer/limits         the limits this Tower enforces itself
+ *   GET  /api/peer/limits         the limits this Tower enforces itself, and Codev Cloud's
  *
  * Turning the switch on and adding a grant widen who may put text into an agent's prompt,
  * so each requires `humanApproved: true`, which the CLI sends only for
@@ -25,6 +26,7 @@
 import type http from 'node:http';
 import type Database from 'better-sqlite3';
 import type {
+  PeerCloudRelay,
   PeerGrantChange,
   PeerGrantModeName,
   PeerGrantResponse,
@@ -32,7 +34,10 @@ import type {
   PeerGrantView,
   PeerLimitsResponse,
   PeerRevokeResponse,
+  PeerSwitchReport,
   PeerSwitchResponse,
+  PeerSwitchState,
+  PeerTowersResponse,
 } from '@cluesmith/codev-types';
 import type { ResolvedPeerSettings } from '../../lib/config.js';
 import { parseJsonBody } from '../utils/server-utils.js';
@@ -49,6 +54,7 @@ import {
 } from '../peer/grants.js';
 import { HUMAN_APPROVAL_FLAG, readSwitch, setSwitch } from '../peer/switch.js';
 import { withdrawRemoteMail } from '../peer/receiver.js';
+import type { PeerListRefresh } from '../peer/peer-list.js';
 import {
   listGrants,
   listTowerNames,
@@ -65,6 +71,18 @@ export const PEER_ROUTE_PREFIX = '/api/peer/';
 /** A grant request is a handful of short strings; anything near this is not one. */
 const MAX_BODY_BYTES = 64 * 1024;
 
+/** What the routes ask of Codev Cloud and the peer list (`peer/cloud-wiring.ts` in production). */
+export interface PeerCloudRouteDeps {
+  /** Fetch the peer list on demand, within the call budget; the cached list stands on any failure. */
+  refreshListing(): Promise<PeerListRefresh>;
+  /** Whether the cloud has a relay, as this Tower knows it now. */
+  relay(): PeerCloudRelay;
+  /** Tell the cloud the switch changed, and say what was done. */
+  reportSwitch(state: PeerSwitchState): PeerSwitchReport;
+  /** Is this Tower's own tunnel up? */
+  tunnelUp(): boolean;
+}
+
 /** What the handlers read. Each is called per request, so a test can change the world between calls. */
 export interface PeerRouteDeps {
   db: () => Database.Database;
@@ -75,6 +93,8 @@ export interface PeerRouteDeps {
   ownTower: () => OwnTower;
   /** The `peer` settings of the user's config, checked; throws on a malformed value. */
   settings: () => ResolvedPeerSettings;
+  /** Codev Cloud, as the sending Tower sees it. */
+  cloud: () => PeerCloudRouteDeps;
   log: (level: 'INFO' | 'WARN' | 'ERROR', message: string) => void;
 }
 
@@ -196,9 +216,20 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     });
   };
 
-  const peerOf = (text: string, purpose: 'grant' | 'existing') => {
-    const db = deps.db();
-    const resolved = resolvePeerTower(text, readListing(db), listTowerNames(db), deps.ownTower(), purpose);
+  /**
+   * The peer a tower-ref names. A name that is not in the cached list is looked up again
+   * after a refresh within the call budget, since the Tower may be new or renamed.
+   */
+  const peerOf = async (text: string, purpose: 'grant' | 'existing') => {
+    const resolve = () => {
+      const db = deps.db();
+      return resolvePeerTower(text, readListing(db), listTowerNames(db), deps.ownTower(), purpose);
+    };
+    let resolved = resolve();
+    if (!resolved.ok && resolved.code === 'UNKNOWN_TOWER') {
+      await deps.cloud().refreshListing();
+      resolved = resolve();
+    }
     if (!resolved.ok) {
       const status = resolved.code === 'UNKNOWN_TOWER' ? 404 : resolved.code === 'AMBIGUOUS' ? 409 : 400;
       throw new RequestError(status, resolved.code, resolved.message);
@@ -206,7 +237,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     return resolved;
   };
 
-  const switchResponse = (changed: boolean): PeerSwitchResponse => {
+  const switchResponse = (changed: boolean, cloudReport: PeerSwitchReport | null): PeerSwitchResponse => {
     const db = deps.db();
     const setting = readSwitch(db);
     return {
@@ -215,7 +246,21 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
       changedAt: setting.changedAt,
       towerName: deps.ownTower().name,
       grantCount: listGrants(db).length,
+      cloudReport,
     };
+  };
+
+  /**
+   * Tell the cloud of a change made. The switch has changed whatever comes of this, so a
+   * failure here is logged and reported, never turned into a failed request.
+   */
+  const reportSwitch = (state: PeerSwitchState): PeerSwitchReport => {
+    try {
+      return deps.cloud().reportSwitch(state);
+    } catch (err) {
+      deps.log('ERROR', `Peer: the switch change could not be reported to Codev Cloud: ${(err as Error).message}`);
+      return 'failed';
+    }
   };
 
   function logWithdrawn(count: number): void {
@@ -242,7 +287,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     })();
     if (change.changed) deps.log('INFO', `Peer: remote messaging turned ${state}`);
     logWithdrawn(withdrawn);
-    return switchResponse(change.changed);
+    return switchResponse(change.changed, change.changed ? reportSwitch(state) : null);
   }
 
   async function postGrants(req: http.IncomingMessage): Promise<PeerGrantResponse> {
@@ -254,7 +299,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
       throw new RequestError(400, 'INVALID_PARAMS', "'mode' must be \"deliver\" or \"hold\".");
     }
     const mode = modeValue as PeerGrantModeName;
-    const peer = peerOf(requiredString(body, 'tower'), 'grant');
+    const peer = await peerOf(requiredString(body, 'tower'), 'grant');
     const targets = resolveGrantTargets(recipientsOf(body), deps.world(), 'grant');
     if (!targets.ok) {
       throw new RequestError(targets.code === 'NOT_FOUND' ? 404 : targets.code === 'AMBIGUOUS' ? 409 : 400, targets.code, targets.message);
@@ -283,7 +328,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
 
   async function postRevoke(req: http.IncomingMessage): Promise<PeerRevokeResponse> {
     const body = await readObject(req);
-    const peer = peerOf(requiredString(body, 'tower'), 'existing');
+    const peer = await peerOf(requiredString(body, 'tower'), 'existing');
     const targets = resolveGrantTargets(recipientsOf(body), deps.world(), 'revoke');
     if (!targets.ok) {
       throw new RequestError(targets.code === 'NOT_FOUND' ? 404 : targets.code === 'AMBIGUOUS' ? 409 : 400, targets.code, targets.message);
@@ -313,11 +358,39 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     return { tower: { towerId: peer.towerId, name: peer.name }, removed };
   }
 
-  function getGrants(url: URL): PeerGrantsResponse {
-    const db = deps.db();
+  async function getGrants(url: URL): Promise<PeerGrantsResponse> {
     const tower = url.searchParams.get('tower');
-    const grants = tower === null ? listGrants(db) : listGrants(db, peerOf(tower, 'existing').towerId);
-    return { remoteMessaging: readSwitch(db).state, grants: viewsOf(grants) };
+    const peerTowerId = tower === null ? undefined : (await peerOf(tower, 'existing')).towerId;
+    const db = deps.db();
+    return { remoteMessaging: readSwitch(db).state, grants: viewsOf(listGrants(db, peerTowerId)) };
+  }
+
+  /** My other Towers, and what each may message here. Works whatever the switch says. */
+  async function getTowers(): Promise<PeerTowersResponse> {
+    const cloud = deps.cloud();
+    const refresh = await cloud.refreshListing();
+    const db = deps.db();
+    const views = viewsOf(listGrants(db));
+    return {
+      remoteMessaging: readSwitch(db).state,
+      towerName: deps.ownTower().name,
+      tunnel: cloud.tunnelUp() ? 'up' : 'down',
+      relay: cloud.relay(),
+      listing: {
+        fresh: refresh.fresh,
+        refreshedAt: refresh.listing.refreshedAt,
+        problem: refresh.problem,
+        retryAfterSec: refresh.retryAfterSec,
+      },
+      towers: refresh.listing.towers.map((t) => ({
+        towerId: t.towerId,
+        name: t.slug,
+        online: t.online,
+        protocols: t.protocols,
+        remoteMessaging: t.remoteMessaging,
+        mayMessage: views.filter((v) => v.peerTowerId === t.towerId),
+      })),
+    };
   }
 
   function getLimits(): PeerLimitsResponse {
@@ -327,7 +400,9 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     } catch (err) {
       throw new RequestError(500, 'CONFIG_INVALID', `The peer settings in your Codev config are not valid: ${(err as Error).message}`);
     }
-    return { tower: settings.limits, recordRetentionDays: settings.recordRetentionDays };
+    const listing = readListing(deps.db());
+    const cloud = listing.refreshedAt !== null && listing.limits !== null ? { limits: listing.limits, listedAt: listing.refreshedAt } : null;
+    return { tower: settings.limits, recordRetentionDays: settings.recordRetentionDays, cloud };
   }
 
   return async (req, res, url) => {
@@ -336,11 +411,14 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     try {
       switch (route) {
         case 'switch':
-          if (method === 'GET') return sendJson(res, 200, switchResponse(false));
+          if (method === 'GET') return sendJson(res, 200, switchResponse(false, null));
           if (method === 'PUT') return sendJson(res, 200, await putSwitch(req));
           break;
+        case 'towers':
+          if (method === 'GET') return sendJson(res, 200, await getTowers());
+          break;
         case 'grants':
-          if (method === 'GET') return sendJson(res, 200, getGrants(url));
+          if (method === 'GET') return sendJson(res, 200, await getGrants(url));
           if (method === 'POST') return sendJson(res, 200, await postGrants(req));
           break;
         case 'grants/revoke':

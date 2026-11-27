@@ -1,8 +1,9 @@
 /**
  * The wire contract module, layer A (Spec 1967, plan phase 1): the field rules, the code
  * point lists, the payload and its caps, R's steps 1 to 7 beyond what the shared vectors
- * express, the answers in both directions, S's refusal order, and the structural rule that
- * no other production file speaks the contract.
+ * express, the answers in both directions, the listing and the switch-state report as S
+ * reads their answers, S's refusal order, and the structural rule that no other production
+ * file speaks the contract.
  *
  * Code points that are line terminators or controls are built with String.fromCodePoint,
  * never written into this file.
@@ -21,7 +22,9 @@ import {
   SENDER_CHECK_ORDER,
   STATEMENT_FIELD_RULES,
   buildRelayRequestHeaders,
+  classifyListingAnswer,
   classifyRelayAnswer,
+  classifySwitchReportAnswer,
   decodeBase64Url,
   decodeSessionSecret,
   encodeBase64Url,
@@ -29,11 +32,13 @@ import {
   encodeMessagePayload,
   encodeQueryPayload,
   encodeReceiverAnswer,
+  encodeSwitchStateReport,
   isWireAddress,
   normalizeRemoteBody,
   prepareRemoteBody,
   printableDetail,
   readMessagePayload,
+  readPeerListing,
   readQueryPayload,
   readRelayRequestHeaders,
   verifyRelayedRequest,
@@ -927,6 +932,163 @@ describe('answers as S reads them: who decided, and what', () => {
 // ---------------------------------------------------------------------------
 // S's refusal order
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Sections 2 and 3: the switch-state report and the listing, as S reads them
+// ---------------------------------------------------------------------------
+
+const LISTING = {
+  v: 1,
+  relay: { protocols: [1] },
+  self: { towerId: '01JMBP000000000000000000AA', slug: 'ana-s-mbp' },
+  limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
+  towers: [{ towerId: '01JDEVVM0000000000000000AA', slug: 'devvm', online: true, protocols: [1], remoteMessaging: 'on' }],
+};
+
+/** The listing with one change made at a path: `undefined` removes the field. */
+function listingWith(path: string, value: unknown): Record<string, unknown> {
+  const copy = structuredClone(LISTING) as Record<string, any>;
+  const keys = path.split('.');
+  const last = keys.pop()!;
+  const parent = keys.reduce((node, key) => node[key], copy);
+  if (value === undefined) delete parent[last];
+  else parent[last] = value;
+  return copy;
+}
+
+const listingBytes = (value: unknown) => utf8(typeof value === 'string' ? value : JSON.stringify(value));
+
+describe('the listing, read strictly (section 3)', () => {
+  it('reads a listing that fits, leaving out the fields it does not know', () => {
+    const extra = { ...LISTING, later: true, self: { ...LISTING.self, extra: 1 }, towers: [{ ...LISTING.towers[0], since: 3 }] };
+    expect(readPeerListing(listingBytes(extra))).toEqual({ ok: true, listing: LISTING });
+    expect(readPeerListing(listingBytes(listingWith('relay', null)))).toMatchObject({ ok: true, listing: { relay: null } });
+    expect(readPeerListing(listingBytes(listingWith('towers', [])))).toMatchObject({ ok: true, listing: { towers: [] } });
+    // "Integer" is judged on the parsed value.
+    expect(readPeerListing(listingBytes(JSON.stringify(LISTING).replace('"v":1', '"v":1.0')))).toMatchObject({ ok: true });
+    // A slug at the slug rule's longest, 63 characters.
+    expect(readPeerListing(listingBytes(listingWith('towers.0.slug', 'a'.repeat(63))))).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ['v', 2, 'v is not 1'],
+    ['relay', 'yes', 'relay is neither null nor an object with a list of protocol versions'],
+    ['relay.protocols', [0], 'relay is neither null nor an object with a list of protocol versions'],
+    ['self', undefined, 'self is not an object with a Tower id and a Tower name'],
+    ['self.towerId', 'a/b', 'self is not an object with a Tower id and a Tower name'],
+    ['self.slug', "Ana's MBP", 'self is not an object with a Tower id and a Tower name'],
+    ['limits', undefined, 'limits is not an object'],
+    ['limits.messagesPerPairPerMinute', -1, 'limits.messagesPerPairPerMinute is not a non-negative integer'],
+    ['limits.queriesPerPairPerMinute', 1.5, 'limits.queriesPerPairPerMinute is not a non-negative integer'],
+    ['towers', {}, 'towers is not an array'],
+    ['towers.0', 'devvm', 'towers[0] is not an object'],
+    ['towers.0.towerId', '', 'towers[0].towerId is not a Tower id'],
+    ['towers.0.slug', 'DevVM', 'towers[0].slug is not a Tower name'],
+    ['towers.0.slug', 'a'.repeat(64), 'towers[0].slug is not a Tower name'],
+    ['towers.0.slug', 'dev:vm', 'towers[0].slug is not a Tower name'],
+    ['towers.0.slug', ' devvm', 'towers[0].slug is not a Tower name'],
+    ['towers.0.online', 'yes', 'towers[0].online is not true or false'],
+    ['towers.0.protocols', [1.5], 'towers[0].protocols is not a list of protocol versions'],
+    ['towers.0.remoteMessaging', 'maybe', 'towers[0].remoteMessaging is not "on", "off" or "unknown"'],
+    ['towers.0.towerId', '01JMBP000000000000000000AA', "towers[0].towerId repeats this Tower's or another entry's"],
+    ['towers.0.slug', 'ana-s-mbp', "towers[0].slug repeats this Tower's or another entry's"],
+  ])('refuses %s set to %j, naming the field', (path, value, problem) => {
+    expect(readPeerListing(listingBytes(listingWith(path, value)))).toEqual({ ok: false, problem });
+  });
+
+  it('refuses two entries for one Tower, and a name listed twice', () => {
+    const twice = listingWith('towers', [LISTING.towers[0], { ...LISTING.towers[0], slug: 'other' }]);
+    expect(readPeerListing(listingBytes(twice))).toEqual({ ok: false, problem: "towers[1].towerId repeats this Tower's or another entry's" });
+    const sameName = listingWith('towers', [LISTING.towers[0], { ...LISTING.towers[0], towerId: '01JOTHER00000000000000000A' }]);
+    expect(readPeerListing(listingBytes(sameName))).toEqual({ ok: false, problem: "towers[1].slug repeats this Tower's or another entry's" });
+  });
+
+  it('refuses what is not one JSON object, a repeated key, and bytes that are not UTF-8, never quoting a value', () => {
+    expect(readPeerListing(utf8('[]'))).toEqual({ ok: false, problem: 'the body is not one JSON object' });
+    expect(readPeerListing(Uint8Array.from([0x7b, 0xff, 0x7d]))).toEqual({ ok: false, problem: 'the body is not one JSON object' });
+    expect(readPeerListing(listingBytes(`{"v":1,${JSON.stringify(LISTING).slice(1)}`))).toEqual({ ok: false, problem: 'the body repeats a key' });
+    const hostile = readPeerListing(listingBytes(listingWith('towers.0.slug', `dev${cp(0x1b)}[2Jvm`)));
+    expect(hostile).toEqual({ ok: false, problem: 'towers[0].slug is not a Tower name' });
+  });
+});
+
+describe('the listing call, as S reads its answer', () => {
+  const stated = { relayStated: true, maxBytes: 1_048_576 };
+  const never = { relayStated: false, maxBytes: 1_048_576 };
+  const bodyless = (status: number): RelayCallResult => ({ answered: true, status, contentType: undefined, outcomeHeader: undefined, body: new Uint8Array() });
+
+  it('takes a 200 that fits, and refuses one that does not, by its media type, its size or its body', () => {
+    expect(classifyListingAnswer(answered(200, LISTING, ''), stated)).toEqual({ ok: true, listing: LISTING });
+    expect(classifyListingAnswer(answered(200, LISTING, '', 'application/json; charset=utf-8'), stated)).toMatchObject({ ok: true });
+    expect(classifyListingAnswer(answered(200, LISTING, '', 'text/plain'), stated)).toEqual({
+      ok: false, status: 200, reason: 'bad-listing', retryAfterSec: null, retryable: false, problem: 'the media type is not application/json',
+    });
+    expect(classifyListingAnswer(answered(200, LISTING, ''), { relayStated: true, maxBytes: 10 })).toMatchObject({
+      reason: 'bad-listing', problem: 'the body is longer than 10 bytes',
+    });
+    expect(classifyListingAnswer(answered(200, listingWith('v', 2), ''), stated)).toMatchObject({ reason: 'bad-listing', problem: 'v is not 1' });
+  });
+
+  it("reads C's 401 and 429, with retryAfterSec", () => {
+    expect(classifyListingAnswer(answered(401, { v: 1, outcome: 'refused', reason: 'unauthenticated' }), stated)).toEqual({
+      ok: false, status: 401, reason: 'unauthenticated', retryAfterSec: null, retryable: false,
+    });
+    expect(classifyListingAnswer(answered(429, { v: 1, outcome: 'refused', reason: 'rate-limited', retryAfterSec: 20 }), stated)).toEqual({
+      ok: false, status: 429, reason: 'rate-limited', retryAfterSec: 20, retryable: true,
+    });
+  });
+
+  it('reads an answer without the body as section 6 does: no relay for a 404 from a cloud that never stated one, else the cloud unreachable', () => {
+    expect(classifyListingAnswer(bodyless(404), never)).toMatchObject({ reason: 'no-relay', retryable: false });
+    expect(classifyListingAnswer(bodyless(404), stated)).toMatchObject({ reason: 'cloud-unreachable', status: 404 });
+    for (const status of [401, 403, 429, 502]) {
+      expect(classifyListingAnswer(bodyless(status), never)).toMatchObject({ reason: 'cloud-unreachable', status });
+    }
+    expect(classifyListingAnswer({ answered: false }, stated)).toEqual({ ok: false, status: null, reason: 'cloud-unreachable', retryAfterSec: null, retryable: true });
+  });
+
+  it("takes a body only for the statuses the listing gives: a relay answer's body on a listing call is not the contract's", () => {
+    expect(classifyListingAnswer(answered(404, { v: 1, outcome: 'refused', reason: 'unknown-tower' }), never)).toMatchObject({ reason: 'no-relay' });
+    expect(classifyListingAnswer(answered(503, { v: 1, outcome: 'unavailable', reason: 'tower-offline' }), stated)).toMatchObject({
+      reason: 'cloud-unreachable', status: 503, retryable: true,
+    });
+    // A 401 whose body claims another reason is not C's answer either.
+    expect(classifyListingAnswer(answered(401, { v: 1, outcome: 'refused', reason: 'rate-limited' }), stated)).toMatchObject({ reason: 'cloud-unreachable' });
+  });
+});
+
+describe('the switch-state report, as S writes it and reads its answer (section 2)', () => {
+  const stated = { relayStated: true };
+  const bodyless = (status: number): RelayCallResult => ({ answered: true, status, contentType: undefined, outcomeHeader: undefined, body: new Uint8Array() });
+
+  it('writes exactly the object the contract shows', () => {
+    expect(new TextDecoder().decode(encodeSwitchStateReport('on'))).toBe('{"remoteMessaging":"on"}');
+    expect(new TextDecoder().decode(encodeSwitchStateReport('off'))).toBe('{"remoteMessaging":"off"}');
+  });
+
+  it('is done on a 204 only', () => {
+    expect(classifySwitchReportAnswer(bodyless(204), stated)).toEqual({ ok: true });
+    expect(classifySwitchReportAnswer(bodyless(200), stated)).toMatchObject({ ok: false, reason: 'cloud-unreachable', retryable: true });
+  });
+
+  it("is not retried on C's 400 or 401, and is on a 429, a 5xx or no answer", () => {
+    expect(classifySwitchReportAnswer(answered(400, { v: 1, outcome: 'refused', reason: 'malformed' }), stated)).toMatchObject({ reason: 'malformed', retryable: false });
+    expect(classifySwitchReportAnswer(answered(401, { v: 1, outcome: 'refused', reason: 'unauthenticated' }), stated)).toMatchObject({ reason: 'unauthenticated', retryable: false });
+    expect(classifySwitchReportAnswer(answered(429, { v: 1, outcome: 'refused', reason: 'rate-limited', retryAfterSec: 45 }), stated)).toEqual({
+      ok: false, status: 429, reason: 'rate-limited', retryAfterSec: 45, retryable: true,
+    });
+    for (const status of [429, 500, 502, 503, 504]) {
+      expect(classifySwitchReportAnswer(bodyless(status), stated)).toMatchObject({ reason: 'cloud-unreachable', retryable: true });
+    }
+    expect(classifySwitchReportAnswer({ answered: false }, stated)).toMatchObject({ reason: 'cloud-unreachable', retryable: true });
+  });
+
+  it('is not retried against a cloud with no relay, and is against one that stated a relay and answers without the body', () => {
+    expect(classifySwitchReportAnswer(bodyless(404), { relayStated: false })).toMatchObject({ reason: 'no-relay', retryable: false });
+    expect(classifySwitchReportAnswer(bodyless(404), stated)).toMatchObject({ reason: 'cloud-unreachable', retryable: true });
+    expect(classifySwitchReportAnswer(bodyless(401), stated)).toMatchObject({ reason: 'cloud-unreachable', retryable: true });
+  });
+});
 
 describe("S's refusal order", () => {
   it("lists S's checks in the contract's order (section 4, checks 0 to 9)", () => {

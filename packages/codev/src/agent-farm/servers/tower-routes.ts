@@ -87,6 +87,7 @@ import { addressBook } from './tower-address-book.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { createPeerRouteHandler, PEER_ROUTE_PREFIX, type PeerRouteDeps } from './peer-routes.js';
+import { peerCloudRouteDeps } from '../peer/cloud-wiring.js';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import {
   formatArchitectMessage,
@@ -313,6 +314,7 @@ function peerRouteDeps(ctx: RouteContext): PeerRouteDeps {
     },
     // Tower-global, from the user-global layer, as the mailbox settings are read.
     settings: () => resolvePeerSettings(loadConfig(homedir())),
+    cloud: peerCloudRouteDeps,
     log: ctx.log,
   };
 }

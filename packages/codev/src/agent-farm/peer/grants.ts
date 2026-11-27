@@ -355,7 +355,7 @@ function refusePeer(code: PeerRefusal['code'], message: string): PeerRefusal {
 }
 
 /** When the cached listing was fetched, for a refusal that depends on it. */
-function listedWhen(listing: CachedListing): string {
+export function listedWhen(listing: CachedListing): string {
   return listing.refreshedAt === null
     ? 'this Tower has not listed its peers yet'
     : `its peer list was last refreshed ${new Date(listing.refreshedAt).toISOString()}`;

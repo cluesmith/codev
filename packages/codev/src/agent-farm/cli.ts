@@ -906,10 +906,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Peer commands (Spec 1967) — the remote-messaging switch and grants between your Towers
+  // Peer commands (Spec 1967) — the remote-messaging switch, grants and the list of your Towers
   const peerCmd = program
     .command('peer')
-    .description('Messaging between your Towers: the remote-messaging switch and grants');
+    .description('Messaging between your Towers: the remote-messaging switch, grants and your other Towers');
 
   /** Run one `afx peer` command: a refusal is printed and exits non-zero. */
   const runPeer = async (run: (peer: typeof import('./commands/peer.js')) => Promise<void>): Promise<void> => {
@@ -937,6 +937,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .description('Turn remote messaging off: this Tower sends nothing to other Towers and accepts nothing')
     .option('-p, --port <port>', 'Tower port (default: 4100)')
     .action((options) => runPeer((peer) => peer.peerOff({ port: portOf(options) })));
+
+  peerCmd
+    .command('list')
+    .description('List your other Towers: online or not, and what each may message here')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((options) => runPeer((peer) => peer.peerList({ port: portOf(options) })));
 
   peerCmd
     .command('grants [tower]')
