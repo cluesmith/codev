@@ -539,6 +539,11 @@ export interface PRView {
   headRefName: string;
   additions: number;
   deletions: number;
+  /**
+   * Full SHA of the PR's head commit as the forge sees it: GitHub `headRefOid`, GitLab `sha`,
+   * Gitea `head.sha`. A forge preset that cannot supply it omits it.
+   */
+  headRefOid?: string;
 }
 
 // --- Issue search (GET /api/issue-search) ---
