@@ -32,6 +32,7 @@ vi.mock('../lib/github.js', async (importOriginal) => {
     overviewBackend: () => 'gh',
     fetchForOverview: async (concept: string): Promise<ForgeCommandResult> => {
       fake.calls.push(concept);
+      if (concept === 'overview-bundle') return { data: { prs: [], issues: [], recentlyClosed: [], recentlyMerged: [] }, error: null };
       return { data: concept === 'user-identity' ? 'octocat' : [], error: null };
     },
   };
@@ -186,8 +187,14 @@ describe('OverviewCache reads the projected TTLs (Spec 1647)', () => {
   afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
   const count = (concept: string) => fake.calls.filter((c) => c === concept).length;
+  /** The four-call projection's numbers belong to four-call mode. */
+  const fourCall = () => {
+    fs.mkdirSync(path.join(tmpDir, '.codev'));
+    fs.writeFileSync(path.join(tmpDir, '.codev', 'config.json'), JSON.stringify({ forge: { 'overview-bundle': null } }));
+  };
 
   it('refetches pr-list at exactly LIST_TTL_MS and recently-closed at exactly SEARCH_TTL_MS', async () => {
+    fourCall();
     const cache = new OverviewCache({ now: () => clock });
     const start = clock;
     await cache.getOverview(tmpDir);
@@ -211,6 +218,7 @@ describe('OverviewCache reads the projected TTLs (Spec 1647)', () => {
   });
 
   it('an invalidated pr-list refetches at exactly INVALIDATE_DEBOUNCE_MS (the churn projection)', async () => {
+    fourCall();
     const cache = new OverviewCache({ now: () => clock });
     const start = clock;
     await cache.getOverview(tmpDir);
@@ -225,5 +233,33 @@ describe('OverviewCache reads the projected TTLs (Spec 1647)', () => {
     await cache.getOverview(tmpDir);
     expect(count('pr-list')).toBe(2);
     expect(INVALIDATE_DEBOUNCE_MS).toBeLessThan(LIST_TTL_MS); // the refetch is invalidation's, not the TTL's
+  });
+
+  it('bundled: refetches the bundle at exactly LIST_TTL_MS and, invalidated, at exactly INVALIDATE_DEBOUNCE_MS', async () => {
+    const cache = new OverviewCache({ now: () => clock });
+    const start = clock;
+    await cache.getOverview(tmpDir);
+    expect(count('overview-bundle')).toBe(1);
+
+    clock = start + LIST_TTL_MS - 1;
+    await cache.getOverview(tmpDir);
+    expect(count('overview-bundle')).toBe(1);
+
+    clock = start + LIST_TTL_MS;
+    await cache.getOverview(tmpDir);
+    expect(count('overview-bundle')).toBe(2);
+
+    const refetchedAt = clock;
+    clock = refetchedAt + 1;
+    cache.invalidate();
+    clock = refetchedAt + INVALIDATE_DEBOUNCE_MS - 1;
+    await cache.getOverview(tmpDir);
+    expect(count('overview-bundle')).toBe(2);
+
+    clock = refetchedAt + INVALIDATE_DEBOUNCE_MS;
+    await cache.getOverview(tmpDir);
+    expect(count('overview-bundle')).toBe(3);
+    // No constituent runs in bundled mode.
+    expect(fake.calls.filter((c) => (OVERVIEW_CONSTITUENTS as readonly string[]).includes(c))).toEqual([]);
   });
 });

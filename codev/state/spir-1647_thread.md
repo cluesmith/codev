@@ -139,3 +139,50 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - doctor.test.ts's forge mock now hands doctor the real `resolveOverviewPlan`, so each doctor
   case is driven by a forge config, not a canned plan. The concept list gains `overview-bundle`
   and its comment is count-free. The two "18 concepts" comments in doctor.ts are count-free too.
+
+## 2026-11-27: Implement Phase 3 (the cache's bundle path)
+- `github.ts`: `overviewPlan(cwd)` (a config that fails to load counts as none, so the bundle's
+  own dispatch reports the load error); `fetchForOverview('overview-bundle')` passes the 60 s /
+  40 MiB limits and `CODEV_SINCE_DATE`, holds the output to the contract (`malformed` names
+  what is wrong), drops extra top-level keys, and 24 h-filters both searches.
+- `overview.ts`: one `bundleCache` entry through the unchanged `cachedFetch` (`LIST_TTL_MS`,
+  list-invalidated), so every #1645 mechanism is reused as is. `getOverview` resolves the plan
+  per poll and `splitBundle` turns the bundle outcome into the four section outcomes the rest
+  of `getOverview` already reads. `forgeStatus`, `errors` and the derivations are untouched.
+- One choice the plan left open: `CacheEntry`/`FetchOutcome.reason` hold the whole phrase
+  (`overview-bundle output malformed (<what>)`), built in `dispatch` from the concept name, so
+  `describeMissing` stays concept-agnostic. A flagged `null` section is a separate boolean
+  (`nullSection`), because its text has no "could not fetch" tail.
+- Existing tests: overview.test.ts and overview-rate-limit.test.ts mock `overviewPlan` to
+  four-call (one block each, no other change). The #1645 harness is re-pinned: bundled 2, then 3;
+  the four-call twin keeps 5, then 9. Its fake `gh` now logs only `$1 $2`, because the bundle's
+  query text spans many lines. Phase 2's TTL-coupling tests now pin four-call through a real
+  `.codev/config.json`, and gained a bundled counterpart (bundle refetch at exactly
+  `LIST_TTL_MS`, and invalidated at exactly `INVALIDATE_DEBOUNCE_MS`).
+- Phase 1's fake `gh` moved to `src/__tests__/helpers/spec-1647-fake-gh.ts`, so the end-to-end
+  test reuses it. It gained a `user-identity` route and a mkdir lock around its call counter,
+  since the cache runs `gh` processes in parallel (the counter's read-increment-write raced).
+- Deviation: the end-to-end parity test freezes `Date` at the recording instant
+  (`vi.useFakeTimers({ toFake: ['Date'] })`) instead of shifting fixture timestamps. The
+  effect is the same, the fixtures are not rewritten, and both modes see one clock, so an
+  item at the 24 h edge cannot flip between the two runs.
+- Mutation checks, each turning only the expected tests red: drop `reason` on the within-TTL
+  path; drop the null-section text; drop the shared suspension in the split; drop the bundle's
+  24 h filter; force four-call mode.
+- Live check (2026-11-27 ~06:00 UTC): the built `OverviewCache` against real gh on this repo,
+  through a logging gh shim, with `GH_REPO` (verified first: it drives `{owner}/{repo}`
+  expansion in `gh api graphql` outside a git checkout, so no git remote was needed).
+  - Bundle mode: 1 invocation = 2 gh processes, 2 requests (`OverviewBundle`,
+    `OverviewIssuesPage`), plus `api user`; 3.2 s. Four-call mode: 5 processes, 8 requests; 1.7 s
+    (parallel).
+  - Both modes: 7 PRs, 198 backlog, 2 recently closed (both with a merged-PR link),
+    `forgeStatus: ok`. `pendingPRs`, `backlog` and `recentlyClosed` are equal between modes, and
+    so are the key sets.
+  - Qualifiers, on unfiltered output: the window held 2 merged and 0 closed-unmerged PRs. No
+    window PR is in `recentlyClosed`, every merged item has `mergedAt`, and both search
+    sections equal their sibling concepts' number sets.
+  - Points: the rate_limit delta and `X-Ratelimit-Used` headers are unusable here; the header
+    alternates between two counters (~281 and ~423) from one request to the next. Measured
+    instead with `rateLimit(dryRun: true)` inserted into the script's own query texts:
+    `OverviewBundle` 3, `OverviewIssuesPage` 2, `OverviewSearchPage` 1, the spec's measured
+    figures. So 5 points per refresh here, against 7 for the four calls.
