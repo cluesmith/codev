@@ -473,6 +473,8 @@ describe('the payload', () => {
       ['to that has no text form', { to: { workspace: 'architect', kind: 'architect' } }],
       ['from as a string', { from: 'codev:architect' }],
       ['from of an unknown kind', { from: { kind: 'human' } }],
+      ['from naming a Tower', { from: { tower: 'devvm', workspace: 'codev', kind: 'id', name: 'builder-spir-1940' } }],
+      ['from naming an owner', { from: { owner: 'ana', workspace: 'codev', kind: 'id', name: 'builder-spir-1940' } }],
       ['sentAt missing', { sentAt: undefined }],
       ['sentAt negative', { sentAt: -1 }],
       ['sentAt with a fraction', { sentAt: sentAt + 0.5 }],

@@ -207,8 +207,9 @@ export class OutboxStoppedError extends Error {
   }
 }
 
+/** An error's class, never its message: a message can quote what came off the network. */
 function errorKind(err: unknown): string {
-  return err instanceof Error ? err.message : typeof err;
+  return err instanceof Error ? err.constructor.name : typeof err;
 }
 
 export type OutboxLogLevel = 'INFO' | 'WARN' | 'ERROR';

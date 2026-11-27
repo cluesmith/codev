@@ -494,6 +494,8 @@ describe('refusals before the persist', () => {
     ['the switch off', () => void setSwitch(f.db, 'off', f.clock.now), { reason: 'remote-off' }],
     ['another owner', () => ({ statement: { sameOwner: false } }), { reason: 'no-grant' }],
     ['a payload that is not JSON', () => ({ payload: Buffer.from('not json') }), { reason: 'malformed' }],
+    // The statement says mbp; a payload's sender may not name any Tower (criterion 10).
+    ['a payload whose sender claims another sending Tower', () => ({ from: { tower: 'devvm', workspace: 'codev', kind: 'architect', name: 'main' } as never }), { reason: 'malformed' }],
     ['a body that is not valid UTF-8', () => ({ payload: Buffer.concat([Buffer.from('{"sentAt":1,"to":{"workspace":"codev","kind":"architect"},"from":null,"body":"'), Buffer.from([0xff]), Buffer.from('"}')]) }), { reason: 'malformed' }],
     ['a sentAt six minutes ahead', () => ({ sentAt: T0 + 6 * 60_000 }), { reason: 'clock-skew' }],
     ['a sentAt 31 days old', () => ({ sentAt: T0 - 31 * DAY }), { reason: 'expired' }],

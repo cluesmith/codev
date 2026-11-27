@@ -715,6 +715,10 @@ export type RelayHeadersReadResult =
  * A relay call's headers read as C's step 2 reads them (lower-case header names, as Node
  * gives them). The `x-codev-peer-to` check against the caller's own Tower is C's, which
  * knows who called.
+ *
+ * This is the cloud's check, not the Tower's: no Tower code calls it. It is kept in the one
+ * module that speaks the wire so the contract's tests pin C's step 2 beside the rules the
+ * Tower does apply.
  */
 export function readRelayRequestHeaders(
   headers: Readonly<Record<string, string | string[] | undefined>>,
