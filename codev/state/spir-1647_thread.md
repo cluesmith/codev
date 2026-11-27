@@ -90,3 +90,6 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - Dispositions: `codev/projects/1647-…/1647-plan-iter1-rebuttals.md`.
 
 ## 2026-11-26: plan-approval gate reached
+- The owner approved plan-approval as written (ruled 2026-11-27 04:41 UTC; relayed by the
+  architect from main). I ran `porch approve` (35a845a28). On to Implement Phase 1; porch
+  requested a context refresh at `enter:implement`.
