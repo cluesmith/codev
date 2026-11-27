@@ -26,6 +26,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
@@ -39,7 +40,8 @@ import { peerOutbox } from '../peer/cloud-wiring.js';
 import { countWaitingForPeer, heldOutboxForWorkspace, queueHeads } from '../peer/surfaces.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 
-const holder = vi.hoisted(() => ({ db: null as unknown as Database.Database, port: 0, workspace: '/work/codev' }));
+// `workspace` is set to WS before each test; a hoisted block runs before `resolve` is imported.
+const holder = vi.hoisted(() => ({ db: null as unknown as Database.Database, port: 0, workspace: '' }));
 const drains = vi.hoisted(() => ({ scheduled: [] as Array<[string, string]> }));
 const out = vi.hoisted(() => ({ lines: [] as string[] }));
 
@@ -141,8 +143,9 @@ vi.mock('../../terminal/index.js', () => ({ DEFAULT_COLS: 120, defaultSessionOpt
 
 import { inboxDismiss, inboxList, inboxRelease, inboxShow } from '../commands/inbox.js';
 
-const WS = '/work/codev';
-const OTHER = '/work/other';
+// Through resolve(), as a Tower stores a workspace: a drive-letter path on Windows (Spec 1658).
+const WS = resolve('/work/codev');
+const OTHER = resolve('/work/other');
 const DEVVM = '01JDEVVM0000000000000000AA';
 const BODY = 'the body of a message for devvm';
 
@@ -486,15 +489,15 @@ describe('reading many outbox rows at once', () => {
     forDevvm();
     forDevvm(`${WS}/`);
     forLab();
-    forDevvm('/work/other');
+    forDevvm(OTHER);
     const ended = forDevvm();
     store.resolveOutbox(holder.db, ended.messageId, { state: 'dismissed', outcome: null, reason: null, attempted: false }, Date.now());
 
     expect(countWaitingForPeer(holder.db, WS)).toBe(3);
     expect(countWaitingForPeer(holder.db, `${WS}/`)).toBe(3);
     expect(countWaitingForPeer(holder.db, WS)).toBe(heldOutboxForWorkspace(holder.db, WS).length);
-    expect(countWaitingForPeer(holder.db, '/work/other')).toBe(1);
-    expect(countWaitingForPeer(holder.db, '/work/none')).toBe(0);
+    expect(countWaitingForPeer(holder.db, OTHER)).toBe(1);
+    expect(countWaitingForPeer(holder.db, resolve('/work/none'))).toBe(0);
     expect(store.countHeldOutboxBySender(holder.db).reduce((n, row) => n + row.count, 0)).toBe(4);
   });
 });
