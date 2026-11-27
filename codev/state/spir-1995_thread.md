@@ -296,3 +296,10 @@ Claude's non-blocking notes:
   arch.md: 21 concepts, the overview path note, the TTL module as the single cadence source, and the
   key-wise forge merge. codev.md + skeleton mirror: a "Forge Concepts" doctor block. Re-grepped
   codev/, codev-skeleton/, src for stale concept counts: none.
+
+## 2026-11-27 — Phase 4 consultation (iter 1): codex APPROVE, claude APPROVE
+Claude's non-blocking notes:
+- Taken: `projectHourlyForgeCalls` is documented as a rate that can be fractional (doctor rounds it).
+- Taken: the no-import guard also rejects a dynamic `import(...)`.
+- Kept as is: the `overview path` row reuses the concept column on purpose (aligned with the table it
+  summarises, `○` marks it informational); nothing parses doctor output.

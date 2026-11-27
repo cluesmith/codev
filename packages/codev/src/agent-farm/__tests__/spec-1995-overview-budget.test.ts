@@ -38,6 +38,7 @@ describe('Spec 1995 — one source for the overview cadence', () => {
   it('overview-budget.ts imports nothing, so doctor can read it without loading Tower', () => {
     const source = fs.readFileSync(path.join(serversDir, 'overview-budget.ts'), 'utf-8');
     expect(source).not.toMatch(/^\s*import\b/m);
+    expect(source).not.toMatch(/\bimport\s*\(/);
     expect(source).not.toMatch(/\brequire\(/);
   });
 

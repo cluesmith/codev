@@ -34,7 +34,9 @@ const HOUR_MS = 3_600_000;
  * - `four-call`: `pr-list` and `issue-list` per open-list refresh, plus
  *   `recently-closed` and `recently-merged` per search refresh.
  *
- * The identity call (`user-identity`, REST, hourly) is not counted.
+ * The identity call (`user-identity`, REST, hourly) is not counted. The result
+ * is a rate, not a count: a TTL that does not divide an hour gives a fraction,
+ * which the caller rounds for display.
  */
 export function projectHourlyForgeCalls(
   path: 'bundle' | 'four-call',
