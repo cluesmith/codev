@@ -32,7 +32,8 @@ export const DECISIONS_SUITE = '**/decisions-tab.test.ts';
  * The Peers panel suite and the held-count suite (Spec 1967) run only through
  * `playwright.peers.config.ts`, which starts a fresh Tower on a throwaway port with directories of
  * its own. Both route-mock what they assert, but the page comes from whatever Tower serves it, and
- * this config may reuse the live one on port 4100.
+ * this config may reuse the live one on port 4100. The nightly `dashboard-e2e.yml` runs them in a
+ * step of their own.
  */
 export const PEERS_SUITE = ['**/peers-panel.test.ts', '**/spec-1313-held-count-indicator.test.ts'];
 

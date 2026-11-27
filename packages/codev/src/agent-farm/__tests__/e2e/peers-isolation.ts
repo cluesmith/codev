@@ -3,31 +3,64 @@
  * check that keeps them apart from a live Tower.
  *
  * `playwright.peers.config.ts` makes them and checks them before its Tower starts;
- * `peers-teardown.ts` checks them again and removes them. The config is evaluated again in
- * every Playwright worker, so the directories are recorded in this module's own environment
- * variables the first time: the main process makes them, and each worker, which inherits the
- * variables, finds the same ones.
+ * `peers-teardown.ts` checks them again and removes them.
+ *
+ * **One run folder, owned.** Playwright's main process makes one new folder under the system
+ * temp directory, holding the three directories and an owner marker written by exclusive create:
+ * the process's pid and a random nonce. The folder and the marker's text are recorded in this
+ * module's environment variables, because the config is evaluated again in every worker, which
+ * inherits them. A worker (a child of the recorded pid) or the same process again reuses the
+ * folder only when its marker matches. Values inherited from anyone else (a caller's shell, an
+ * earlier run) are ignored and never touched: this process makes a folder of its own. Removal
+ * happens only in the process that made the folder, after the marker and path checks, so a
+ * folder this run did not make is never removed.
  *
  * Free of any `@playwright/test` import, so the unit test loads it on its own.
  */
 
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
-/** Where the run records its directories, one variable each. */
-export const PEERS_DIR_VARS = {
-  agentFarm: 'CODEV_PEERS_E2E_AGENT_FARM_DIR',
-  socket: 'CODEV_PEERS_E2E_SOCKET_DIR',
-  home: 'CODEV_PEERS_E2E_HOME',
+/** Where the run records its folder and its owner marker's text. */
+export const PEERS_RUN_VARS = {
+  root: 'CODEV_PEERS_E2E_ROOT',
+  owner: 'CODEV_PEERS_E2E_OWNER',
 } as const;
 
-export type PeersDirName = keyof typeof PEERS_DIR_VARS;
+/** The run folder's name begins with this, directly under the system temp directory. */
+export const PEERS_ROOT_PREFIX = 'codev-peers-e2e-';
+
+/** The owner marker inside the run folder. */
+export const PEERS_OWNER_FILE = '.owner';
+
+/** The three directories inside the run folder, by name. */
+const SUBDIRS = { agentFarm: 'agent-farm', socket: 'socket', home: 'home' } as const;
+
+export type PeersDirName = keyof typeof SUBDIRS;
 
 /** The throwaway Tower's state directory (its database and key), its socket directory and its `HOME`. */
 export type PeersDirs = Record<PeersDirName, string>;
 
-const DIR_NAMES = Object.keys(PEERS_DIR_VARS) as PeersDirName[];
+const DIR_NAMES = Object.keys(SUBDIRS) as PeersDirName[];
+
+/** The process asking: its own pid, and its parent's (a worker's parent is the main process). */
+export interface PeersProcess {
+  pid: number;
+  ppid: number;
+}
+
+function thisProcess(): PeersProcess {
+  return { pid: process.pid, ppid: process.ppid };
+}
+
+/** A run as the environment records it. */
+export interface PeersRun {
+  root: string;
+  owner: string;
+  ownerPid: number;
+}
 
 /** What the throwaway Tower must never be given: a live Tower's directories, and the real home. */
 export interface LiveDirs {
@@ -85,37 +118,96 @@ export function checkPeersDir(dir: string, live: LiveDirs = liveDirs(), tmp: str
   return real;
 }
 
-/** The directories the environment records; `null` when it records none. Some but not all is refused. */
-export function recordedPeersDirs(env: NodeJS.ProcessEnv = process.env): PeersDirs | null {
-  const recorded = DIR_NAMES.filter((name) => env[PEERS_DIR_VARS[name]]);
-  if (recorded.length === 0) return null;
-  if (recorded.length !== DIR_NAMES.length) {
-    throw new Error(`Only some of ${DIR_NAMES.map((n) => PEERS_DIR_VARS[n]).join(', ')} are set; set none, and the config makes all three.`);
+/** The run the environment records; `null` when it records none. One variable without the other is refused. */
+export function recordedPeersRun(env: NodeJS.ProcessEnv = process.env): PeersRun | null {
+  const root = env[PEERS_RUN_VARS.root];
+  const owner = env[PEERS_RUN_VARS.owner];
+  if (!root && !owner) return null;
+  if (!root || !owner) {
+    throw new Error(`Only one of ${PEERS_RUN_VARS.root} and ${PEERS_RUN_VARS.owner} is set; the config sets both itself.`);
   }
-  return Object.fromEntries(DIR_NAMES.map((name) => [name, env[PEERS_DIR_VARS[name]] as string])) as PeersDirs;
+  const match = /^([1-9][0-9]*):[0-9a-f]{32}$/.exec(owner);
+  if (!match) throw new Error(`${PEERS_RUN_VARS.owner} does not read as <pid>:<nonce>; the config sets it itself.`);
+  return { root, owner, ownerPid: Number(match[1]) };
+}
+
+function dirsUnder(root: string): PeersDirs {
+  return Object.fromEntries(DIR_NAMES.map((name) => [name, path.join(root, SUBDIRS[name])])) as PeersDirs;
 }
 
 /**
- * The run's directories: those the environment already records (a worker evaluating the config
- * again), else three new ones under the system temp directory, recorded for the workers.
+ * Confirm a recorded run folder is one this module made: directly under the system temp
+ * directory, named with the run prefix, and holding an owner marker whose text is the recorded
+ * one. Returns the folder resolved.
  */
-export function peersDirs(env: NodeJS.ProcessEnv = process.env, tmp: string = tmpdir()): { dirs: PeersDirs; created: boolean } {
-  const recorded = recordedPeersDirs(env);
-  if (recorded !== null) return { dirs: recorded, created: false };
-  const base = realpathSync(tmp);
-  const dirs = {} as PeersDirs;
-  for (const name of DIR_NAMES) {
-    dirs[name] = mkdtempSync(path.join(base, `codev-peers-e2e-${name}-`));
-    env[PEERS_DIR_VARS[name]] = dirs[name];
+function confirmMade(run: PeersRun, tmp: string): string {
+  const real = resolvedPath(run.root);
+  if (path.dirname(real) !== resolvedPath(tmp) || !path.basename(real).startsWith(PEERS_ROOT_PREFIX)) {
+    throw new Error(`${run.root} is not a ${PEERS_ROOT_PREFIX}* folder directly under the system temp directory: not one this config made.`);
   }
-  return { dirs, created: true };
+  let marker: string;
+  try {
+    marker = readFileSync(path.join(real, PEERS_OWNER_FILE), 'utf-8');
+  } catch {
+    throw new Error(`${run.root} has no owner marker: not a folder this config made.`);
+  }
+  if (marker !== run.owner) throw new Error(`${run.root}'s owner marker is not this run's: not a folder this config made.`);
+  return real;
 }
 
-/** Remove the directories the environment records, each checked again first. Returns what was removed. */
-export function removePeersDirs(env: NodeJS.ProcessEnv = process.env, live: LiveDirs = liveDirs(), tmp: string = tmpdir()): string[] {
-  const dirs = recordedPeersDirs(env);
+/**
+ * The run's directories. A run recorded by this process or by its parent (a worker evaluating
+ * the config again) is reused once its marker is confirmed. Otherwise, with nothing recorded or
+ * with values inherited from anyone else, this process makes a new run folder and records it,
+ * replacing those values and leaving whatever they name untouched.
+ */
+export function peersDirs(
+  env: NodeJS.ProcessEnv = process.env,
+  tmp: string = tmpdir(),
+  proc: PeersProcess = thisProcess(),
+): { dirs: PeersDirs; created: boolean } {
+  const recorded = recordedPeersRun(env);
+  if (recorded !== null && (recorded.ownerPid === proc.pid || recorded.ownerPid === proc.ppid)) {
+    return { dirs: dirsUnder(confirmMade(recorded, tmp)), created: false };
+  }
+  const root = mkdtempSync(path.join(realpathSync(tmp), PEERS_ROOT_PREFIX));
+  const owner = `${proc.pid}:${randomBytes(16).toString('hex')}`;
+  writeFileSync(path.join(root, PEERS_OWNER_FILE), owner, { flag: 'wx', mode: 0o600 });
+  for (const name of DIR_NAMES) mkdirSync(path.join(root, SUBDIRS[name]));
+  env[PEERS_RUN_VARS.root] = root;
+  env[PEERS_RUN_VARS.owner] = owner;
+  return { dirs: dirsUnder(root), created: true };
+}
+
+/**
+ * The directories of the run this process made; `null` when none is recorded. A run recorded by
+ * another process, or whose folder this module did not make, is refused.
+ */
+export function ownedPeersDirs(env: NodeJS.ProcessEnv = process.env, tmp: string = tmpdir(), pid: number = process.pid): PeersDirs | null {
+  const run = recordedPeersRun(env);
+  if (run === null) return null;
+  if (run.ownerPid !== pid) {
+    throw new Error(`The recorded Peers run was made by process ${run.ownerPid}, not this one (${pid}): it is left in place.`);
+  }
+  return dirsUnder(confirmMade(run, tmp));
+}
+
+/**
+ * Remove the run folder this process made, its directories checked again first, and forget it.
+ * Returns what was removed. Anything not provably this run's is refused and left in place.
+ */
+export function removePeersDirs(
+  env: NodeJS.ProcessEnv = process.env,
+  live: LiveDirs = liveDirs(),
+  tmp: string = tmpdir(),
+  pid: number = process.pid,
+): string[] {
+  const dirs = ownedPeersDirs(env, tmp, pid);
   if (dirs === null) return [];
-  const checked = DIR_NAMES.map((name) => checkPeersDir(dirs[name], live, tmp));
-  for (const dir of checked) rmSync(dir, { recursive: true, force: true });
-  return checked;
+  for (const name of DIR_NAMES) checkPeersDir(dirs[name], live, tmp);
+  const root = checkPeersDir(path.dirname(dirs.agentFarm), live, tmp);
+  rmSync(root, { recursive: true, force: true });
+  delete env[PEERS_RUN_VARS.root];
+  delete env[PEERS_RUN_VARS.owner];
+  return [root];
 }

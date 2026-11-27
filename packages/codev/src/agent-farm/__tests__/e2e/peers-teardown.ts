@@ -1,6 +1,6 @@
 /**
  * Global teardown for `playwright.peers.config.ts` (Spec 1967, plan phase 12): stop the
- * throwaway Tower, then remove exactly the directories the config made.
+ * throwaway Tower, then remove exactly the run folder the config made in this process.
  *
  * Playwright runs a global teardown before it stops its `webServer`, so the Tower would still
  * hold its database open in those directories. It is stopped first through its own graceful
@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
-import { recordedPeersDirs, removePeersDirs } from './peers-isolation.js';
+import { ownedPeersDirs, removePeersDirs } from './peers-isolation.js';
 
 const EXIT_WAIT_MS = 20_000;
 
@@ -50,7 +50,8 @@ async function stopTower(port: string, agentFarmDir: string): Promise<void> {
 }
 
 export default async function peersTeardown(): Promise<void> {
-  const dirs = recordedPeersDirs();
+  // Only the run this process made: one recorded by another process is refused, not stopped or removed.
+  const dirs = ownedPeersDirs();
   if (dirs === null) return;
   const port = process.env.TOWER_TEST_PORT;
   if (port) await stopTower(port, dirs.agentFarm);

@@ -1337,3 +1337,38 @@ a line this phase wrote.
     the web app's test config).
   - A literal U+202E landed in `peer-inbox.test.ts` where I typed the escape (the U+2028 trap);
     the scan of every changed file caught it, it is now the escape text, and the file passes.
+- **Porch checks.** `porch done 1967`: build 16.9 s, tests 241.9 s.
+- **Phase 12 review (iter 1): codex REQUEST_CHANGES (HIGH); claude COMMENT (HIGH).** All fixed
+  in place except claude 3; the rebuttal is `1967-phase_12-iter1-rebuttals.md`.
+  - **Codex: the teardown could remove directories a caller supplied.** `peersDirs()` adopted
+    any `CODEV_PEERS_E2E_*` values already in the environment, and the removal trusted them.
+    - Now the main process makes one `codev-peers-e2e-*` run folder directly under tmp. It holds
+      the three directories and an owner marker (`.owner`, exclusive create, `<pid>:<nonce>`).
+    - A worker (a child of that pid) or the same process reuses it only when the marker matches.
+      Values from anyone else are ignored and never touched.
+    - Removal happens only in the process that made the run.
+    - Proven by 6 new unit cases, and by a real run with a caller's values exported: 16 of 16
+      passed, and the caller's folder and its file remained.
+  - **Claude 1: the nightly workflow no longer ran the held-count suite.** I had moved it into a
+    config no workflow ran. `dashboard-e2e.yml` gains a step for `playwright.peers.config.ts` on
+    port 14102, after the Decisions step and under the same condition. This follows the Decisions
+    precedent.
+  - **Claude 2:** `countWaitingForPeer`, on every overview build, read every held message's
+    payload to count them. It now uses a `GROUP BY` count (`store.countHeldOutboxBySender`), with
+    a test that it agrees with the list.
+  - **Claude 3: not changed.** The unmocked case is "no cloud", not "a cloud with no relay"
+    (reading 4 above). Covering it needs a fake cloud, which the plan does not include.
+  - **Claude 4, fixed:**
+    - `mark.run` is escaped.
+    - `peerTime` says "an unknown time" for a non-number instead of throwing.
+    - The local case also asserts that the panel has no controls.
+  - **Claude 4, left as it is:** a run that dies before its teardown leaves its one folder.
+    Nothing else can prove that folder is the run's, so nothing removes it; the config's doc
+    says so.
+- **Re-verified.**
+  - Build: 18 s.
+  - Layer C, load 3.6, port 14102: 16 of 16 in 5.5 s, nothing left. Again with a caller's
+    values exported: 16 of 16 in 5.3 s, the caller's folder kept, no other left.
+  - Layer A: 11 010 passed, 116 skipped, 263 s.
+- **Architect's 11:49Z request, answered at phase close:** how the panel shows turning on and
+  granting through the cloud, and where the screenshots are.

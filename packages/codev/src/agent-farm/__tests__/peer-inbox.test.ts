@@ -20,7 +20,8 @@
  * Phase 12 adds: a stored sender or owner that does not fit the statement's rules is neither
  * stored nor printed by the list or show; the workspace-scoped outbox route behind the
  * dashboard's popover lists only its own workspace's mail and reaches no other peer route; and
- * a view of many outbox rows reads the queue heads and the messages once.
+ * a view of many outbox rows reads the queue heads and the messages once, and the overview's
+ * waiting-for-a-peer count, read without any payload, agrees with the workspace's list.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -35,7 +36,7 @@ import { setSwitch } from '../peer/switch.js';
 import { encodeMessagePayload } from '../peer/contract.js';
 import { handleRequest, type RouteContext } from '../servers/tower-routes.js';
 import { peerOutbox } from '../peer/cloud-wiring.js';
-import { queueHeads } from '../peer/surfaces.js';
+import { countWaitingForPeer, heldOutboxForWorkspace, queueHeads } from '../peer/surfaces.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as Database.Database, port: 0, workspace: '/work/codev' }));
@@ -479,6 +480,22 @@ describe('reading many outbox rows at once', () => {
     expect([...found.keys()].sort()).toEqual([a.messageId, b.messageId].sort());
     expect(found.get(b.messageId)?.peerTowerId).toBe(LAB);
     expect(store.getOutboxMany(holder.db, []).size).toBe(0);
+  });
+
+  it("the overview's count, read without any payload, agrees with the workspace's list under either spelling", () => {
+    forDevvm();
+    forDevvm(`${WS}/`);
+    forLab();
+    forDevvm('/work/other');
+    const ended = forDevvm();
+    store.resolveOutbox(holder.db, ended.messageId, { state: 'dismissed', outcome: null, reason: null, attempted: false }, Date.now());
+
+    expect(countWaitingForPeer(holder.db, WS)).toBe(3);
+    expect(countWaitingForPeer(holder.db, `${WS}/`)).toBe(3);
+    expect(countWaitingForPeer(holder.db, WS)).toBe(heldOutboxForWorkspace(holder.db, WS).length);
+    expect(countWaitingForPeer(holder.db, '/work/other')).toBe(1);
+    expect(countWaitingForPeer(holder.db, '/work/none')).toBe(0);
+    expect(store.countHeldOutboxBySender(holder.db).reduce((n, row) => n + row.count, 0)).toBe(4);
   });
 });
 

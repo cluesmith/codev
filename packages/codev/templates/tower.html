@@ -1877,6 +1877,8 @@
     // A time as the panel shows it: the viewer's local time, with the exact instant on hover.
     function peerTime(epochMs) {
       const d = new Date(epochMs);
+      // A time the route did not give as a number reads as unknown, never breaks the panel's render.
+      if (typeof epochMs !== 'number' || Number.isNaN(d.getTime())) return 'an unknown time';
       return `<time datetime="${d.toISOString()}" title="${d.toISOString()}">${escapeHtml(d.toLocaleString())}</time>`;
     }
 
@@ -1894,9 +1896,9 @@
     function peerMarkText(mark) {
       switch (mark.mark) {
         case 'not-verifying':
-          return `Not verifying: its last ${mark.run} messages from here were not verified there, since ${peerTime(mark.since)}. The two Towers may disagree about the contract; this Tower keeps retrying.`;
+          return `Not verifying: its last ${escapeHtml(String(mark.run))} messages from here were not verified there, since ${peerTime(mark.since)}. The two Towers may disagree about the contract; this Tower keeps retrying.`;
         case 'cloud-error':
-          return `Cloud error: Codev Cloud failed the last ${mark.run} messages to it, since ${peerTime(mark.since)}, as it cannot build a valid statement for this pair. This Tower keeps retrying.`;
+          return `Cloud error: Codev Cloud failed the last ${escapeHtml(String(mark.run))} messages to it, since ${peerTime(mark.since)}, as it cannot build a valid statement for this pair. This Tower keeps retrying.`;
         case 'clock-out-of-range':
           return `Clock out of range: it refused a message from here as clock-skew at ${peerTime(mark.lastAt)}. Its clock may be wrong (Codev Cloud's clock is the reference); this Tower keeps retrying.`;
         default:

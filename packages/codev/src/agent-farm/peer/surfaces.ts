@@ -21,6 +21,7 @@ import { readMessagePayload } from './contract.js';
 import { peerNameOf } from './grants.js';
 import { outboxHoldReason, readPeerMarks, type Outbox, type PeerMark } from './outbox.js';
 import {
+  countHeldOutboxBySender,
   getOutboxMany,
   listHeldOutbox,
   listRecords,
@@ -65,9 +66,18 @@ export function heldOutboxForWorkspace(db: Database.Database, workspacePath: str
   });
 }
 
-/** How many messages from this workspace wait on this Tower for a peer (`OverviewData.waitingForPeerCount`). */
+/**
+ * How many messages from this workspace wait on this Tower for a peer
+ * (`OverviewData.waitingForPeerCount`), by the same canonical comparison as
+ * `heldOutboxForWorkspace`, counted without reading any payload.
+ */
 export function countWaitingForPeer(db: Database.Database, workspacePath: string): number {
-  return heldOutboxForWorkspace(db, workspacePath).length;
+  const target = normalizeWorkspacePath(workspacePath);
+  let total = 0;
+  for (const { fromWorkspacePath, count } of countHeldOutboxBySender(db)) {
+    if (normalizeWorkspacePath(fromWorkspacePath) === target) total += count;
+  }
+  return total;
 }
 
 /** Why a row reads as it does: why a held one waits; for an ended one, a refusal's reason or the state. */

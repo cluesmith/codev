@@ -129,6 +129,8 @@ test.describe('Spec 1967: the Peers panel on Tower home', () => {
       'May message this Tower: codev:architect:local (deliver), codev:architect:main (hold for release)',
     );
     await expect(row.getByTestId('peer-mark')).toHaveCount(0);
+    // Read-only here too, not only through the cloud: no control of any kind.
+    await expect(page.getByTestId('peers-panel').locator('button, input, select, textarea, a[href]')).toHaveCount(0);
   });
 
   test('several peers: each mark on its own peer, and this Tower\'s own clock', async ({ page }, testInfo) => {

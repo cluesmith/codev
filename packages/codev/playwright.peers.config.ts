@@ -8,14 +8,18 @@
  *
  *   - **The port.** It refuses unless `TOWER_TEST_PORT` is set and is not 4100, before any Tower
  *     is started or reused.
- *   - **Its own directories.** In Playwright's main process it makes an agent-farm directory (the
- *     Tower's database and key), a socket directory and a `HOME` under the system temp directory,
- *     and passes them to the Tower. Workers, which evaluate this file again, find them recorded in
- *     the environment and reuse them (`peers-isolation.ts`).
+ *   - **Its own directories.** In Playwright's main process it makes one run folder under the
+ *     system temp directory, holding an agent-farm directory (the Tower's database and key), a
+ *     socket directory, a `HOME` and an owner marker (its pid and a random nonce), and passes the
+ *     three to the Tower. Workers, which evaluate this file again, reuse the folder only as children
+ *     of that pid with the marker matching; values inherited from anyone else are ignored and never
+ *     touched (`peers-isolation.ts`).
  *   - **A check before the Tower starts.** Each must be under the system temp directory, and none
  *     may be or contain the live agent-farm directory, the default socket directory or the real home.
- *   - **Cleanup.** The global teardown stops the Tower and removes exactly those directories,
- *     checked again (`peers-teardown.ts`).
+ *   - **Cleanup.** The global teardown, in the process that made the folder, stops the Tower and
+ *     removes exactly that folder, its marker and paths checked again (`peers-teardown.ts`). A run
+ *     that dies before its teardown leaves its one folder; nothing else removes it, since nothing
+ *     else can prove it is that run's.
  *   - **A fresh Tower.** `reuseExistingServer: false`: a server already on the port fails the run.
  *   - **No repository workspace.** No global setup: the marked states are route mocks, and the
  *     one unmocked case wants a fresh Tower as it starts.

@@ -567,6 +567,17 @@ export function listHeldOutbox(db: Database.Database, peerTowerId?: string): Pee
   return rows.map(toOutbox);
 }
 
+/**
+ * How many messages wait at this Tower for a peer, per sending workspace as stored (Spec 1967):
+ * a count without reading any message's payload, for the overview built on every refresh.
+ */
+export function countHeldOutboxBySender(db: Database.Database): Array<{ fromWorkspacePath: string; count: number }> {
+  const rows = db
+    .prepare("SELECT from_workspace_path AS path, COUNT(*) AS n FROM peer_outbox WHERE state = 'held' GROUP BY from_workspace_path")
+    .all() as Array<{ path: string; n: number }>;
+  return rows.map((row) => ({ fromWorkspacePath: row.path, count: row.n }));
+}
+
 /** How many messages wait at this Tower for one peer (the sender's per-peer cap counts these). */
 export function countHeldOutbox(db: Database.Database, peerTowerId: string): number {
   const row = db
