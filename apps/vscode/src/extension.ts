@@ -11,8 +11,10 @@ import { sendMessage } from './commands/send.js';
 import { approveGate } from './commands/approve.js';
 import { cleanupBuilder } from './commands/cleanup.js';
 import { openWorktreeWindow } from './commands/open-worktree-window.js';
-import { viewDiff, activateDiffView, openBuilderFileDiff } from './commands/view-diff.js';
-import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition, openBuilderDiffLocation } from './commands/diff-nav.js';
+import { viewDiff, activateDiffView, openBuilderFileDiff, openPullRequestFileDiff } from './commands/view-diff.js';
+import { navigateDiff, navigateDiffToFirst, navigateBuilderDiffToFirst, diffFirstHunk, diffStepHunk, recordDiffNavPosition, recordPullRequestNavPosition, activePullRequestDocument, openBuilderDiffLocation } from './commands/diff-nav.js';
+import { PULL_REQUEST_DIFF_CONTEXT_KEY } from './diff-query.js';
+import { PullRequestFileTreeItem } from './views/pull-request-file-tree-item.js';
 import { activateDiffInjectCodeLens, getDiffInjectEntry, onDidChangeDiffInjectRegistry } from './diff-inject-codelens.js';
 import { isStandaloneTextTab } from './diff-tab-input.js';
 import { buildBuilderRangeRef, buildBuilderFileRef } from './diff-inject-ref.js';
@@ -725,7 +727,24 @@ export async function activate(context: vscode.ExtensionContext) {
 			fireActivity(connectionManager?.getWorkspacePath() ?? null, 'builder-active', { builder: builderId });
 		}),
 	);
-	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: new PullRequestsProvider(overviewCache) });
+	// Pull Requests (#2008): each row expands into the PR's changed files, read
+	// from the main checkout after the head commit is fetched under the hidden
+	// refs/codev/pr/ namespace. The PR detail (head commit) is a Tower forge read.
+	const pullRequestSource = {
+		repo: () => connectionManager?.getWorkspacePath() ?? undefined,
+		loadPR: async (prId: string) => {
+			const client = connectionManager?.getClient();
+			const workspacePath = connectionManager?.getWorkspacePath();
+			if (!client || !workspacePath) { return null; }
+			return client.getPR(prId, workspacePath);
+		},
+	};
+	const pullRequestsProvider = new PullRequestsProvider(overviewCache, {
+		diffCache: builderDiffCache,
+		...pullRequestSource,
+	});
+	pullRequestsView = vscode.window.createTreeView('codev.pullRequests', { treeDataProvider: pullRequestsProvider });
+	const prView = pullRequestsView;
 	const backlogProvider = new BacklogProvider(overviewCache, context.workspaceState);
 	backlogView = vscode.window.createTreeView('codev.backlog', { treeDataProvider: backlogProvider });
 	context.subscriptions.push(...persistAreaGroupExpansion(
@@ -896,6 +915,31 @@ export async function activate(context: vscode.ExtensionContext) {
 		onDidChangeDiffInjectRegistry(() => { revealActiveBuilderFile(); announceActiveBuilderFromEditor(); }),
 	);
 
+	// Pull Requests active-file sync (#2008): the PR counterpart of the reveal
+	// above. A PR diff is never in the diff-inject registry (it is not a builder),
+	// so the active tab's `codev-diff:` URI is decoded instead. Same setting, same
+	// focus:false. No builder-active event: a PR has no builder. The context key
+	// scopes the next/previous-file keybindings to PR diffs too.
+	const revealActivePullRequestFile = async (): Promise<void> => {
+		const doc = activePullRequestDocument();
+		vscode.commands.executeCommand('setContext', PULL_REQUEST_DIFF_CONTEXT_KEY, doc !== undefined);
+		if (!doc || !readAutoReveal() || !prView.visible) { return; }
+		const item = await pullRequestsProvider.findFileItem(doc.prId, doc.relPath);
+		if (!item) { return; }
+		const current = activePullRequestDocument();
+		if (current?.prId !== doc.prId || current.relPath !== doc.relPath) { return; }
+		try {
+			await prView.reveal(item, { select: true, expand: true, focus: false });
+		} catch {
+			// Benign if the row is gone (the PR closed mid-reveal).
+		}
+	};
+	revealActivePullRequestFile();
+	context.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor(() => { revealActivePullRequestFile(); }),
+		vscode.window.tabGroups.onDidChangeTabs(() => { revealActivePullRequestFile(); }),
+	);
+
 	// Builders file-view-as-tree: each builder's changed-files list renders
 	// as a folder tree (with single-child folder chains compacted, like
 	// VSCode SCM) when on, or as a flat list when off. Toggle via the
@@ -907,8 +951,10 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (!e.affectsConfiguration('codev.buildersFileViewAsTree')) { return; }
 			vscode.commands.executeCommand('setContext', 'codev.buildersFileViewAsTree', readBuildersFileViewAsTree());
-			// Both views render changed files (Agents and the Cockpit).
+			// Both views render changed files (Agents and the Cockpit), and so do
+			// the Pull Requests rows (#2008).
 			hosts.refreshAll();
+			pullRequestsProvider.refresh();
 		}),
 	);
 
@@ -1624,6 +1670,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			// diff-inject registry that navigation otherwise resolves against).
 			recordDiffNavPosition(arg.builderId, arg.plan.resourcePath);
 		}),
+		// A Pull Requests file row (#2008): open the read-only merge-base ↔ head
+		// diff and anchor next/previous-file navigation on it.
+		reg('codev.openPullRequestFileDiff', async (arg: unknown) => {
+			if (!(arg instanceof PullRequestFileTreeItem)) { return; }
+			const { target } = arg;
+			await openPullRequestFileDiff({
+				repo: target.repo, prId: target.prId, baseRef: target.baseRef, headSha: target.headSha, plan: arg.plan,
+			});
+			recordPullRequestNavPosition(target.prId, arg.plan.resourcePath);
+		}),
+		// A PR row's click now expands it (#2008); the browser open is this explicit action.
+		reg('codev.openPullRequestInBrowser', async (arg: unknown) => {
+			if (!(arg instanceof PullRequestTreeItem) || !arg.prUrl) { return; }
+			await vscode.env.openExternal(vscode.Uri.parse(arg.prUrl));
+		}),
 		// Cross-file navigation in a builder diff review (#1060): walk the
 		// builder's changed-file list top-to-bottom (next) / bottom-to-top (prev),
 		// opening each file's per-file diff. CLI-independent — operates on editor
@@ -1642,13 +1703,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			);
 		}),
 		reg('codev.diffNextFile', () =>
-			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache })),
+			navigateDiff(1, { context, overviewCache, diffCache: builderDiffCache, pullRequests: pullRequestSource })),
 		reg('codev.diffPreviousFile', () =>
-			navigateDiff(-1, { context, overviewCache, diffCache: builderDiffCache })),
+			navigateDiff(-1, { context, overviewCache, diffCache: builderDiffCache, pullRequests: pullRequestSource })),
 		// "Reset to start" gestures (e.g. a controller dial press): jump to the
 		// first file in the list / the first hunk of the active diff.
 		reg('codev.diffFirstFile', () =>
-			navigateDiffToFirst({ context, overviewCache, diffCache: builderDiffCache })),
+			navigateDiffToFirst({ context, overviewCache, diffCache: builderDiffCache, pullRequests: pullRequestSource })),
 		// Builder-id-scoped "open first file diff" (#1414): the SD+ Automatic diff
 		// press relays `open-diff-first` here with the target builder id, so it lands
 		// on file 1 in per-file mode (dials seeded) instead of the aggregate editor.
@@ -1692,7 +1753,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			viewSpecFile(connectionManager!, extractBuilderId(arg))),
 		reg('codev.viewReviewFile', (arg: vscode.TreeItem | string | undefined) =>
 			viewReviewFile(connectionManager!, extractBuilderId(arg))),
-		reg('codev.refreshOverview', () => overviewCache.refresh()),
+		reg('codev.refreshOverview', () => {
+			// Also re-read every expanded PR's head commit on the next render (#2008).
+			builderDiffCache.invalidateAllPullRequests();
+			return overviewCache.refresh();
+		}),
 		// Focus the editor window for a workspace path (driven by a controller via the
 		// command relay). `vscode.openFolder` with forceNewWindow reuses and focuses an
 		// existing window for that folder rather than replacing this one; it opens a new

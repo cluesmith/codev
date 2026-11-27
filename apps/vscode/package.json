@@ -323,6 +323,15 @@
         "title": "Codev: Open Builder File Diff"
       },
       {
+        "command": "codev.openPullRequestFileDiff",
+        "title": "Codev: Open Pull Request File Diff"
+      },
+      {
+        "command": "codev.openPullRequestInBrowser",
+        "title": "Codev: Open PR in Browser",
+        "icon": "$(link-external)"
+      },
+      {
         "command": "codev.diffNextFile",
         "title": "Codev: Go to Next File in Diff"
       },
@@ -699,6 +708,14 @@
           "when": "false"
         },
         {
+          "command": "codev.openPullRequestFileDiff",
+          "when": "false"
+        },
+        {
+          "command": "codev.openPullRequestInBrowser",
+          "when": "false"
+        },
+        {
           "command": "codev.viewSpecFile",
           "when": "false"
         },
@@ -867,6 +884,16 @@
           "command": "codev.referenceIssueInArchitect",
           "when": "view == codev.backlog && viewItem == backlog-item",
           "group": "inline@1"
+        },
+        {
+          "command": "codev.openPullRequestInBrowser",
+          "when": "view == codev.pullRequests && viewItem == pull-request",
+          "group": "inline@0"
+        },
+        {
+          "command": "codev.openPullRequestInBrowser",
+          "when": "view == codev.pullRequests && viewItem == pull-request",
+          "group": "1_primary@1"
         },
         {
           "command": "codev.referencePRInArchitect",
@@ -1106,6 +1133,16 @@
           "group": "navigation"
         },
         {
+          "command": "codev.disableBuildersFileTreeMode",
+          "when": "view == codev.pullRequests && codev.buildersFileViewAsTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codev.enableBuildersFileTreeMode",
+          "when": "view == codev.pullRequests && !codev.buildersFileViewAsTree",
+          "group": "navigation@1"
+        },
+        {
           "command": "codev.openBacklogSearch",
           "when": "view == codev.backlog",
           "group": "navigation@0"
@@ -1269,12 +1306,12 @@
       {
         "command": "codev.diffNextFile",
         "key": "ctrl+alt+]",
-        "when": "codev.activeEditorIsBuilderFile"
+        "when": "codev.activeEditorIsBuilderFile || codev.activeTabIsPullRequestDiff"
       },
       {
         "command": "codev.diffPreviousFile",
         "key": "ctrl+alt+[",
-        "when": "codev.activeEditorIsBuilderFile"
+        "when": "codev.activeEditorIsBuilderFile || codev.activeTabIsPullRequestDiff"
       },
       {
         "command": "codev.diffNextHunk",

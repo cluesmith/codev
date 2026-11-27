@@ -68,7 +68,8 @@ describe('package.json contributes.commands', () => {
       expect(binding, `${command} missing keybinding`).toBeDefined();
       expect(binding!.key).toBe(expectedKey[command]);
       expect(binding!.key, `${command} must not use a function key`).not.toMatch(/F\d/i);
-      expect(binding!.when).toBe('codev.activeEditorIsBuilderFile');
+      // Builder diffs and, since #2008, pull-request diffs.
+      expect(binding!.when).toBe('codev.activeEditorIsBuilderFile || codev.activeTabIsPullRequestDiff');
     }
   });
 

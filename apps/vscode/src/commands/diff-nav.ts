@@ -29,7 +29,9 @@ import type { OverviewCache } from '../views/overview-data.js';
 import type { BuilderDiffCache, BuilderFileChange } from '../views/builder-diff-cache.js';
 import { getDiffInjectEntry } from '../diff-inject-codelens.js';
 import { buildFilePathTree, flattenTreeOrder } from '../views/file-path-tree.js';
-import { openBuilderFileDiff } from './view-diff.js';
+import { openBuilderFileDiff, openPullRequestFileDiff } from './view-diff.js';
+import { decodePullRequestDiffUri, type PullRequestDiffDocument } from '../diff-query.js';
+import type { PRView } from '@cluesmith/codev-types';
 import { builderWithWorktree } from '../builder-lookup.js';
 import { readBuildersFileViewAsTree } from '../builders-config.js';
 
@@ -81,6 +83,27 @@ interface NavDeps {
   context: vscode.ExtensionContext;
   overviewCache: OverviewCache;
   diffCache: BuilderDiffCache;
+  /**
+   * Pull-request diffs (#2008): the main checkout and the forge read. Absent →
+   * PR diffs aren't navigable (builder navigation is unaffected).
+   */
+  pullRequests?: {
+    repo: () => string | undefined;
+    loadPR: (prId: string) => Promise<PRView | null>;
+  };
+}
+
+/**
+ * The PR document shown in the active tab, whichever side has focus: the
+ * modified side of a per-file PR diff, else its original side. Undefined for
+ * builder diffs and everything else.
+ */
+export function activePullRequestDocument(): PullRequestDiffDocument | undefined {
+  const input = vscode.window.tabGroups?.activeTabGroup?.activeTab?.input;
+  if (input !== undefined && input instanceof vscode.TabInputTextDiff) {
+    return decodePullRequestDiffUri(input.modified) ?? decodePullRequestDiffUri(input.original);
+  }
+  return decodePullRequestDiffUri(vscode.window.activeTextEditor?.document.uri);
 }
 
 /**
@@ -96,19 +119,71 @@ interface NavDeps {
  *
  * Module-level by design: navigation is a singleton gesture.
  */
-let lastPosition: { builderId: string; relPath: string } | undefined;
+let lastPosition: NavPosition | undefined;
+
+/** A navigation anchor: a file in a builder's diff, or in a pull request's (#2008). */
+export type NavPosition =
+  | { builderId: string; relPath: string }
+  | { prId: string; relPath: string };
 
 function flash(message: string): void {
   vscode.window.setStatusBarMessage(`Codev: ${message}`, 4000);
 }
 
 /** Resolved navigation context: the ordered file list plus where we are in it. */
-interface DiffContext {
+interface BuilderDiffContext {
+  kind: 'builder';
   ordered: BuilderFileChange[];
   builderId: string;
   worktreePath: string;
   baseRef: string;
   currentIdx: number;
+}
+
+interface PullRequestDiffContext {
+  kind: 'pr';
+  ordered: BuilderFileChange[];
+  prId: string;
+  repo: string;
+  baseRef: string;
+  headSha: string;
+  currentIdx: number;
+}
+
+type DiffContext = BuilderDiffContext | PullRequestDiffContext;
+
+/**
+ * Resolve a pull request's ordered changed-file list (#2008), in the visible
+ * order of the Pull Requests view, and the current position within it.
+ */
+async function resolvePullRequestContext(
+  deps: NavDeps,
+  current: { prId: string; relPath: string },
+): Promise<PullRequestDiffContext | undefined> {
+  const repo = deps.pullRequests?.repo();
+  if (!deps.pullRequests || !repo) {
+    flash('not connected to Tower');
+    return undefined;
+  }
+  const { loadPR } = deps.pullRequests;
+  const result = await deps.diffCache.getPullRequestDiff(
+    { prId: current.prId, repo },
+    () => loadPR(current.prId),
+  );
+  if (result.errorKind || result.files.length === 0) {
+    flash('no changed files to navigate');
+    return undefined;
+  }
+  const ordered = navigationOrder(result.files, readBuildersFileViewAsTree());
+  return {
+    kind: 'pr',
+    ordered,
+    prId: current.prId,
+    repo,
+    baseRef: result.baseRef,
+    headSha: result.headSha,
+    currentIdx: indexOfRelPath(ordered, current.relPath),
+  };
 }
 
 /**
@@ -129,11 +204,21 @@ async function resolveDiffContext(
   if (seed) {
     current = seed;
   } else {
+    // A pull-request diff in the active tab (#2008) wins: it is never in the
+    // diff-inject registry, which is builder-only.
+    const prDoc = activePullRequestDocument();
+    if (prDoc) {
+      return resolvePullRequestContext(deps, prDoc);
+    }
     const activeFsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
     const entry = activeFsPath ? getDiffInjectEntry(activeFsPath) : undefined;
-    current = entry
-      ? { builderId: entry.builderId, relPath: entry.relPath }
-      : lastPosition;
+    if (entry) {
+      current = { builderId: entry.builderId, relPath: entry.relPath };
+    } else if (lastPosition && 'prId' in lastPosition) {
+      return resolvePullRequestContext(deps, lastPosition);
+    } else {
+      current = lastPosition;
+    }
   }
   if (!current) {
     flash('open a builder file diff first');
@@ -158,6 +243,7 @@ async function resolveDiffContext(
   }
   const ordered = navigationOrder(result.files, readBuildersFileViewAsTree());
   return {
+    kind: 'builder',
     ordered,
     builderId: current.builderId,
     worktreePath,
@@ -169,6 +255,14 @@ async function resolveDiffContext(
 /** Open the diff for `ordered[index]` as a reused preview tab and anchor there. */
 async function openDiffAt(deps: NavDeps, ctx: DiffContext, index: number): Promise<void> {
   const target = ctx.ordered[index]!;
+  if (ctx.kind === 'pr') {
+    await openPullRequestFileDiff(
+      { repo: ctx.repo, prId: ctx.prId, baseRef: ctx.baseRef, headSha: ctx.headSha, plan: target.plan },
+      { preview: true },
+    );
+    recordPullRequestNavPosition(ctx.prId, target.plan.resourcePath);
+    return;
+  }
   await openBuilderFileDiff(
     deps.context,
     { worktreePath: ctx.worktreePath, baseRef: ctx.baseRef, builderId: ctx.builderId, plan: target.plan },
@@ -390,8 +484,16 @@ export function recordDiffNavPosition(builderId: string, relPath: string): void 
   lastPosition = { builderId, relPath };
 }
 
+/**
+ * Record the currently-shown pull-request diff file as the navigation anchor
+ * (#2008), after a sidebar click or a navigation step.
+ */
+export function recordPullRequestNavPosition(prId: string, relPath: string): void {
+  lastPosition = { prId, relPath };
+}
+
 /** Read the retained navigation anchor — for tests. */
-export function peekDiffNavPosition(): { builderId: string; relPath: string } | undefined {
+export function peekDiffNavPosition(): NavPosition | undefined {
   return lastPosition;
 }
 

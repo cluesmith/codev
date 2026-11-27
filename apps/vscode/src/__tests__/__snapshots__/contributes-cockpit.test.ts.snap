@@ -128,6 +128,14 @@ exports[`existing containers, views and menus are unchanged > every menu entry o
       "when": "false",
     },
     {
+      "command": "codev.openPullRequestFileDiff",
+      "when": "false",
+    },
+    {
+      "command": "codev.openPullRequestInBrowser",
+      "when": "false",
+    },
+    {
       "command": "codev.viewSpecFile",
       "when": "false",
     },
@@ -399,6 +407,16 @@ exports[`existing containers, views and menus are unchanged > every menu entry o
       "when": "view == codev.backlog && viewItem == backlog-item",
     },
     {
+      "command": "codev.openPullRequestInBrowser",
+      "group": "inline@0",
+      "when": "view == codev.pullRequests && viewItem == pull-request",
+    },
+    {
+      "command": "codev.openPullRequestInBrowser",
+      "group": "1_primary@1",
+      "when": "view == codev.pullRequests && viewItem == pull-request",
+    },
+    {
       "command": "codev.referencePRInArchitect",
       "group": "inline@1",
       "when": "view == codev.pullRequests && viewItem == pull-request",
@@ -474,6 +492,16 @@ exports[`existing containers, views and menus are unchanged > every menu entry o
       "command": "codev.refreshOverview",
       "group": "navigation",
       "when": "view == codev.pullRequests",
+    },
+    {
+      "command": "codev.disableBuildersFileTreeMode",
+      "group": "navigation@1",
+      "when": "view == codev.pullRequests && codev.buildersFileViewAsTree",
+    },
+    {
+      "command": "codev.enableBuildersFileTreeMode",
+      "group": "navigation@1",
+      "when": "view == codev.pullRequests && !codev.buildersFileViewAsTree",
     },
     {
       "command": "codev.openBacklogSearch",
