@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -146,6 +146,8 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
   let work: string;
   let scratchTmp: string;
   let fake: FakeGh;
+  /** Directories put on PATH ahead of the fake gh's, for a test that shims another tool. */
+  let pathPrefix: string;
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-1647-bundle-'));
@@ -154,6 +156,7 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
     fs.mkdirSync(work);
     fs.mkdirSync(scratchTmp);
     fake = new FakeGh(path.join(root, 'fake'));
+    pathPrefix = '';
   });
 
   afterEach(() => {
@@ -166,7 +169,7 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
 
   const env = (since: string = SINCE): Record<string, string> => ({
     CODEV_SINCE_DATE: since,
-    PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ''}`,
+    PATH: `${pathPrefix}${fake.dir}${path.delimiter}${process.env.PATH ?? ''}`,
     TMPDIR: scratchTmp,
   });
 
@@ -640,6 +643,64 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
       const deadline = Date.now() + 3000;
       while (alive() && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
       expect(alive(), 'the in-flight gh outlived the timeout').toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------------------------
+  // A native jq.exe on Windows ends every output line with CRLF, and Git Bash strips only the
+  // last one from a command substitution. The first Windows run caught the script splitting
+  // two search names on newlines (`closed\r` matched no section). This shim reproduces jq.exe on
+  // POSIX, so the script's independence from jq's line endings is pinned on every CI run.
+  // Native Windows runs the real thing.
+  describe.skipIf(onWindows)('a jq that ends lines with CRLF, as a native jq.exe does', () => {
+    beforeEach(() => {
+      const realJq = execFileSync('sh', ['-c', 'command -v jq'], { encoding: 'utf-8' }).trim();
+      const shimDir = path.join(root, 'crlf-jq');
+      fs.mkdirSync(shimDir);
+      fs.writeFileSync(path.join(shimDir, 'jq'), [
+        '#!/bin/sh',
+        'dir="$(dirname "$0")"',
+        `"${realJq}" "$@" >"$dir/out.$$"`,
+        's=$?',
+        `perl -pe 's/\\n/\\r\\n/g' <"$dir/out.$$"`,
+        'rm -f "$dir/out.$$"',
+        'exit "$s"',
+        '',
+      ].join('\n'), { mode: 0o755 });
+      pathPrefix = `${shimDir}${path.delimiter}`;
+    });
+
+    it('the shim really emits CRLF', () => {
+      const out = execFileSync('jq', ['-n', '"a", "b"'], { env: { ...process.env, ...env() } });
+      expect(out.toString('latin1')).toBe('"a"\r\n"b"\r\n');
+    });
+
+    it('errors on both searches: both null, the lists intact', async () => {
+      const body = {
+        data: { repository: { pullRequests: { nodes: [PR_NODE] }, issues: connection([ISSUE_NODE]) }, closed: null, merged: null },
+        errors: [{ path: ['closed'], message: 'x' }, { path: ['merged'], message: 'y' }],
+      };
+      fake.route('OverviewBundle', { body, stderr: 'gh: x\n', code: 1 });
+      const bundle = await runBundle();
+      expect(bundle.recentlyClosed).toBeNull();
+      expect(bundle.recentlyMerged).toBeNull();
+      expect(bundle.prs).toHaveLength(1);
+      expect(bundle.issues).toHaveLength(1);
+    });
+
+    it('paging reads clean cursors: the recorded state gives the same bundle as with a plain jq', async () => {
+      const recording = readFixture<{ sinceDate: string; issuesPage2Cursor: string; mergedPage2Cursor: string }>('recording.json');
+      fake.route('OverviewBundle', { body: readFixture('graphql-bundle.json') });
+      fake.route(graphqlKey('OverviewIssuesPage', { cursor: recording.issuesPage2Cursor }), { body: readFixture('graphql-issues-page-2.json') });
+      fake.route(graphqlKey('OverviewSearchPage', { section: 'merged', cursor: recording.mergedPage2Cursor }), { body: readFixture('graphql-merged-page-2.json') });
+      const shimmed = await runBundle(recording.sinceDate);
+      const prefix = pathPrefix;
+      pathPrefix = '';
+      const plain = await runBundle(recording.sinceDate);
+      pathPrefix = prefix;
+      expect(shimmed).toEqual(plain);
+      expect(ops()).toEqual(['OverviewBundle', 'OverviewIssuesPage', 'OverviewSearchPage.merged',
+        'OverviewBundle', 'OverviewIssuesPage', 'OverviewSearchPage.merged']);
     });
   });
 });

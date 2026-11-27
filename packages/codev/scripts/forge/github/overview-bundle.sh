@@ -180,9 +180,10 @@ is_rate_limited() {
 # when there is no next page). A next page without a cursor is a failure too: paging would
 # otherwise stop early and truncate the section in silence. $3 = `last` marks a page after
 # which paging stops anyway, so its pageInfo is not read and cannot fail the bundle.
+# `-j` prints no line ending, so a native jq.exe's CRLF cannot reach the cursor.
 read_connection() {
   if [ "${3-}" = last ]; then last=true; else last=false; fi
-  info=$(jq -r --argjson path "$2" --argjson last "$last" '
+  info=$(jq -j --argjson path "$2" --argjson last "$last" '
     getpath($path)
     | if (type == "object") and ((.nodes | type) == "array") then
         "\(.nodes | length) \(if $last or .pageInfo.hasNextPage != true then ""
@@ -213,31 +214,27 @@ gh_request first api graphql \
 if [ "$gh_status" -ne 0 ]; then
   # Search-local only when the body is JSON, both open lists arrived, and every error sits
   # on a search field and is not a rate limit. Anything else fails the whole bundle.
-  failed_searches=
-  if ! is_rate_limited first; then
-    failed_searches=$(jq -r '
-      if (type == "object")
-         and ((.data | type) == "object")
-         and ((.data.repository | type) == "object")
-         and ((.data.repository.pullRequests | type) == "object")
-         and ((.data.repository.issues | type) == "object")
-         and ((.errors | type) == "array") and ((.errors | length) > 0)
-         and all(.errors[];
-               (type == "object")
-               and ((.path | type) == "array") and ((.path | length) > 0)
-               and (.path[0] == "closed" or .path[0] == "merged"))
-      then [.errors[].path[0]] | unique | .[]
-      else empty end' <"$tmp/first.out" 2>/dev/null)
-  fi
-  if [ -z "$failed_searches" ]; then
+  # Decided by jq's exit status, never by parsing its text: a native jq.exe on Windows ends
+  # every output line with CRLF, and a `closed\r` would match no section (#1647 review).
+  if is_rate_limited first || ! jq -e '
+      (type == "object")
+      and ((.data | type) == "object")
+      and ((.data.repository | type) == "object")
+      and ((.data.repository.pullRequests | type) == "object")
+      and ((.data.repository.issues | type) == "object")
+      and ((.errors | type) == "array") and ((.errors | length) > 0)
+      and all(.errors[];
+            (type == "object")
+            and ((.path | type) == "array") and ((.path | length) > 0)
+            and (.path[0] == "closed" or .path[0] == "merged"))' <"$tmp/first.out" >/dev/null 2>&1; then
     fail_with_gh first
   fi
-  for section in $failed_searches; do
-    case "$section" in
-      closed) closed_ok=false ;;
-      merged) merged_ok=false ;;
-    esac
-  done
+  if jq -e 'any(.errors[]; .path[0] == "closed")' <"$tmp/first.out" >/dev/null 2>&1; then
+    closed_ok=false
+  fi
+  if jq -e 'any(.errors[]; .path[0] == "merged")' <"$tmp/first.out" >/dev/null 2>&1; then
+    merged_ok=false
+  fi
   jq -r '.errors[] | "overview-bundle: \(.path[0]) search failed, section reported as null: \(.message // "no message")"' \
     <"$tmp/first.out" >&2
 fi
