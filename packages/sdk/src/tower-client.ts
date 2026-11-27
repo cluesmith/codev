@@ -46,7 +46,7 @@ function namesATower(to: string): boolean {
 /** The refusal fields of a `REMOTE_REFUSED` answer, each only if it has its type. */
 function readRemoteRefusal(body: Record<string, unknown> | undefined): RemoteSendRefusal | undefined {
   if (body === undefined) return undefined;
-  const { refusedBy, reason, retryAfterSec, mailboxId, peer } = body;
+  const { refusedBy, reason, retryAfterSec, mailboxId, peer, detail } = body;
   if (refusedBy !== 'this-tower' && refusedBy !== 'cloud' && refusedBy !== 'peer') return undefined;
   if (typeof reason !== 'string') return undefined;
   return {
@@ -55,6 +55,7 @@ function readRemoteRefusal(body: Record<string, unknown> | undefined): RemoteSen
     retryAfterSec: typeof retryAfterSec === 'number' ? retryAfterSec : null,
     mailboxId: typeof mailboxId === 'string' ? mailboxId : null,
     peer: typeof peer === 'string' ? peer : null,
+    detail: typeof detail === 'string' ? detail : null,
   };
 }
 

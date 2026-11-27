@@ -29,6 +29,7 @@ import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-
 import { parseAddress } from '@cluesmith/codev-sdk/address';
 import type { RemoteSendAnswer } from '@cluesmith/codev-types';
 import { olderTowerError } from '../utils/older-tower.js';
+import { namesATower } from '../utils/agent-names.js';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
@@ -409,7 +410,11 @@ async function explainMalformed(client: TowerClient, to: string, result: SendRes
 export function remoteHeldLine(resolvedTo: string, remote: RemoteSendAnswer, reason?: string, mailboxId?: string): string {
   const id = mailboxId ? ` — mailbox id ${mailboxId}` : '';
   if (remote.heldWhere === 'this-tower') {
-    const ahead = remote.ahead ? ` ${remote.ahead} held message(s) for ${remote.peer} go before it.` : '';
+    const ahead = !remote.ahead
+      ? ''
+      : remote.ahead === 1
+        ? ` 1 held message for ${remote.peer} goes before it.`
+        : ` ${remote.ahead} held messages for ${remote.peer} go before it.`;
     const next =
       reason === 'tower-offline'
         ? `It is sent when ${remote.peer} returns.`
@@ -571,7 +576,9 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   // Mirror Tower's body ceiling here (Issue #1573) so the refusal is local, immediate and
   // identically worded, instead of a 400 the user has to interpret. Checked AFTER the --file
   // append because that content travels in the same body and counts against the same limit.
-  const tooLarge = messageLimitError(message);
+  // A recipient on another Tower is sized by Tower's sender, in the contract's order of
+  // refusals and on the body once normalised (Spec 1967), so it is not checked here.
+  const tooLarge = target !== undefined && namesATower(target) ? null : messageLimitError(message);
   if (tooLarge) fatal(tooLarge);
 
   logger.header('Sending Instruction');
@@ -650,7 +657,9 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
         const explained =
           (await explainNotFound(client, target!, result, { workspace, from })) ??
           (await explainMalformed(client, target!, result));
-        throw new Error(explained ?? (result.error || 'Unknown error'));
+        // What the receiving Tower said, for a person, after the words this Tower wrote.
+        const said = result.refusal?.detail ? ` (${result.refusal.peer ?? 'the receiving Tower'} says: ${result.refusal.detail})` : '';
+        throw new Error((explained ?? (result.error || 'Unknown error')) + said);
       }
 
       // Report the real first outcome (Spec 1307 `--delay` + Spec 1313 mailbox). A
@@ -666,6 +675,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
         logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
       } else if (result.held && result.remote) {
         logger.info(remoteHeldLine(result.resolvedTo ?? target!, result.remote, result.reason, result.mailboxId));
+        if (result.remote.detail) logger.info(`${result.remote.peer} says: ${result.remote.detail}`);
       } else if (result.held) {
         logger.info(
           `Message held for ${result.resolvedTo ?? target} (${formatVerdict(result.reason, result.detail, 'pending')})` +
@@ -703,6 +713,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
               ? ' (unverified — header not seen on the terminal)'
               : '';
         logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
+        if (result.remote?.detail) logger.info(`${result.remote.peer} says: ${result.remote.detail}`);
         if (result.unverifiedCause === 'input-raced') {
           logger.warn(
             `That terminal received input while this message was being written, so the body may ` +

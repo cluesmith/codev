@@ -91,7 +91,7 @@ import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { createPeerRouteHandler, PEER_ROUTE_PREFIX, type PeerRouteDeps } from './peer-routes.js';
 import { peerCloudRouteDeps, peerSender } from '../peer/cloud-wiring.js';
 import type { PeerSendResult } from '../peer/sender.js';
-import { isRemoteAddress, localAddressOnlyMessage } from '../utils/agent-names.js';
+import { isRemoteAddress, localAddressOnlyMessage, namesATower } from '../utils/agent-names.js';
 import { formatAddress } from '@cluesmith/codev-sdk/address';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import {
@@ -2090,24 +2090,27 @@ function respondToRemoteSend(
       retryAfterSec: outcome.retryAfterSec,
       mailboxId: outcome.messageId,
       peer: outcome.peer?.name ?? null,
+      detail: outcome.detail,
     };
     sendJson(res, 403, { error: REMOTE_REFUSED_ERROR, message: outcome.message, ...refusal });
     return;
   }
-  const answered = { ok: true, resolvedTo, mailboxId: outcome.messageId, bodyLength };
+  // The top-level `detail` is the local gate's verdict (#1482); what the receiving Tower said
+  // goes in `remote.detail`, so the two are never read as one another.
+  const answered = { ok: true, resolvedTo, mailboxId: outcome.messageId, bodyLength, detail: null };
+  const said = (detail: string | null) => (detail === null ? {} : { detail });
   if (outcome.outcome === 'delivered') {
-    const remote: RemoteSendAnswer = { peer: outcome.peer.name, duplicate: outcome.duplicate };
+    const remote: RemoteSendAnswer = { peer: outcome.peer.name, duplicate: outcome.duplicate, ...said(outcome.detail) };
     ctx.log('INFO', `Message delivered to ${resolvedTo} (message ${outcome.messageId})`);
-    sendJson(res, 200, { ...answered, delivered: true, held: false, detail: outcome.detail, remote });
+    sendJson(res, 200, { ...answered, delivered: true, held: false, remote });
     return;
   }
   const remote: RemoteSendAnswer =
     outcome.where === 'recipient'
-      ? { peer: outcome.peer.name, heldWhere: 'recipient', duplicate: outcome.duplicate }
+      ? { peer: outcome.peer.name, heldWhere: 'recipient', duplicate: outcome.duplicate, ...said(outcome.detail) }
       : { peer: outcome.peer.name, heldWhere: 'this-tower', ahead: outcome.ahead };
-  const detail = outcome.where === 'recipient' ? outcome.detail : null;
   ctx.log('INFO', `Message to ${resolvedTo} held ${outcome.where === 'recipient' ? `on ${outcome.peer.name}` : 'here'} (${outcome.reason}; message ${outcome.messageId})`);
-  sendJson(res, 200, { ...answered, delivered: false, held: true, reason: outcome.reason, detail, remote });
+  sendJson(res, 200, { ...answered, delivered: false, held: true, reason: outcome.reason, remote });
 }
 
 function sendResolveError(res: http.ServerResponse, err: ResolveError): void {
@@ -2578,8 +2581,12 @@ async function handleSend(
   // downstream bounded message size, so an oversized body used to be paced onto the line one
   // line at a time and reported delivered whatever the composer made of it. Rejecting is the
   // only honest option: truncating would reproduce #1564 on purpose.
+  // Spec 1967: a send to another Tower is sized by its sender instead, as contract section 4
+  // orders it: check 6, after the switch, the registration, the relay and the options, and on
+  // the body once normalised (so CRLF line endings do not count twice). The request itself is
+  // still capped by parseJsonBody.
   const bodyLength = Buffer.byteLength(message, 'utf8');
-  if (bodyLength > MAX_MESSAGE_BYTES) {
+  if (bodyLength > MAX_MESSAGE_BYTES && !namesATower(to)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'MESSAGE_TOO_LARGE', message: messageTooLargeError(bodyLength) }));
     return;
@@ -2695,6 +2702,11 @@ async function handleSend(
     });
     if (outcome.outcome !== 'local') {
       respondToRemoteSend(res, ctx, outcome, address, bodyLength);
+      return;
+    }
+    // This Tower's own name: a local send after all, with a local send's size limit.
+    if (bodyLength > MAX_MESSAGE_BYTES) {
+      sendJson(res, 400, { error: 'MESSAGE_TOO_LARGE', message: messageTooLargeError(bodyLength) });
       return;
     }
     address = outcome.address;

@@ -250,8 +250,33 @@ describe('TowerClient.sendMessage — a send to another Tower', () => {
       ok: false,
       error: 'Refused by devvm: remote messaging is off there.',
       errorCode: 'REMOTE_REFUSED',
-      refusal: { refusedBy: 'peer', reason: 'remote-off', retryAfterSec: null, mailboxId: '7c1e52aa-0000-4000-8000-000000000001', peer: 'devvm' },
+      refusal: {
+        refusedBy: 'peer',
+        reason: 'remote-off',
+        retryAfterSec: null,
+        mailboxId: '7c1e52aa-0000-4000-8000-000000000001',
+        peer: 'devvm',
+        detail: null,
+      },
     });
+  });
+
+  it('passes on what the receiving Tower said, as text only', async () => {
+    const answer = (detail: unknown) => ({
+      error: 'REMOTE_REFUSED',
+      message: 'Refused by devvm: remote messaging is off there.',
+      refusedBy: 'peer',
+      reason: 'remote-off',
+      retryAfterSec: null,
+      mailboxId: null,
+      peer: 'devvm',
+      detail,
+    });
+    for (const [detail, read] of [['back on Monday', 'back on Monday'], [42, null], [undefined, null]] as const) {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, text: async () => JSON.stringify(answer(detail)) }) as unknown as Response));
+      const result = await new TowerClient().sendMessage('afx://devvm/codev:architect', 'hi');
+      expect(result.refusal?.detail, String(detail)).toBe(read);
+    }
   });
 
   it('keeps the plain failure when a REMOTE_REFUSED body lacks its fields', async () => {

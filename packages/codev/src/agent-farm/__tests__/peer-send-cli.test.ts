@@ -9,6 +9,10 @@
  * - each outcome of the stage 2 walkthrough, as it prints it: delivered (step 7), held on
  *   this Tower with where and why (the last row of the skipped-step table), held on the
  *   receiving Tower, and every refusal in its own words, exiting non-zero (criterion 5);
+ * - what the receiving Tower said (`detail`, contract section 6), after the words this Tower
+ *   wrote, for every outcome;
+ * - the size of a body for another Tower is left to Tower, which checks it in the contract's
+ *   order of refusals (a local recipient is still refused here, before any call);
  * - the stage 1 carry-over hint: `devvm:codev:architect` is malformed, and when `devvm` is
  *   one of my Towers the failure says to write `afx://devvm/codev:architect`. The peer list
  *   is asked only on that failure.
@@ -153,8 +157,12 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
 
   it('says where a held message waits and what happens next, for each place and reason', () => {
     expect(remoteHeldLine(TO, { peer: 'devvm', heldWhere: 'this-tower', ahead: 2 }, 'cloud-unreachable', 'm-1')).toBe(
-      'Message held on this Tower (cloud-unreachable) — mailbox id m-1. 2 held message(s) for devvm go before it. ' +
+      'Message held on this Tower (cloud-unreachable) — mailbox id m-1. 2 held messages for devvm go before it. ' +
         'It is sent to devvm when it can be, within 30 days.',
+    );
+    expect(remoteHeldLine(TO, { peer: 'devvm', heldWhere: 'this-tower', ahead: 1 }, 'tower-offline', 'm-1')).toBe(
+      'Message held on this Tower (tower-offline) — mailbox id m-1. 1 held message for devvm goes before it. ' +
+        'It is sent when devvm returns.',
     );
     expect(remoteHeldLine(TO, { peer: 'devvm', heldWhere: 'recipient' }, 'busy', 'm-1')).toBe(
       `Message held on devvm for ${TO} (busy) — mailbox id m-1. devvm delivers it when the recipient's prompt is clear.`,
@@ -175,6 +183,63 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
     await expect(send({ builder: TO, message: 'hi' })).rejects.toMatchObject({ code: 1 });
 
     expect(errors).toEqual([`[error] ${message}`]);
+  });
+
+  it('prints what the receiving Tower said, after the words this Tower wrote', async () => {
+    towerAnswering({
+      send: () =>
+        refused('peer', 'remote-off', 'Refused by devvm: remote messaging is off there.', { detail: 'back on Monday' }),
+    });
+    await expect(send({ builder: TO, message: 'hi' })).rejects.toMatchObject({ code: 1 });
+    expect(errors).toEqual(['[error] Refused by devvm: remote messaging is off there. (devvm says: back on Monday)']);
+
+    towerAnswering({
+      send: () =>
+        json(200, {
+          ok: true,
+          resolvedTo: TO,
+          mailboxId: MESSAGE_ID,
+          bodyLength: 2,
+          delivered: true,
+          held: false,
+          detail: null,
+          remote: { peer: 'devvm', duplicate: false, detail: 'read at once' },
+        }),
+    });
+    await expect(send({ builder: TO, message: 'hi' })).resolves.toBe('delivered');
+    expect(printed.slice(-2)).toEqual([`[ok] Message delivered to ${TO} (2 bytes)`, '[info] devvm says: read at once']);
+
+    towerAnswering({
+      send: () =>
+        json(200, {
+          ok: true,
+          resolvedTo: TO,
+          mailboxId: MESSAGE_ID,
+          bodyLength: 2,
+          delivered: false,
+          held: true,
+          reason: 'busy',
+          detail: null,
+          remote: { peer: 'devvm', heldWhere: 'recipient', duplicate: false, detail: 'in a long turn' },
+        }),
+    });
+    await expect(send({ builder: TO, message: 'hi' })).resolves.toBe('held');
+    expect(printed.at(-1)).toBe('[info] devvm says: in a long turn');
+  });
+
+  it("leaves the size of a body for another Tower to Tower's sender, and still refuses a local one before any call", async () => {
+    const big = 'x'.repeat(48 * 1024 + 1);
+    const paths = towerAnswering({
+      send: () => refused('this-tower', 'remote-off', 'Remote messaging is off on this Tower (mbp). A human turns it on with: afx peer on'),
+    });
+    await expect(send({ builder: TO, message: big })).rejects.toMatchObject({ code: 1 });
+    expect(errors).toEqual(['[error] Remote messaging is off on this Tower (mbp). A human turns it on with: afx peer on']);
+    expect(paths).toContain('/api/send');
+
+    const local = towerAnswering({ send: () => json(200, { ok: true, resolvedTo: 'main', bodyLength: 1 }) });
+    await expect(send({ builder: 'codev:architect', message: big })).rejects.toMatchObject({ code: 1 });
+    expect(errors.at(-1)).toMatch(/^\[error\] Message body is 49153 bytes, over the 49152-byte \(48KB\) limit/);
+    expect(local).toEqual([]);
   });
 
   describe('the hint for a Tower written as a second workspace', () => {

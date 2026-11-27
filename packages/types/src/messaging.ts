@@ -135,6 +135,11 @@ export interface RemoteSendRefusal {
   mailboxId: string | null;
   /** The receiving Tower's current name, once it was known. */
   peer: string | null;
+  /**
+   * What the receiving Tower said, for a person (contract section 6), with control characters
+   * stripped and its length capped by the sending Tower; `null` when it said nothing.
+   */
+  detail: string | null;
 }
 
 /**
@@ -158,4 +163,9 @@ export interface RemoteSendAnswer {
   ahead?: number;
   /** The receiving Tower had accepted this message before: its first answer was lost. */
   duplicate?: boolean;
+  /**
+   * What the receiving Tower said, for a person (contract section 6), with control characters
+   * stripped and its length capped by the sending Tower. Absent when it said nothing.
+   */
+  detail?: string;
 }

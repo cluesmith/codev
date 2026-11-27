@@ -9,8 +9,9 @@
  *
  * What is proven, in the plan's order:
  *
- * - the headline path in both directions: each direction needs its own grant, and the
- *   reply command printed in the footer, sent unchanged, reaches the sender;
+ * - the headline path in both directions, delivered through the real gate: each direction
+ *   needs its own grant, and the reply command printed in the footer, sent unchanged, is
+ *   delivered to the sender;
  * - a message for an offline peer is held at the sender, never in its mailbox (so neither
  *   the local drainer nor escalation touches it), and delivered once when the peer returns;
  * - order, and one message call at a time per peer under twenty concurrent sends;
@@ -22,14 +23,17 @@
  * - a restart of the sending Tower with three messages waiting;
  * - every refusal exits non-zero through the CLI.
  *
- * The architects are inert terminals, so the render gate holds what reaches them as
- * `no-profile`: the receiving Tower has accepted it, and the frame it would type is on
- * record in its mailbox, as `cross-workspace-addressing.e2e.test.ts` reads it. Delivery
- * through the real gate is phase 6's (`peer-receive.e2e.test.ts`). Two cases need a
- * receiving Tower that takes longer than the relay to answer; for those the recipient is
- * an echo terminal named `agy`, whose writes are paced line by line, given a long body,
- * and the stand-in's relay timeout is 3 seconds (the contract's is 15), shorter than the
- * receiving Tower's 5-second deadline.
+ * The headline path is delivered through the real render gate, both ways: each Tower has a
+ * `live` workspace whose architects run an echo program named `claude` (`stty raw -echo;
+ * exec cat`), so the gate resolves claude's profile from the launch command, and the test
+ * draws a clean claude composer before each send, as `send-integration.e2e.test.ts` does.
+ * Everywhere else the architects are inert terminals, so the render gate holds what reaches
+ * them as `no-profile`: the receiving Tower has accepted it, and the frame it would type is
+ * on record in its mailbox, as `cross-workspace-addressing.e2e.test.ts` reads it. Two cases
+ * need a receiving Tower that takes longer than the relay to answer; for those the
+ * recipient is an echo terminal named `agy`, whose writes are paced line by line, given a
+ * long body, and the stand-in's relay timeout is 3 seconds (the contract's is 15), shorter
+ * than the receiving Tower's 5-second deadline.
  *
  * The stand-in's limits and each Tower's own per-peer limit are raised, so the number of
  * messages this file sends in a minute is never what decides an answer; the sending
@@ -56,7 +60,7 @@ import {
   type HarnessTower,
   type TwoTowers,
 } from './helpers/two-towers.js';
-import { waitFor } from './helpers/tower-test-utils.js';
+import { encodeWorkspacePath, waitFor } from './helpers/tower-test-utils.js';
 
 vi.mock('../lib/tower-client.js', async (importOriginal) =>
   (await import('./helpers/two-towers.js')).towerClientModuleFor(await importOriginal()),
@@ -70,6 +74,8 @@ const { workspaceName } = await import('../commands/workspace-name.js');
 
 const ESC = '\x1b';
 const CLEAR_SCREEN = `${ESC}[2J${ESC}[H`;
+/** A clean claude composer: the marker and a dim placeholder only (send-integration.e2e). */
+const CLAUDE_CLEAN = `${CLEAR_SCREEN}❯ ${ESC}[2mTry "fix the flaky test"${ESC}[0m\r\n${'─'.repeat(22)}\r\n`;
 /** A clean agy composer: the captured idle screen the render gate's own tests classify clean. */
 const AGY_CLEAN = (() => {
   const raw = readFileSync(fileURLToPath(new URL('./fixtures/gate/agy-idle.clean.txt', import.meta.url)), 'utf8');
@@ -128,6 +134,9 @@ describe('Spec 1967 phase 9: afx send across Towers, end to end', () => {
   let wsA: string;
   let wsB: string;
   let notesB: string;
+  /** `<root>/a/live` and `<root>/b/live`: workspaces whose architects the gate delivers to. */
+  let liveA: string;
+  let liveB: string;
   let builderWorktree: string;
   let agyTerminal: string;
 
@@ -174,8 +183,8 @@ describe('Spec 1967 phase 9: afx send across Towers, end to end', () => {
   const relayState = async () =>
     (await a.json<{ relay: { state: string } }>('GET', '/api/peer/towers')).body.relay.state;
 
-  const render = async (terminalId: string, screen: string) => {
-    const res = await b.fetch(`/api/terminals/${terminalId}/write`, {
+  const render = async (terminalId: string, screen: string, tower: HarnessTower = b) => {
+    const res = await tower.fetch(`/api/terminals/${terminalId}/write`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data: screen }),
@@ -183,6 +192,17 @@ describe('Spec 1967 phase 9: afx send across Towers, end to end', () => {
     expect(res.ok).toBe(true);
     // Past the input settle (#1473): the write route is an external writer.
     await new Promise((resolve) => setTimeout(resolve, 600));
+  };
+
+  /** The terminal of a running workspace's `main` architect, from its dashboard state. */
+  const mainArchitectTerminal = async (tower: HarnessTower, workspacePath: string): Promise<string> => {
+    const state = await tower.json<{ architects: Array<{ name: string; terminalId?: string }> }>(
+      'GET',
+      `/workspace/${encodeWorkspacePath(workspacePath)}/api/state`,
+    );
+    const terminalId = state.body.architects.find((architect) => architect.name === 'main')?.terminalId;
+    if (!terminalId) throw new Error(`no main architect terminal in ${workspacePath}: ${JSON.stringify(state.body.architects)}`);
+    return terminalId;
   };
 
   beforeAll(async () => {
@@ -211,9 +231,19 @@ describe('Spec 1967 phase 9: afx send across Towers, end to end', () => {
     // A directory name with a space is not an address name: this workspace is reached only
     // by the name it is given.
     notesB = makeWorkspace(join(towers.root, 'b', 'Team Notes'), inert);
+    // An architect command is split on whitespace and given further arguments by Tower:
+    // one executable named claude that ignores them.
+    const echoDir = join(towers.root, 'claude-echo');
+    mkdirSync(echoDir, { recursive: true });
+    const claudeEcho = join(echoDir, 'claude');
+    writeFileSync(claudeEcho, '#!/bin/sh\nstty raw -echo 2>/dev/null; exec cat\n', { mode: 0o755 });
+    liveA = makeWorkspace(join(towers.root, 'a', 'live'), claudeEcho);
+    liveB = makeWorkspace(join(towers.root, 'b', 'live'), claudeEcho);
     await a.activate(wsA);
+    await a.activate(liveA);
     await b.activate(wsB);
     await b.activate(notesB);
+    await b.activate(liveB);
     await a.addArchitect(wsA, 'review');
     builderWorktree = await a.addBuilder(wsA, A_BUILDER, 'spir-901', 'main');
 
@@ -261,56 +291,58 @@ describe('Spec 1967 phase 9: afx send across Towers, end to end', () => {
   // The headline path
   // -------------------------------------------------------------------------
 
-  it('the headline path, in both directions: each needs its own grant, and the footer reply reaches the sender', async () => {
+  it('the headline path, in both directions: each needs its own grant, and the footer reply is delivered to the sender', async () => {
+    const liveMainA: CliAgent = { cwd: liveA, architect: 'main' };
+    const liveMainB: CliAgent = { cwd: liveB, architect: 'main' };
+    const delivered = (tower: HarnessTower, workspacePath: string) =>
+      remoteMail(tower).filter((row) => row.workspace_path === workspacePath && row.status === 'delivered');
+
     // mbp → devvm, before devvm grants anything: refused there, exiting non-zero.
-    const before = await runCli(a, aMain(), () => send({ builder: TO_B, message: BODY }));
+    const before = await runCli(a, liveMainA, () => send({ builder: 'afx://devvm/live:architect', message: BODY }));
     expect(before.exitCode).toBe(1);
     expect(before.stderr).toEqual([
-      '[error] Refused by devvm: mbp has no grant there for codev:architect. On devvm: afx peer grant mbp codev:architect',
+      '[error] Refused by devvm: mbp has no grant there for live:architect. On devvm: afx peer grant mbp live:architect',
     ]);
     expect(remoteMail(b)).toEqual([]);
 
+    // With the grant, and devvm's architect at a clean prompt: delivered through the gate.
     await grant(b, 'mbp');
-    const sent = await runCli(a, aMain(), () => send({ builder: TO_B, message: BODY }));
+    await render(await mainArchitectTerminal(b, liveB), CLAUDE_CLEAN, b);
+    const sent = await runCli(a, liveMainA, () => send({ builder: 'afx://devvm/live:architect', message: BODY }));
     expect(sent.exitCode, JSON.stringify(sent)).toBeNull();
-    expect(sent.result).toBe('held');
-    const line = sent.stdout.at(-1)!;
-    expect(line).toMatch(
-      new RegExp(
-        `^\\[info\\] Message held on devvm for afx://devvm/codev:architect \\(no-profile\\) — mailbox id (${UUID.source})\\. ` +
-          "devvm delivers it when the recipient's prompt is clear\\.$",
-      ),
-    );
-    const id = UUID.exec(line)![0];
+    expect(sent.result).toBe('delivered');
+    expect(sent.stdout.at(-1)).toBe(`[ok] Message delivered to afx://devvm/live:architect (${Buffer.byteLength(BODY)} bytes)`);
 
-    const [arrived] = mailFor(b, id);
-    expect(arrived).toMatchObject({ workspace_path: wsB, to_agent: 'main', status: 'held', reason: 'no-profile' });
+    const [arrived] = delivered(b, liveB);
+    expect(arrived).toMatchObject({ to_agent: 'main', remote_tower_id: a.towerId });
+    expect(outboxRow(arrived.remote_message_id!)).toMatchObject({ state: 'accepted', last_outcome: 'delivered', attempts: 1 });
     const frame = arrived.formatted_message.split('\n');
-    expect(frame[0]).toMatch(/^### \[REMOTE, your Tower · afx:\/\/mbp\/codev:architect:main → main \| \S+Z\] ###$/);
+    expect(frame[0]).toMatch(/^### \[REMOTE, your Tower · afx:\/\/mbp\/live:architect:main → main \| \S+Z\] ###$/);
     expect(frame[1]).toBe(BODY);
     // An architect recipient may send to any agent: the reply names the sender itself
-    // (Decision 7). A builder's footer would name the front door (phase 6's case).
-    expect(frame[2]).toBe('###############################  (reply: afx send afx://mbp/codev:architect:main "…")');
-    expect(outboxRow(id)).toMatchObject({ state: 'accepted', last_outcome: 'held', attempts: 1 });
+    // (Decision 7). A builder's footer names the front door (phase 6's case).
+    expect(frame[2]).toBe('###############################  (reply: afx send afx://mbp/live:architect:main "…")');
 
     // devvm → mbp with the footer's command as printed: refused until mbp grants devvm.
     const replyTo = /\(reply: afx send (\S+) "…"\)$/.exec(frame[2])![1];
-    const refused = await runCli(b, bMain(), () => send({ builder: replyTo, message: REPLY }));
+    const refused = await runCli(b, liveMainB, () => send({ builder: replyTo, message: REPLY }));
     expect(refused.exitCode).toBe(1);
     expect(refused.stderr).toEqual([
-      '[error] Refused by mbp: devvm has no grant there for codev:architect:main. On mbp: afx peer grant devvm codev:architect:main',
+      '[error] Refused by mbp: devvm has no grant there for live:architect:main. On mbp: afx peer grant devvm live:architect:main',
     ]);
 
     await grant(a, 'devvm');
-    const replied = await runCli(b, bMain(), () => send({ builder: replyTo, message: REPLY }));
+    await render(await mainArchitectTerminal(a, liveA), CLAUDE_CLEAN, a);
+    const replied = await runCli(b, liveMainB, () => send({ builder: replyTo, message: REPLY }));
     expect(replied.exitCode, JSON.stringify(replied)).toBeNull();
-    const replyId = UUID.exec(replied.stdout.at(-1)!)![0];
-    const [back] = mailFor(a, replyId);
-    expect(back).toMatchObject({ workspace_path: wsA, to_agent: 'main', status: 'held', reason: 'no-profile' });
+    expect(replied.result).toBe('delivered');
+    expect(replied.stdout.at(-1)).toBe(`[ok] Message delivered to ${replyTo} (${Buffer.byteLength(REPLY)} bytes)`);
+    const [back] = delivered(a, liveA);
+    expect(back).toMatchObject({ to_agent: 'main', remote_tower_id: b.towerId });
     expect(back.formatted_message.split('\n')).toEqual([
-      expect.stringMatching(/^### \[REMOTE, your Tower · afx:\/\/devvm\/codev:architect:main → main \| \S+Z\] ###$/),
+      expect.stringMatching(/^### \[REMOTE, your Tower · afx:\/\/devvm\/live:architect:main → main \| \S+Z\] ###$/),
       REPLY,
-      '###############################  (reply: afx send afx://devvm/codev:architect:main "…")',
+      '###############################  (reply: afx send afx://devvm/live:architect:main "…")',
     ]);
   }, 120_000);
 

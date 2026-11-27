@@ -954,3 +954,21 @@ Surprises:
   test's own mistake: I expected a reply footer naming the sender's front door, but an
   architect recipient's footer names the sender itself (Decision 7; phase 6's recipient was
   a builder, whose footer does name the front door). Fixed in the test, then green.
+- **Phase 9 review (iter 1): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** Response:
+  `1967-phase_9-iter1-rebuttals.md`.
+  - **Taken (codex 2).** The size of a body for another Tower is the sender's check 6, in the
+    contract's order and on the normalised body. The route and the CLI no longer refuse it
+    first. An address naming this Tower's own name is still held to the local limit.
+  - **Taken (codex 3).** The headline case is delivered through the real gate both ways:
+    `live` workspaces whose architects run an echo program named `claude`.
+  - **Taken (claude 1).** What the receiving Tower says (`detail`) reaches `afx send`'s
+    output: `(devvm says: …)` after a refusal, `devvm says: …` after a delivery or a hold. It
+    goes in `remote.detail`, apart from the local gate's top-level `detail`.
+  - **Taken (claude 4).** "1 held message … goes before it", "2 held messages … go before it".
+  - **Not changed (codex 1).** The route's trim applies to every send, as before this spec.
+  - **Not changed (claude 2).** An outbox rejection stays an error (fail loudly). The row is
+    held and listed by `afx inbox`.
+  - **For the review phase (claude 3).** Phases 8 and 9's readings go into the review
+    document there.
+  - **Verified.** Layer A 10 879 passed, 116 skipped, 242.3 s. Layer B 20 of 20 in 58.9 s.
+  - **My slip.** I wrote my untracked state file while the lanes ran; both flagged it.

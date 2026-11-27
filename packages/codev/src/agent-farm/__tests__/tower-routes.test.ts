@@ -2916,7 +2916,59 @@ describe('tower-routes', () => {
             retryAfterSec: null,
             mailboxId: 'm-4',
             peer: 'devvm',
+            detail: null,
           });
+        });
+
+        it("passes on what the receiving Tower said, apart from the local gate's detail", async () => {
+          scripted({
+            outcome: 'refused',
+            by: 'peer',
+            reason: 'no-grant',
+            message: 'Refused by devvm: mbp has no grant there for codev:architect:local. On devvm: afx peer grant mbp codev:architect:local',
+            detail: 'ask Sam to grant it',
+            retryAfterSec: null,
+            messageId: 'm-5',
+            peer: PEER,
+          });
+          expect((await send('afx://devvm/codev:architect:local', 'architect:review')).body.detail).toBe('ask Sam to grant it');
+
+          scripted({ outcome: 'held', where: 'recipient', reason: 'busy', messageId: 'm-6', peer: PEER, detail: 'in a long turn', duplicate: false });
+          const held = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(held.body).toMatchObject({ detail: null, remote: { peer: 'devvm', heldWhere: 'recipient', detail: 'in a long turn' } });
+
+          scripted({ outcome: 'delivered', messageId: 'm-7', peer: PEER, detail: 'read at once', duplicate: false });
+          const delivered = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(delivered.body).toMatchObject({ detail: null, remote: { peer: 'devvm', detail: 'read at once' } });
+        });
+
+        it('leaves the size of a body for another Tower to the sender, in its order, and on the body once normalised', async () => {
+          // Over 48 KiB as sent, under it once CRLF becomes LF: the sender is handed it.
+          const crlf = 'x'.repeat(10).concat('\r\n').repeat(4200);
+          expect(Buffer.byteLength(crlf)).toBeGreaterThan(48 * 1024);
+          expect(Buffer.byteLength(crlf.replace(/\r\n/g, '\n'))).toBeLessThanOrEqual(48 * 1024);
+          scripted({ outcome: 'delivered', messageId: 'm-8', peer: PEER, detail: null, duplicate: false });
+          mockParseJsonBody.mockResolvedValue({ to: 'afx://devvm/codev:architect:local', message: crlf, from: 'architect:review', workspace: CODEV, fromWorkspace: CODEV });
+          const { res, statusCode } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+          expect(statusCode()).toBe(200);
+          expect(told[0].body).toBe(crlf.trim());
+        });
+
+        it('still refuses an over-large body to this Tower, named by its own name, as a local send', async () => {
+          scripted({ outcome: 'local', address: { workspace: 'codev-cloud', kind: 'architect', name: 'tunnel' } });
+          mockParseJsonBody.mockResolvedValue({
+            to: 'afx://mbp/codev-cloud:architect:tunnel',
+            message: 'x'.repeat(48 * 1024 + 1),
+            from: 'architect:review',
+            workspace: CODEV,
+            fromWorkspace: CODEV,
+          });
+          const { res, statusCode, body } = makeRes();
+          await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+          expect(statusCode()).toBe(400);
+          expect(JSON.parse(body()).error).toBe('MESSAGE_TOO_LARGE');
+          expect(allRows()).toHaveLength(0);
         });
 
         it("resolves an address naming this Tower as the local address the sender hands back, on the immediate and the delayed path", async () => {
@@ -2962,6 +3014,21 @@ describe('tower-routes', () => {
               mailboxId: null,
             });
             expect(allRows()).toHaveLength(0);
+          });
+
+          it("refuses an over-large body as remote messaging off, not as too large: the sender's order (contract section 4)", async () => {
+            mockReadCloudConfig.mockReturnValue(CONNECTED);
+            mockParseJsonBody.mockResolvedValue({
+              to: 'afx://devvm/codev:architect:local',
+              message: 'x'.repeat(48 * 1024 + 1),
+              from: 'architect:review',
+              workspace: CODEV,
+              fromWorkspace: CODEV,
+            });
+            const { res, statusCode, body } = makeRes();
+            await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
+            expect(statusCode()).toBe(403);
+            expect(JSON.parse(body())).toMatchObject({ error: 'REMOTE_REFUSED', reason: 'remote-off' });
           });
 
           it('refuses a Tower never connected to Codev Cloud, once the switch is on', async () => {
