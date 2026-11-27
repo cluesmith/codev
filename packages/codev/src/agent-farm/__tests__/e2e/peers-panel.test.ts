@@ -3,15 +3,17 @@
  *
  * Runs only through `playwright.peers.config.ts`, on a fresh throwaway Tower with directories of
  * its own (never port 4100, never reused). The marked states come from route-mocking the panel's
- * one read-only route, `GET /api/peer/panel`, which is deterministic; one case reads the real
- * route unmocked, on the fresh Tower as it starts: the switch off and no cloud, so no relay.
+ * one read-only route, `GET /api/peer/panel`, which is deterministic; each mocks a registered
+ * Tower or one with the switch on. One case reads the real route unmocked, on the fresh Tower as
+ * it starts: the switch off and no cloud registration, so the section is absent (the architect's
+ * ruling in phase 13: it appears once the Tower is connected or the switch is on).
  *
- * What is proven, rendered: the peer list with the online hint and what each Tower may message
- * here; the switch; a peer that is not verifying, one whose clock is out of range and one shown
- * as "cloud error", each on its own row, and this Tower's own clock; with one peer and with
- * several; through Codev Cloud, that turning on and granting are done at the machine, with no
- * control on the panel; why a list is not a fresh one; that names from the route are text, never
- * markup; and a route failure said as one.
+ * What is proven, rendered: no section on a Tower never connected with the switch off; the peer
+ * list with the online hint and what each Tower may message here; the switch; a peer that is not
+ * verifying, one whose clock is out of range and one shown as "cloud error", each on its own row,
+ * and this Tower's own clock; with one peer and with several; through Codev Cloud, that turning
+ * on and granting are done at the machine, with no control on the panel; why a list is not a
+ * fresh one; that names from the route are text, never markup; and a route failure said as one.
  *
  * Run: TOWER_TEST_PORT=14102 npx playwright test --config playwright.peers.config.ts
  */
@@ -83,8 +85,10 @@ async function showPanel(page: Page, body?: PeerPanelResponse | { status: number
 }
 
 test.describe('Spec 1967: the Peers panel on Tower home', () => {
-  test('a fresh Tower, unmocked: the route says the switch is off with no cloud, and the panel says so', async ({ page }) => {
-    await showPanel(page);
+  test('a fresh Tower, unmocked: no cloud registration and the switch off, so the section is absent', async ({ page }, testInfo) => {
+    const panelAnswered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/peer/panel');
+    await page.goto(`${TOWER_URL}/`);
+    await panelAnswered;
 
     // The route itself, read by the page with the key the Tower injects same-origin.
     const answer = await page.evaluate(async () => {
@@ -104,13 +108,13 @@ test.describe('Spec 1967: the Peers panel on Tower home', () => {
       viaTunnel: false,
     });
 
-    const switchLine = page.getByTestId('peers-switch');
-    await expect(switchLine).toHaveAttribute('data-state', 'off');
-    await expect(switchLine).toContainText('Remote messaging: off');
-    await expect(switchLine).toContainText('afx peer on');
-    await expect(page.getByTestId('peers-panel')).toContainText('This Tower is not connected to Codev Cloud. Connect it with: afx tower connect');
-    await expect(page.getByTestId('peer-row')).toHaveCount(0);
-    await expect(page.getByTestId('peers-via-cloud')).toHaveCount(0);
+    // The page rendered that answer: the home page is up, and the Peers section is not on it.
+    await expect(page.locator('#peers-container')).toBeAttached();
+    await expect(page.locator('#peers-container')).toBeEmpty();
+    await expect(page.getByTestId('peers-panel')).toHaveCount(0);
+    await expect(page.getByText('Remote messaging:')).toHaveCount(0);
+
+    await page.screenshot({ path: testInfo.outputPath('peers-hidden-unregistered.png'), fullPage: true });
   });
 
   test('one peer: its name, the online hint, its own switch and what it may message here', async ({ page }) => {

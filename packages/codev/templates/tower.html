@@ -1977,8 +1977,18 @@
       }
     }
 
+    // A Tower never registered with Codev Cloud, with remote messaging off, has no peers to
+    // show and nothing in reach: the section stays hidden until it is connected or switched on.
+    function peersPanelShown(panel) {
+      return panel.towerName !== null || panel.remoteMessaging === 'on';
+    }
+
     function renderPeers(state) {
       const container = document.getElementById('peers-container');
+      if (state.kind === 'ready' && !peersPanelShown(state.panel)) {
+        container.innerHTML = '';
+        return;
+      }
       if (state.kind === 'error') {
         container.innerHTML = `
           <section class="peers-section" data-testid="peers-panel">
