@@ -202,19 +202,19 @@ export interface ConceptResolution {
 }
 
 /**
- * Resolve every known concept with its source and executable.
- * Used by `codev doctor` for full concept reporting.
+ * Every known concept's command and where it came from, with no file I/O. The
+ * overview resolves its plan from this on every poll (Spec 1647), so it must not
+ * read the concept scripts the way the executable lookup does.
  */
-export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {
+function resolveConceptSources(forgeConfig?: ForgeConfig | null): Array<Omit<ConceptResolution, 'executable'>> {
   const concepts = Object.keys(getDefaultCommands());
   return concepts.map((concept) => {
     // Check manual override first
     if (forgeConfig && concept !== 'provider' && concept in forgeConfig) {
       const cmd = forgeConfig[concept];
-      if (cmd === null) {
-        return { concept, command: null, source: 'disabled' as ConceptSource, executable: null };
-      }
-      return { concept, command: cmd, source: 'override' as ConceptSource, executable: extractExecutable(cmd) };
+      return cmd === null
+        ? { concept, command: null, source: 'disabled' as ConceptSource }
+        : { concept, command: cmd, source: 'override' as ConceptSource };
     }
 
     // Check provider preset
@@ -222,16 +222,28 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
       const preset = getProviderPresets()[forgeConfig.provider];
       if (preset && concept in preset) {
         const cmd = preset[concept];
-        if (cmd === null) {
-          return { concept, command: null, source: 'disabled' as ConceptSource, executable: null };
-        }
-        return { concept, command: cmd, source: 'preset' as ConceptSource, executable: extractExecutable(cmd) };
+        return cmd === null
+          ? { concept, command: null, source: 'disabled' as ConceptSource }
+          : { concept, command: cmd, source: 'preset' as ConceptSource };
       }
     }
 
     // Default
-    const cmd = getDefaultCommands()[concept] ?? null;
-    return { concept, command: cmd, source: 'default' as ConceptSource, executable: cmd ? extractExecutable(cmd) : null };
+    return { concept, command: getDefaultCommands()[concept] ?? null, source: 'default' as ConceptSource };
+  });
+}
+
+/**
+ * Resolve every known concept with its source and executable.
+ * Used by `codev doctor` for full concept reporting.
+ */
+export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {
+  return resolveConceptSources(forgeConfig).map((r) => {
+    let executable: string | null;
+    if (r.source === 'disabled') executable = null;
+    else if (r.source === 'default') executable = r.command ? extractExecutable(r.command) : null;
+    else executable = extractExecutable(r.command as string);
+    return { ...r, executable };
   });
 }
 
@@ -243,7 +255,7 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
  * stays in force. An overridden bundle discloses the constituent settings it hides.
  */
 export function resolveOverviewPlan(forgeConfig?: ForgeConfig | null): OverviewPlan {
-  const sources = new Map(resolveAllConcepts(forgeConfig).map((r) => [r.concept, r.source]));
+  const sources = new Map(resolveConceptSources(forgeConfig).map((r) => [r.concept, r.source]));
   const sourceOf = (concept: OverviewConstituent) => sources.get(concept);
   const overridden = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) === 'override');
   const disabled = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) === 'disabled');

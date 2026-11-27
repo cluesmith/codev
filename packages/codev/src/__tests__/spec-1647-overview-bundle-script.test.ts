@@ -26,14 +26,17 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { executeForgeCommandDetailed, type ForgeCommandResult } from '../lib/forge.js';
-import { isRateLimitError } from '../lib/forge-rate-limit.js';
+import { isRateLimitError, RATE_LIMIT_PATTERN } from '../lib/forge-rate-limit.js';
 import type {
   IssueListItem,
   MergedPrItem,
   OverviewBundleResult,
   PrListItem,
 } from '../lib/forge-contracts.js';
-import { FakeGh, graphqlKey, operation, fields, posixWithJq } from './helpers/spec-1647-fake-gh.js';
+import { FakeGh, graphqlKey, operation, fields, scriptTestTimeoutMs, withJq } from './helpers/spec-1647-fake-gh.js';
+
+/** Native Windows: the script runs under Git Bash; a few tests need POSIX and skip by name. */
+const onWindows = process.platform === 'win32';
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', '..', 'scripts', 'forge', 'github', 'overview-bundle.sh');
 const FIXTURES = path.resolve(import.meta.dirname, 'fixtures', 'spec-1647-overview-bundle');
@@ -123,11 +126,22 @@ describe('Spec 1647 — the overview-bundle script is executable and declares gh
   it('declares gh as its executable', () => {
     expect(fs.readFileSync(SCRIPT, 'utf-8')).toMatch(/^# forge-executable: gh$/m);
   });
+
+  // The script classifies rate limits itself, and names a body-only one on stderr for the
+  // limiter, so its copy of the pattern must not drift from the limiter's.
+  it('carries the rate-limit pattern the limiter matches on', () => {
+    const line = fs.readFileSync(SCRIPT, 'utf-8').match(/^RATE_LIMIT_PATTERN='([^']*)'$/m);
+    expect(line, 'RATE_LIMIT_PATTERN assignment').not.toBeNull();
+    // ERE groups capture; the limiter's are non-capturing. Otherwise the two must be equal.
+    const asJs = new RegExp(line![1].replace(/\((?!\?)/g, '(?:'), 'i');
+    expect(asJs.source).toBe(RATE_LIMIT_PATTERN.source);
+    expect(RATE_LIMIT_PATTERN.flags).toBe('i');
+  });
 });
 
 // Each script run spawns a few dozen short processes (gh, jq, sh); a test that runs five
 // of them can pass vitest's 5 s default on a loaded machine.
-describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script', { timeout: 30_000 }, () => {
+describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { timeout: scriptTestTimeoutMs }, () => {
   let root: string;
   let work: string;
   let scratchTmp: string;
@@ -412,7 +426,9 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
 
   // -------------------------------------------------------------------------------------------
   describe('CODEV_SINCE_DATE is validated before any request', () => {
-    it.each([
+    // Run directly through /bin/sh, which Node cannot spawn on native Windows; the
+    // dispatcher case below runs everywhere.
+    it.skipIf(onWindows).each([
       ['missing', undefined],
       ['empty', ''],
       ['date-only', '2026-11-25'],
@@ -454,7 +470,8 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
       expect(result.error?.stderr).toBe(stderr);
     };
 
-    it('an error on the closed search alone: recentlyClosed null, the rest populated, exit 0, the reason on stderr', async () => {
+    // Reads stderr from a direct /bin/sh run; "errors on both searches" covers this path on Windows.
+    it.skipIf(onWindows)('an error on the closed search alone: recentlyClosed null, the rest populated, exit 0, the reason on stderr', async () => {
       const body = { data: { repository: lists, closed: null, merged: connection([MERGED_NODE]) }, errors: [error(['closed'])] };
       fake.route('OverviewBundle', { body, stderr: GH_STDERR, code: 1 });
       const bundle = await runBundle();
@@ -564,7 +581,8 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
   });
 
   // -------------------------------------------------------------------------------------------
-  describe('hostile strings', () => {
+  // The hostile cursor names a route file, and NTFS forbids its `"`.
+  describe.skipIf(onWindows)('hostile strings', () => {
     const HOSTILE = 'x $(touch pwned) `touch pwned` \'single\' "double" ; touch pwned\nsecond line \\ end';
     const HOSTILE_CURSOR = 'c$(touch pwned)`touch pwned`;\'"';
 
@@ -595,7 +613,9 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
   });
 
   // -------------------------------------------------------------------------------------------
-  describe('timeout', () => {
+  // POSIX signals and pids. On native Windows a timeout kill delivers no signal the script's
+  // trap can catch (documented in the script), so neither the kill nor the cleanup is pinned there.
+  describe.skipIf(onWindows)('timeout', () => {
     it('settles promptly, kills the in-flight gh and leaves no temp files', async () => {
       // The limit must fire while gh is in flight. A 3 s limit leaves room for the script to
       // reach its first gh on a loaded machine; a 30 s hang makes "settles promptly" unambiguous.

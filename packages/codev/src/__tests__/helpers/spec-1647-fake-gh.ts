@@ -24,8 +24,15 @@ function hasJq(): boolean {
   }
 }
 
-/** The github scripts are POSIX sh plus jq; their fake-gh tests run where both exist. */
-export const posixWithJq = process.platform !== 'win32' && hasJq();
+/**
+ * The github scripts are POSIX sh plus jq; their fake-gh tests run wherever jq is on PATH,
+ * native Windows included, where the forge layer runs them under Git Bash. The few tests
+ * that need POSIX signals, pids or file names skip on win32 by name.
+ */
+export const withJq = hasJq();
+
+/** Git Bash emulates fork, so each process costs several times what it does on POSIX (#1137). */
+export const scriptTestTimeoutMs = process.platform === 'win32' ? 120_000 : 30_000;
 
 const FAKE_GH = `#!/bin/sh
 dir="$(dirname "$0")"
@@ -33,7 +40,14 @@ dir="$(dirname "$0")"
 # The trap releases the lock only while this process holds it, so a fake gh killed inside
 # the window cannot leave the next one spinning, and one that exits later cannot remove a
 # lock another process has since taken.
-until mkdir "$dir/lock" 2>/dev/null; do :; done
+spins=0
+until mkdir "$dir/lock" 2>/dev/null; do
+  spins=$((spins + 1))
+  if [ "$spins" -gt 2000 ]; then
+    printf '%s\\n' "lock never acquired" >> "$dir/violations"
+    exit 97
+  fi
+done
 trap 'rmdir "$dir/lock" 2>/dev/null' EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT

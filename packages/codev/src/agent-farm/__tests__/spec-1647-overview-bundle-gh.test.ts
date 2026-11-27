@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { FakeGh, graphqlKey, operation, posixWithJq } from '../../__tests__/helpers/spec-1647-fake-gh.js';
+import { FakeGh, graphqlKey, operation, scriptTestTimeoutMs, withJq } from '../../__tests__/helpers/spec-1647-fake-gh.js';
 import { LIST_TTL_MS } from '../../lib/overview-budget.js';
 
 const { dbState } = vi.hoisted(() => ({ dbState: { globalDbPath: '' } }));
@@ -38,8 +38,9 @@ function firstPage(next: { issues: boolean; merged: boolean }) {
   return body;
 }
 
-// The scripts spawn a few dozen short processes per refresh (gh, jq, sh).
-describe.skipIf(!posixWithJq)('Spec 1647 — OverviewCache over the real scripts and a fake gh', { timeout: 30_000 }, () => {
+// The scripts spawn a few dozen short processes per refresh (gh, jq, sh). This runs on native
+// Windows too, where it is the one check of the bundled default through Git Bash.
+describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and a fake gh', { timeout: scriptTestTimeoutMs }, () => {
   const originalPath = process.env.PATH;
   let root: string;
   let fake: FakeGh;

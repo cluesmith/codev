@@ -7,8 +7,12 @@
  * by the caller that wants it (Tower's overview cache).
  */
 
-/** GitHub's GraphQL and REST primary-limit messages, and gh's error type. */
-const RATE_LIMIT_PATTERN = /rate limit (?:already )?exceeded|RATE_LIMITED|graphql_rate_limit|secondary rate limit/i;
+/**
+ * GitHub's GraphQL and REST primary-limit messages, and gh's error type.
+ * `scripts/forge/github/overview-bundle.sh` carries the same pattern as an ERE;
+ * a test holds the two equal (Spec 1647).
+ */
+export const RATE_LIMIT_PATTERN = /rate limit (?:already )?exceeded|RATE_LIMITED|graphql_rate_limit|secondary rate limit/i;
 
 export function isRateLimitError(text: string): boolean {
   return RATE_LIMIT_PATTERN.test(text);
