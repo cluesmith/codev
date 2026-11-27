@@ -93,3 +93,31 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - The owner approved plan-approval as written (ruled 2026-11-27 04:41 UTC; relayed by the
   architect from main). I ran `porch approve` (35a845a28). On to Implement Phase 1; porch
   requested a context refresh at `enter:implement`.
+
+## 2026-11-27: Implement Phase 1 (overview-bundle concept + GitHub script)
+- Before writing the mapping I captured what gh 2.102 actually sends (`GH_DEBUG=api`) and read
+  its JSON export code. Three facts shaped the script:
+  - gh queries `reviewRequests` with a `Bot` fragment but exports only `User` and `Team`
+    reviewers, so bot reviewers are dropped as well as teams.
+  - An author without a user id is exported as `app/<login>` (and a null author as `app/`).
+    The recording confirms the spelling: `app/renovate-sh-app`.
+  - gh's searches use `type: ISSUE_ADVANCED` (and `last:` for the issue search), not the plain
+    `ISSUE` the plan pinned. I compared both types on this repo over 7-day windows: identical
+    sets in identical order. So the plan's `ISSUE` stands; it also works on GHES without
+    advanced search.
+- Windows: the forge layer turns MSYS path conversion off, and jq there is usually a native
+  exe, so jq never receives a `/tmp/…` path argument. Every jq reads through shell
+  redirection, and the assembly reads one concatenated stream whose page counts the shell
+  tracks. This replaces the `--slurpfile` design I first wrote.
+- Verified the signal design on bash-as-sh and dash: TERM during `wait` kills the in-flight
+  gh, exits 143 and leaves no temp; `sh -c <path>` execs the script on both, so the
+  dispatcher's SIGTERM reaches the trap.
+- Fixture: this repo has no bot PR, no null review decision, no multi-assignee issue and no
+  closed-unmerged PR in its window, so the recording is grafana/grafana (36 h window, which
+  also gives a real second page of the merged search). Bundle and siblings were recorded
+  back to back through a tee'ing gh shim and checked equal before trimming. Live check on
+  this repo: all four sections byte-identical to the sibling scripts.
+- Tests: 41 in the new file. Three mutations of the script (trap without kill, rate-limit
+  check removed, bot prefix removed) each turn exactly the expected tests red.
+- Small adjacent change: `forge-windows-launcher.test.ts` lists every concept, so it gains
+  `overview-bundle`.

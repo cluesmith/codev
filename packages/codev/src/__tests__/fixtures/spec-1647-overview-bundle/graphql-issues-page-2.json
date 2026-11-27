@@ -1,0 +1,118 @@
+{
+ "data": {
+  "repository": {
+   "issues": {
+    "pageInfo": {
+     "hasNextPage": true,
+     "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMS0wM1QxNDozOTo0NlrPAAAAAXCk_e8="
+    },
+    "nodes": [
+     {
+      "number": 137892,
+      "title": "Time series: configurable crosshair color and width",
+      "url": "https://github.com/grafana/grafana/issues/137892",
+      "createdAt": "2026-11-15T06:58:02Z",
+      "labels": {
+       "nodes": [
+        {
+         "name": "type/feature-request"
+        },
+        {
+         "name": "type/ux"
+        },
+        {
+         "name": "type/accessibility"
+        },
+        {
+         "name": "area/panel/timeseries"
+        },
+        {
+         "name": "automated-triage"
+        }
+       ]
+      },
+      "author": {
+       "__typename": "User",
+       "login": "MirtoBusico"
+      },
+      "assignees": {
+       "nodes": []
+      }
+     },
+     {
+      "number": 137442,
+      "title": "Alternative paths to discoverability",
+      "url": "https://github.com/grafana/grafana/issues/137442",
+      "createdAt": "2026-11-10T13:14:18Z",
+      "labels": {
+       "nodes": [
+        {
+         "name": "internal"
+        },
+        {
+         "name": "needs design"
+        },
+        {
+         "name": "plg-navigation"
+        }
+       ]
+      },
+      "author": {
+       "__typename": "User",
+       "login": "jessover9000"
+      },
+      "assignees": {
+       "nodes": [
+        {
+         "login": "AndrejKiri"
+        },
+        {
+         "login": "Ijin08"
+        },
+        {
+         "login": "jessover9000"
+        }
+       ]
+      }
+     },
+     {
+      "number": 137114,
+      "title": "Epic: Frontend plugin runtime",
+      "url": "https://github.com/grafana/grafana/issues/137114",
+      "createdAt": "2026-11-05T14:14:54Z",
+      "labels": {
+       "nodes": [
+        {
+         "name": "internal"
+        }
+       ]
+      },
+      "author": {
+       "__typename": "User",
+       "login": "jackw"
+      },
+      "assignees": {
+       "nodes": [
+        {
+         "login": "jackw"
+        },
+        {
+         "login": "jesdavpet"
+        },
+        {
+         "login": "ashharrison90"
+        },
+        {
+         "login": "sgriff96"
+        },
+        {
+         "login": "eledobleefe"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ }
+}

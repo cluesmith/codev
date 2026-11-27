@@ -1,0 +1,276 @@
+[
+ {
+  "assignees": [],
+  "author": {
+   "id": "MDQ6VXNlcjU2Njc1MjM=",
+   "is_bot": false,
+   "login": "AlexChrbn",
+   "name": ""
+  },
+  "createdAt": "2026-11-26T13:18:26Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWwxMDIzNjcyOTc=",
+    "name": "type/docs",
+    "description": "Flags the technical writing team for documentation support; auto adds to org-wide docs project",
+    "color": "0D549C"
+   },
+   {
+    "id": "MDU6TGFiZWwxNzQ5MTc1ODk=",
+    "name": "area/auth",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "MDU6TGFiZWw4OTc4OTIwNTc=",
+    "name": "area/auth/oauth",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 139027,
+  "title": "Documentation feedback: /docs/sources/setup-grafana/configure-access/configure-authentication/_index.md",
+  "url": "https://github.com/grafana/grafana/issues/139027"
+ },
+ {
+  "assignees": [
+   {
+    "id": "MDQ6VXNlcjQ2MTQy",
+    "login": "joshhunt",
+    "name": "Josh Hunt",
+    "databaseId": 46142
+   },
+   {
+    "id": "MDQ6VXNlcjIwOTk5ODQ2",
+    "login": "ashharrison90",
+    "name": "Ashley Harrison",
+    "databaseId": 20999846
+   }
+  ],
+  "author": {
+   "id": "MDQ6VXNlcjQ2MTQy",
+   "is_bot": false,
+   "login": "joshhunt",
+   "name": "Josh Hunt"
+  },
+  "createdAt": "2026-11-23T13:42:51Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   }
+  ],
+  "number": 138635,
+  "title": "Skye a11y issues Q4 26",
+  "url": "https://github.com/grafana/grafana/issues/138635"
+ },
+ {
+  "assignees": [
+   {
+    "id": "MDQ6VXNlcjQxMjYxNzE=",
+    "login": "AndrejKiri",
+    "name": "Andrej Kiripolský",
+    "databaseId": 4126171
+   },
+   {
+    "id": "MDQ6VXNlcjIzNDcwNjgx",
+    "login": "Ijin08",
+    "name": "Patrick O'Carroll",
+    "databaseId": 23470681
+   },
+   {
+    "id": "MDQ6VXNlcjUzNzU0ODcx",
+    "login": "jessover9000",
+    "name": "Jess",
+    "databaseId": 53754871
+   }
+  ],
+  "author": {
+   "id": "MDQ6VXNlcjUzNzU0ODcx",
+   "is_bot": false,
+   "login": "jessover9000",
+   "name": "Jess"
+  },
+  "createdAt": "2026-11-16T11:31:09Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABIB8N4A",
+    "name": "needs research",
+    "description": "for internal issues needing more research",
+    "color": "7A16F4"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAADB8AhvQ",
+    "name": "plg-navigation",
+    "description": "PLG Navigation project: counted on the progress dashboard",
+    "color": "FF671D"
+   }
+  ],
+  "number": 137933,
+  "title": "Long-term nav proposals: Validation with real users",
+  "url": "https://github.com/grafana/grafana/issues/137933"
+ },
+ {
+  "assignees": [],
+  "author": {
+   "id": "MDQ6VXNlcjExMDkwOTM0",
+   "is_bot": false,
+   "login": "MirtoBusico",
+   "name": "mirtobusico@gmail.com"
+  },
+  "createdAt": "2026-11-15T06:58:02Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw4MTE5ODcyMQ==",
+    "name": "type/feature-request",
+    "description": "",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjQ2ODkxODA=",
+    "name": "type/ux",
+    "description": "",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjYyNDAyMDY0",
+    "name": "type/accessibility",
+    "description": "Accessibility problem / enhancement",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwyNjczNTg5MDE0",
+    "name": "area/panel/timeseries",
+    "description": "The main time series Graph panel",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 137892,
+  "title": "Time series: configurable crosshair color and width",
+  "url": "https://github.com/grafana/grafana/issues/137892"
+ },
+ {
+  "assignees": [
+   {
+    "id": "MDQ6VXNlcjQxMjYxNzE=",
+    "login": "AndrejKiri",
+    "name": "Andrej Kiripolský",
+    "databaseId": 4126171
+   },
+   {
+    "id": "MDQ6VXNlcjIzNDcwNjgx",
+    "login": "Ijin08",
+    "name": "Patrick O'Carroll",
+    "databaseId": 23470681
+   },
+   {
+    "id": "MDQ6VXNlcjUzNzU0ODcx",
+    "login": "jessover9000",
+    "name": "Jess",
+    "databaseId": 53754871
+   }
+  ],
+  "author": {
+   "id": "MDQ6VXNlcjUzNzU0ODcx",
+   "is_bot": false,
+   "login": "jessover9000",
+   "name": "Jess"
+  },
+  "createdAt": "2026-11-10T13:14:18Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABt8cMCg",
+    "name": "needs design",
+    "description": "for internal development issues that require design support",
+    "color": "01F41C"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAADB8AhvQ",
+    "name": "plg-navigation",
+    "description": "PLG Navigation project: counted on the progress dashboard",
+    "color": "FF671D"
+   }
+  ],
+  "number": 137442,
+  "title": "Alternative paths to discoverability",
+  "url": "https://github.com/grafana/grafana/issues/137442"
+ },
+ {
+  "assignees": [
+   {
+    "id": "MDQ6VXNlcjczMjAx",
+    "login": "jackw",
+    "name": "Jack Westbrook",
+    "databaseId": 73201
+   },
+   {
+    "id": "MDQ6VXNlcjU0NjQ1ODc=",
+    "login": "jesdavpet",
+    "name": "Jesse David Peterson",
+    "databaseId": 5464587
+   },
+   {
+    "id": "MDQ6VXNlcjIwOTk5ODQ2",
+    "login": "ashharrison90",
+    "name": "Ashley Harrison",
+    "databaseId": 20999846
+   },
+   {
+    "id": "MDQ6VXNlcjQ2NTA5NDE2",
+    "login": "sgriff96",
+    "name": "Sean Griffin",
+    "databaseId": 46509416
+   },
+   {
+    "id": "MDQ6VXNlcjY1NDE3NzMx",
+    "login": "eledobleefe",
+    "name": "Laura Fernández",
+    "databaseId": 65417731
+   }
+  ],
+  "author": {
+   "id": "MDQ6VXNlcjczMjAx",
+   "is_bot": false,
+   "login": "jackw",
+   "name": "Jack Westbrook"
+  },
+  "createdAt": "2026-11-05T14:14:54Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   }
+  ],
+  "number": 137114,
+  "title": "Epic: Frontend plugin runtime",
+  "url": "https://github.com/grafana/grafana/issues/137114"
+ }
+]

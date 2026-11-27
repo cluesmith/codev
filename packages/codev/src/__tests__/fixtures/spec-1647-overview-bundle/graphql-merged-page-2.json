@@ -1,0 +1,201 @@
+{
+ "data": {
+  "search": {
+   "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": "Y3Vyc29yOjEyMQ=="
+   },
+   "nodes": [
+    {
+     "number": 138704,
+     "title": "Alerting: Build the historian app config in a shared appconfig package",
+     "url": "https://github.com/grafana/grafana/pull/138704",
+     "body": "Moves the mapping from `[unified_alertin",
+     "createdAt": "2026-11-23T20:40:29Z",
+     "mergedAt": "2026-11-26T10:33:18Z",
+     "headRefName": "stevesg/core-apps-server-historian"
+    },
+    {
+     "number": 138502,
+     "title": "Page: Wrap header actions and landing page cards on narrow screens",
+     "url": "https://github.com/grafana/grafana/pull/138502",
+     "body": "**What is this feature?**\r\n\r\nFixes sidew",
+     "createdAt": "2026-11-20T16:09:11Z",
+     "mergedAt": "2026-11-25T22:38:35Z",
+     "headRefName": "fix/narrow-screen-overflow"
+    },
+    {
+     "number": 138489,
+     "title": "Modal, Drawer: Prevent scrolling underlying page when overlay is open",
+     "url": "https://github.com/grafana/grafana/pull/138489",
+     "body": "Fixes #94966  \nRef #138284  \n\n### Proble",
+     "createdAt": "2026-11-20T15:22:10Z",
+     "mergedAt": "2026-11-26T10:28:14Z",
+     "headRefName": "fix/modal-drawer-prevent-body-scroll"
+    },
+    {
+     "number": 138478,
+     "title": "Alerting: Use the async rules source list in the v1 rule list views",
+     "url": "https://github.com/grafana/grafana/pull/138478",
+     "body": "**What is this feature?**\n\nThis PR moves",
+     "createdAt": "2026-11-20T13:50:39Z",
+     "mergedAt": "2026-11-26T09:26:28Z",
+     "headRefName": "issue-127031-v8-s4g"
+    },
+    {
+     "number": 138417,
+     "title": "unified-storage: add property-based test to the shared KV suite",
+     "url": "https://github.com/grafana/grafana/pull/138417",
+     "body": "These tests generate a random set of ope",
+     "createdAt": "2026-11-20T00:11:33Z",
+     "mergedAt": "2026-11-26T15:34:32Z",
+     "headRefName": "renato.costa/kv-property-test"
+    },
+    {
+     "number": 138415,
+     "title": "TimePicker: Add opt-in compact tabs and inline calendar",
+     "url": "https://github.com/grafana/grafana/pull/138415",
+     "body": "## What changed\n\nAdds an opt-in compact ",
+     "createdAt": "2026-11-19T23:29:41Z",
+     "mergedAt": "2026-11-25T17:43:43Z",
+     "headRefName": "codex/responsive-timepicker"
+    },
+    {
+     "number": 138325,
+     "title": "Dashboards: Stop search pagination at the last visible result",
+     "url": "https://github.com/grafana/grafana/pull/138325",
+     "body": "## What changed\n\nBrowse Dashboards searc",
+     "createdAt": "2026-11-19T11:53:54Z",
+     "mergedAt": "2026-11-26T13:24:14Z",
+     "headRefName": "fix/dashboard-search-pagination"
+    },
+    {
+     "number": 138274,
+     "title": "Dashboards API: block grafana-cloud deletes",
+     "url": "https://github.com/grafana/grafana/pull/138274",
+     "body": "Deleting a dashboard managed by a regist",
+     "createdAt": "2026-11-18T21:12:29Z",
+     "mergedAt": "2026-11-26T16:14:55Z",
+     "headRefName": "jess/grafana-cloud-block-delete"
+    },
+    {
+     "number": 138144,
+     "title": "Folder picker: Always send permission=create for dashboard destinations",
+     "url": "https://github.com/grafana/grafana/pull/138144",
+     "body": "<!--\n\nThank you for sending a pull reque",
+     "createdAt": "2026-11-18T03:01:33Z",
+     "mergedAt": "2026-11-26T17:17:37Z",
+     "headRefName": "folder-picker-send-create-permission"
+    },
+    {
+     "number": 138118,
+     "title": "Notebooks: Add content outline",
+     "url": "https://github.com/grafana/grafana/pull/138118",
+     "body": "**What is this feature?**\n\nAdds a conten",
+     "createdAt": "2026-11-17T20:16:12Z",
+     "mergedAt": "2026-11-25T19:52:58Z",
+     "headRefName": "evictorero/notebooks-content-outline"
+    },
+    {
+     "number": 138093,
+     "title": "Folders: Add an alert rule kind to the cascade-delete controller",
+     "url": "https://github.com/grafana/grafana/pull/138093",
+     "body": "<!--\r\n\r\nThank you for sending a pull req",
+     "createdAt": "2026-11-17T17:25:40Z",
+     "mergedAt": "2026-11-27T01:31:58Z",
+     "headRefName": "folder-cascade-alert-rule-handler"
+    },
+    {
+     "number": 137902,
+     "title": "Graphite: Parse numbers directly when decoding render responses",
+     "url": "https://github.com/grafana/grafana/pull/137902",
+     "body": "**What is this feature?**\n\n`Float.Unmars",
+     "createdAt": "2026-11-16T00:41:45Z",
+     "mergedAt": "2026-11-26T16:26:48Z",
+     "headRefName": "adamyeats/graphite-float-parse"
+    },
+    {
+     "number": 137801,
+     "title": "Provisioning: Add a devenv provisioning-bootstrap example",
+     "url": "https://github.com/grafana/grafana/pull/137801",
+     "body": "**What is this feature?**\n\nA worked `[pr",
+     "createdAt": "2026-11-13T08:32:28Z",
+     "mergedAt": "2026-11-26T08:58:39Z",
+     "headRefName": "MissingRoberto/devenv-bootstrap-git-sync"
+    },
+    {
+     "number": 137775,
+     "title": "Panels: Unify data link menus and tooltip surfaces",
+     "url": "https://github.com/grafana/grafana/pull/137775",
+     "body": "Data-link menus use different typography",
+     "createdAt": "2026-11-12T20:31:00Z",
+     "mergedAt": "2026-11-25T20:40:04Z",
+     "headRefName": "draft/panel-data-link-menu-consistency"
+    },
+    {
+     "number": 137708,
+     "title": "Provisioning: Retire the operator's unified-storage dial",
+     "url": "https://github.com/grafana/grafana/pull/137708",
+     "body": "## What\n\nThe provisioning operators stop",
+     "createdAt": "2026-11-12T13:39:53Z",
+     "mergedAt": "2026-11-26T16:11:29Z",
+     "headRefName": "MissingRoberto/operators-index-dependency-retire"
+    },
+    {
+     "number": 136996,
+     "title": "AuthZ: Fix: handle FlagExcludeRedundantManagedPermissions correctly",
+     "url": "https://github.com/grafana/grafana/pull/136996",
+     "body": "issue: https://github.com/grafana/identi",
+     "createdAt": "2026-11-04T15:31:44Z",
+     "mergedAt": "2026-11-26T14:44:12Z",
+     "headRefName": "iam2543/handle-FlagExcludeRedundantManagedPermissions-correctly"
+    },
+    {
+     "number": 136955,
+     "title": "chore: Check conventional commit titles of independently released packages",
+     "url": "https://github.com/grafana/grafana/pull/136955",
+     "body": "Part of #134797. PR 3 of 5, stacked on #",
+     "createdAt": "2026-11-04T11:01:34Z",
+     "mergedAt": "2026-11-26T17:09:41Z",
+     "headRefName": "eledobleefe/plugin-compat-pr-title-check"
+    },
+    {
+     "number": 136900,
+     "title": "App Platform: Remove kubernetesAggregator feature toggles",
+     "url": "https://github.com/grafana/grafana/pull/136900",
+     "body": "**What is this feature?**\n\nRemoves the `",
+     "createdAt": "2026-11-03T21:21:25Z",
+     "mergedAt": "2026-11-26T11:57:05Z",
+     "headRefName": "grambbledook/kube-aggregator-toggle-cleanup"
+    },
+    {
+     "number": 136602,
+     "title": "chore: Version plugin-compat from conventional commits",
+     "url": "https://github.com/grafana/grafana/pull/136602",
+     "body": "Part of #134797. PR 2 of 5, stacked on #",
+     "createdAt": "2026-10-30T13:28:37Z",
+     "mergedAt": "2026-11-26T17:09:39Z",
+     "headRefName": "eledobleefe/plugin-compat-version-plans"
+    },
+    {
+     "number": 136601,
+     "title": "chore: Add an independent-packages release group",
+     "url": "https://github.com/grafana/grafana/pull/136601",
+     "body": "Part of #134797 (publish `@grafana/plugi",
+     "createdAt": "2026-10-30T13:28:35Z",
+     "mergedAt": "2026-11-26T17:09:37Z",
+     "headRefName": "eledobleefe/plugin-compat-release-group"
+    },
+    {
+     "number": 136595,
+     "title": "Alerting: Migrate RuleDetailsDataSources to async DataSource API",
+     "url": "https://github.com/grafana/grafana/pull/136595",
+     "body": "**What is this feature?**\n\n`RuleDetailsD",
+     "createdAt": "2026-10-30T12:33:29Z",
+     "mergedAt": "2026-11-26T13:53:30Z",
+     "headRefName": "issue-127031-v4"
+    }
+   ]
+  }
+ }
+}

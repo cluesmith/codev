@@ -68,7 +68,7 @@ const KNOWN_CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
+  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs', 'overview-bundle',
 ] as const;
 
 // =============================================================================
@@ -132,17 +132,22 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     // concept falls through to the github default and would run `gh` on a GitLab or
     // Gitea workspace. Neither could be verified against a real glab or Gitea server, so
     // `codev check` reports them as "not run" by name until a project supplies an override.
-    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs']),
-    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs']),
+    // overview-bundle (Spec 1647) is disabled on every non-GitHub preset for the same reason:
+    // the overview then makes its four per-section calls through the preset's own scripts.
+    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs', 'overview-bundle']),
+    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs', 'overview-bundle']),
     // Linear is a hybrid forge (spec 719): it owns *issues*, while every PR
     // concept — pr-create included — deliberately falls through to the github
     // default. Disabling pr-create here would leave Linear the one provider
     // that can merge a PR but not open one.
-    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    // For the hybrids, disabling overview-bundle is a correctness requirement, not a
+    // capability gap: the github bundle would fill the backlog with GitHub issues instead
+    // of the tracker's (Spec 1647).
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps', 'overview-bundle']),
     // Jira Cloud via Atlassian's `acli` (#1740) is hybrid on the Linear model:
     // issue concepts only, every PR concept (pr-create included) on the github
     // default.
-    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps']),
+    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps', 'overview-bundle']),
   };
   return _providerPresets;
 }
@@ -170,12 +175,13 @@ const ISSUE_ID_KIND_BY_PROVIDER: Record<string, IssueIdKind> = {
   jira: 'key',
 };
 
-const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed'];
+const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed', 'overview-bundle'];
 
 /**
  * The shape of the workspace's issue ids, from its provider (#1740). Undefined
  * when a hand-written override replaces an issue concept: the provider then no
  * longer says what the ids look like, so this reports nothing rather than guess.
+ * An overridden `overview-bundle` counts: it supplies the overview's issues (Spec 1647).
  */
 export function resolveIssueIdKind(forgeConfig: ForgeConfig | null | undefined): IssueIdKind | undefined {
   if (forgeConfig && ISSUE_CONCEPTS.some((concept) => typeof forgeConfig[concept] === 'string')) {
