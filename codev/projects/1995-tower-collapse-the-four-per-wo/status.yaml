@@ -44,7 +44,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-claude.txt
 started_at: '2026-11-26T01:28:07.091Z'
-updated_at: '2026-11-27T05:31:19.700Z'
+updated_at: '2026-11-27T05:32:18.513Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-26T22:13:27.161Z'
@@ -54,3 +54,4 @@ context_refreshes:
     acknowledged_at: '2026-11-27T05:15:23.956Z'
   - boundary: plan-phase:bundle_cache_path
     at: '2026-11-27T05:31:19.700Z'
+    acknowledged_at: '2026-11-27T05:32:18.513Z'
