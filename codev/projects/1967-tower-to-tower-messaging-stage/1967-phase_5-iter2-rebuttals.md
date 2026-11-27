@@ -49,3 +49,34 @@ in any form. With the check disabled, the test fails.
    sends `auth`.
 5. **No change, as the review says:** a statement that MACs correctly but is not JSON is
    refused `unsupported-version` at step 3, as contract section 5 says.
+
+## Architect ruling on claude's point 1 (2026-11-27T03:05Z)
+
+Keep failing the attempt: Tower states only what it knows, and the back-off recovers by
+itself once the read works. Two conditions, now built:
+
+1. **An ERROR line naming the cause.** `tower-tunnel.ts` reads the switch through
+   `readSwitchForAuth`. On a failure it logs
+   `Cloud connection not made: the remote-messaging switch is unreadable: global.db could not be read (<class> <code>). Retrying on back-off.`
+   at ERROR, once per failing run, so a 60-second back-off does not repeat it. It shows the
+   error class, plus its SQLite code when the code has the shape of one, but never the
+   message. The fixed text it throws becomes the tunnel's state reason.
+2. **`afx tower status` shows the reason while it lasts.** `TunnelClient.getLastFailure()`
+   keeps the last failed attempt's reason (already sanitized) until the tunnel connects again
+   or is disconnected on purpose. `GET /api/tunnel/status` carries it as `lastFailure` (null
+   when connected), the SDK's `TowerTunnelStatus` has the optional field, and
+   `afx tower status` prints `Last failure` under `Connection` when it is set.
+
+Tests:
+- Through tower-tunnel's real wiring:
+  - a switch that throws a `SqliteError` with `SQLITE_CORRUPT` gives exactly one ERROR line
+    over two failing attempts;
+  - no handshake is sent;
+  - the status reports the reason;
+  - once the read works, the back-off connects and the status clears it;
+  - the error's message never appears in the log.
+- The client's own test checks `getLastFailure()` while the switch is unreadable, and checks
+  it is cleared on `disconnect()`.
+- The CLI prints `Last failure` while the connection is down, and nothing when connected or
+  for a Tower that predates the field.
+

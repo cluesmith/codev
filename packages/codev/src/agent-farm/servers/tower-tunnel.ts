@@ -21,6 +21,7 @@ import {
   type TunnelPeerSession,
   type TowerMetadata,
 } from '../lib/tunnel-client.js';
+import type { PeerSwitchState } from '@cluesmith/codev-types';
 import { getGlobalDb } from '../db/index.js';
 import { encodeReceiverAnswer, type EncodedAnswer } from '../peer/contract.js';
 import { readSwitch } from '../peer/switch.js';
@@ -146,13 +147,45 @@ async function refuseVerifiedPeerRequest(): Promise<EncodedAnswer> {
   return encodeReceiverAnswer({ outcome: 'refused', reason: 'remote-off' });
 }
 
+/** Whether the last read of the switch for `auth` failed, so its ERROR is logged once per failing run. */
+let switchReadFailing = false;
+
+/** A database error as a log line may name it: its class, and its code when it has the shape of one. */
+function describeDbError(err: unknown): string {
+  if (!(err instanceof Error)) return typeof err;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? `${err.constructor.name} ${code}` : err.constructor.name;
+}
+
+/**
+ * The switch as `auth` states it. A read that fails fails the connect attempt, and the
+ * back-off retries it: Tower states only what it knows, with no fallback (architect ruling,
+ * 2026-11-27). The failure is loud: an ERROR line naming the cause the first time in a
+ * failing run, and the tunnel's last failure, which `afx tower status` shows while the
+ * connection is down.
+ */
+function readSwitchForAuth(): PeerSwitchState {
+  try {
+    const state = readSwitch(getGlobalDb()).state;
+    switchReadFailing = false;
+    return state;
+  } catch (err) {
+    const cause = `global.db could not be read (${describeDbError(err)})`;
+    if (!switchReadFailing) {
+      _deps?.log('ERROR', `Cloud connection not made: the remote-messaging switch is unreadable: ${cause}. Retrying on back-off.`);
+    }
+    switchReadFailing = true;
+    throw new Error(cause);
+  }
+}
+
 /**
  * The tunnel's peer entry point, as this Tower supplies it (Spec 1967). The switch is read
  * from the database for every `auth`, so a reconnect states it as it stands. The audit hook
  * is a no-op until plan phase 6 wires it to the record and the clock-skew surface.
  */
 const PEER_OPTIONS: TunnelPeerOptions = {
-  remoteMessaging: () => readSwitch(getGlobalDb()).state,
+  remoteMessaging: readSwitchForAuth,
   onVerifiedRequest: refuseVerifiedPeerRequest,
   onEntryEvent: () => {},
 };
@@ -367,6 +400,7 @@ export async function initTunnel(
 ): Promise<void> {
   _deps = deps;
   _getInstances = callbacks.getInstances;
+  switchReadFailing = false;
 
   // Auto-connect tunnel if registered
   try {
@@ -736,6 +770,8 @@ export async function handleTunnelEndpoint(
       state,
       uptime,
       hostname: os.hostname(),
+      // Why the connection is down, while it is (the client's last failure; already sanitized).
+      lastFailure: deregistered || state === 'connected' ? null : (tunnelClient?.getLastFailure() ?? null),
     };
 
     if (config) {

@@ -137,7 +137,11 @@ export type PeerEntryEvent = PeerEntryResult &
 
 /** What the Tower injects into the entry point. */
 export interface TunnelPeerOptions {
-  /** The remote-messaging switch, read for every `auth`, so each reconnect states it afresh. */
+  /**
+   * The remote-messaging switch, read for every `auth`, so each reconnect states it afresh.
+   * A throw fails the connect attempt, and its message becomes the state reason and the last
+   * failure (`afx tower status`): it names the cause and nothing else.
+   */
   remoteMessaging: () => PeerSwitchState;
   /** Where a verified request goes. */
   onVerifiedRequest: PeerRequestHandler;
@@ -676,6 +680,8 @@ export class TunnelClient {
   private authFailureLogged = false;
   /** The current connection's peer state, from its `auth_ok` until it ends (Spec 1967). */
   private session: TunnelSession | null = null;
+  /** See `getLastFailure`. */
+  private lastFailure: string | null = null;
 
   constructor(options: TunnelClientOptions) {
     this.options = options;
@@ -713,6 +719,9 @@ export class TunnelClient {
   }
 
   private setState(newState: TunnelState, reason?: string): void {
+    // The last failure stays until the tunnel is up again (or disconnected on purpose).
+    if (newState === 'connected') this.lastFailure = null;
+    else if ((newState === 'disconnected' || newState === 'auth_failed') && reason) this.lastFailure = reason;
     if (this.state === newState) return;
     const prev = this.state;
     this.state = newState;
@@ -755,6 +764,16 @@ export class TunnelClient {
     this.stopHeartbeat();
     this.cleanup();
     this.setState('disconnected', 'disconnect() called');
+    this.lastFailure = null;
+  }
+
+  /**
+   * Why the tunnel is not connected: the reason the last attempt failed, until it connects
+   * again or is disconnected on purpose; `null` otherwise. Already sanitized, like every
+   * state reason.
+   */
+  getLastFailure(): string | null {
+    return this.lastFailure;
   }
 
   /**

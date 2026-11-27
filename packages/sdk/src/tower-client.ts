@@ -225,6 +225,12 @@ export interface TowerTunnelStatus {
   accessUrl: string | null;
   /** Set when the cloud rejected the key after it had connected (Issue #1871). */
   deregisteredAt?: string;
+  /**
+   * Why the cloud connection is down, while it is: the last attempt's failure, e.g. the
+   * remote-messaging switch unreadable from global.db (Spec 1967). `null` when connected.
+   * Absent from a Tower that predates it.
+   */
+  lastFailure?: string | null;
 }
 
 export interface TowerStatus {

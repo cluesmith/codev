@@ -547,4 +547,14 @@ above is struck through. A test breaks both invariants by hand and finds neither
     attempt, which takes the dashboard, VS Code remote and `/t/` down with it. Stating `off`
     with a WARN would also be fail-closed for messaging, but it is a fallback. Kept as built
     (design choice 5, the owner's fail-fast rule); asked in the phase report.
+- **Architect, 2026-11-27T03:05Z, on the unreadable switch:** keep fail-the-attempt (no
+  fallback; stating `off` would report what Tower does not know). Conditions, built:
+  - an ERROR line once per failing run naming the cause (`global.db could not be read
+    (<class> <code>)`, never the message);
+  - `afx tower status` shows `Last failure` while the connection is down: from
+    `TunnelClient.getLastFailure()`, served as `lastFailure` in `/api/tunnel/status`, which
+    is an optional field in the SDK type.
+
+  Tests for both. The architect tells the owner, since a database fault now takes remote
+  access down too; if overruled, it is a one-line change in `readSwitchForAuth`.
 

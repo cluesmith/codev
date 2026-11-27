@@ -249,6 +249,9 @@ export async function towerCloudStatus(port?: number): Promise<void> {
 
   if (status) {
     logger.kv('Connection', status.state);
+    if (status.lastFailure) {
+      logger.kv('Last failure', status.lastFailure);
+    }
     if (status.uptime !== null) {
       logger.kv('Uptime', formatUptime(status.uptime));
     }

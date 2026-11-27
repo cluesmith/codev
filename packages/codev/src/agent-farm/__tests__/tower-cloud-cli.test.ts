@@ -318,6 +318,52 @@ describe('tower cloud CLI flows (Phase 5)', () => {
     });
   });
 
+  describe('status: why the cloud connection is down (Spec 1967)', () => {
+    /** The running Tower, as this file's fetch spy: `GET /api/tunnel/status` answers `body`. */
+    function towerAnswering(body: Record<string, unknown>): void {
+      fetchSpy.mockImplementation(async (input: unknown) => {
+        const url = typeof input === 'string' ? input : String(input);
+        if (url.endsWith('/api/tunnel/status')) {
+          return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(null, { status: 404 });
+      });
+    }
+    const base = {
+      registered: true,
+      uptime: null,
+      towerId: 'tw-1',
+      towerName: 'mac',
+      serverUrl: 'https://codevos.ai',
+      accessUrl: 'https://codevos.ai/t/mac/',
+    };
+
+    beforeEach(() => {
+      writeCloudConfig({ tower_id: 'tw-1', tower_name: 'mac', api_key: 'ctk_MockApiKey123', server_url: 'https://codevos.ai' });
+    });
+
+    it('prints the last failure while the connection is down', async () => {
+      const failure = 'connection error: remote-messaging switch unreadable: global.db could not be read (SqliteError SQLITE_CORRUPT)';
+      towerAnswering({ ...base, state: 'disconnected', lastFailure: failure });
+      await towerCloudStatus(UNUSED_TOWER_PORT);
+      expect(logger.kv).toHaveBeenCalledWith('Connection', 'disconnected');
+      expect(logger.kv).toHaveBeenCalledWith('Last failure', failure);
+    });
+
+    it('prints no failure line when connected, or for a Tower that predates the field', async () => {
+      for (const body of [
+        { ...base, state: 'connected', uptime: 5_000, lastFailure: null },
+        { ...base, state: 'disconnected' },
+      ]) {
+        vi.mocked(logger.kv).mockClear();
+        towerAnswering(body);
+        await towerCloudStatus(UNUSED_TOWER_PORT);
+        expect(logger.kv).toHaveBeenCalledWith('Connection', body.state);
+        expect(vi.mocked(logger.kv).mock.calls.map((c) => c[0])).not.toContain('Last failure');
+      }
+    });
+  });
+
   describe('towerDeregister', () => {
     it('deregisters without confirmation', async () => {
       writeCloudConfig({

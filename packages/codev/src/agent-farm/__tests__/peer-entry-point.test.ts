@@ -60,7 +60,7 @@ vi.mock('../lib/cloud-config.js', () => ({
 vi.mock('../db/index.js', () => ({ getGlobalDb: () => ({ stand: 'in for the global database' }) }));
 vi.mock('../peer/switch.js', () => ({ readSwitch: (db: unknown) => mockReadSwitch(db) }));
 
-const { initTunnel, shutdownTunnel, getTunnelPeerSession } = await import('../servers/tower-tunnel.js');
+const { initTunnel, shutdownTunnel, getTunnelPeerSession, handleTunnelEndpoint } = await import('../servers/tower-tunnel.js');
 
 // A reconnect waits out the client's own back-off (2 to 3 seconds), and some tests make two.
 vi.setConfig({ testTimeout: 20_000 });
@@ -334,6 +334,9 @@ describe('the handshake', () => {
     expect(await waitFor(async () => reasons.some((reason) => reason.includes('remote-messaging switch unreadable')), 10_000, 10)).toBe(true);
     expect(relay.handshakes).toEqual([]);
     expect(tunnel.getState()).toBe('disconnected');
+    expect(tunnel.getLastFailure()).toBe('connection error: remote-messaging switch unreadable: database is locked');
+    tunnel.disconnect();
+    expect(tunnel.getLastFailure()).toBeNull();
   });
 });
 
@@ -911,6 +914,56 @@ describe('the secret never reaches a log', () => {
       await new Promise<void>((resolve) => cloud.close(() => resolve()));
     }
   });
+
+  it('a switch tower-tunnel cannot read: one ERROR naming the cause per failing run, the reason in the status while it lasts, then recovery', async () => {
+    class SqliteError extends Error {
+      code = 'SQLITE_CORRUPT';
+    }
+    clock = Date.now();
+    const configDir = mkdtempSync(join(tmpdir(), 'codev-peer-entry-'));
+    mockGetCloudConfigPath.mockReturnValue(join(configDir, 'cloud-config.json'));
+    mockReadCloudConfig.mockReturnValue({ tower_id: r.towerId, tower_name: r.slug, api_key: r.apiKey, server_url: relay.url });
+    mockReadSwitch.mockImplementation(() => {
+      throw new SqliteError('database disk image is malformed');
+    });
+    const logged: Array<{ level: string; message: string }> = [];
+    const tunnelStatus = async (): Promise<Record<string, unknown>> => {
+      let body = '';
+      const res = { writeHead: () => {}, end: (data?: string) => { body += data ?? ''; } } as unknown as http.ServerResponse;
+      const req = { method: 'GET', url: '/api/tunnel/status', headers: {}, socket: { remoteAddress: '127.0.0.1' } } as unknown as http.IncomingMessage;
+      await handleTunnelEndpoint(req, res, 'status');
+      return JSON.parse(body) as Record<string, unknown>;
+    };
+    const cause = 'global.db could not be read (SqliteError SQLITE_CORRUPT)';
+    const attempts = () => logged.filter((line) => line.message.includes('→ disconnected') && line.message.includes(cause)).length;
+    try {
+      await initTunnel(
+        { port: localPort, log: (level, message) => logged.push({ level, message }), workspaceTerminals: new Map() as never, terminalManager: null },
+        { getInstances: async () => [] },
+      );
+      // Two failing attempts: the first and the back-off's retry.
+      expect(await waitFor(async () => attempts() >= 2, 15_000, 20)).toBe(true);
+      expect(logged.filter((line) => line.level === 'ERROR')).toEqual([
+        { level: 'ERROR', message: `Cloud connection not made: the remote-messaging switch is unreadable: ${cause}. Retrying on back-off.` },
+      ]);
+      expect(relay.handshakes).toEqual([]);
+      expect(await tunnelStatus()).toMatchObject({
+        registered: true,
+        state: expect.stringMatching(/^(disconnected|connecting)$/),
+        lastFailure: `connection error: remote-messaging switch unreadable: ${cause}`,
+      });
+
+      // The read works again: the back-off connects, and the failure is gone from the status.
+      mockReadSwitch.mockReturnValue({ state: 'off', changedAt: null });
+      expect(await waitFor(async () => getTunnelPeerSession() !== null, 15_000, 20)).toBe(true);
+      expect(await tunnelStatus()).toMatchObject({ state: 'connected', lastFailure: null });
+      expect(relay.handshakes.map((h) => h.peer)).toEqual([{ protocols: [1], remoteMessaging: 'off' }]);
+      for (const line of logged) expect(line.message).not.toContain('malformed');
+    } finally {
+      shutdownTunnel();
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  }, 40_000);
 
   it("through tower-tunnel's wiring: its logger, the stub handler, the switch re-announced on reconnect, the exposed session", async () => {
     // tower-tunnel's client reads the real clock, so the stand-in issues statements on it too.
