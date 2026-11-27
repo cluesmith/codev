@@ -150,9 +150,18 @@ gh_request() {
   gh_pid=
 }
 
-# Whole-bundle failure: replay gh's stderr and exit with gh's status.
+# Whole-bundle failure: replay gh's stderr and exit with gh's status. A rate limit that only
+# the response body reports never reaches gh's stderr, so it is named there too: the forge
+# layer's rate limiter reads stderr alone, and would otherwise not suspend the budget.
 fail_with_gh() {
   cat "$tmp/$1.err" >&2
+  if ! grep -Eiq "$RATE_LIMIT_PATTERN" "$tmp/$1.err" && is_rate_limited "$1"; then
+    jq -r --arg re "$RATE_LIMIT_PATTERN" '
+      .errors[]?
+      | select((.type? // "") == "RATE_LIMITED" or ((.message? // "") | tostring | test($re; "i")))
+      | "overview-bundle: GitHub reported a rate limit: \(.type // "no type"): \(.message // "no message")"' \
+      <"$tmp/$1.out" >&2 2>/dev/null
+  fi
   exit "$gh_status"
 }
 
@@ -169,12 +178,14 @@ is_rate_limited() {
 # Reads the connection at JSON path $2 (an array literal) of staged response $1, and fails
 # the whole bundle unless it holds a nodes array. Sets page_count and page_cursor (empty
 # when there is no next page). A next page without a cursor is a failure too: paging would
-# otherwise stop early and truncate the section in silence.
+# otherwise stop early and truncate the section in silence. $3 = `last` marks a page after
+# which paging stops anyway, so its pageInfo is not read and cannot fail the bundle.
 read_connection() {
-  info=$(jq -r --argjson path "$2" '
+  if [ "${3-}" = last ]; then last=true; else last=false; fi
+  info=$(jq -r --argjson path "$2" --argjson last "$last" '
     getpath($path)
     | if (type == "object") and ((.nodes | type) == "array") then
-        "\(.nodes | length) \(if .pageInfo.hasNextPage != true then ""
+        "\(.nodes | length) \(if $last or .pageInfo.hasNextPage != true then ""
                               elif (.pageInfo.endCursor | type) == "string" and .pageInfo.endCursor != ""
                               then .pageInfo.endCursor
                               else error("next page without a cursor") end)"
@@ -254,7 +265,7 @@ if [ -n "$issues_cursor" ]; then
   if [ "$gh_status" -ne 0 ]; then
     fail_with_gh issues.2
   fi
-  read_connection issues.2 '["data","repository","issues"]'
+  read_connection issues.2 '["data","repository","issues"]' last
   cat "$tmp/issues.2.out" >>"$tmp/pages.json"
   issue_pages=1
 fi
@@ -291,7 +302,11 @@ page_search() {
       search_ok=false
       return
     fi
-    read_connection "$section.$page" '["data","search"]'
+    if [ "$page" -ge 10 ]; then
+      read_connection "$section.$page" '["data","search"]' last
+    else
+      read_connection "$section.$page" '["data","search"]'
+    fi
     cat "$tmp/$section.$page.out" >>"$tmp/pages.json"
     search_pages=$((search_pages + 1))
     count=$((count + page_count))

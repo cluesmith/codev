@@ -26,6 +26,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { executeForgeCommandDetailed, type ForgeCommandResult } from '../lib/forge.js';
+import { isRateLimitError } from '../lib/forge-rate-limit.js';
 import type {
   IssueListItem,
   MergedPrItem,
@@ -319,6 +320,29 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
       expect(ops()).toEqual(['OverviewBundle']);
     });
 
+    it('a page after which paging stops anyway (issue page 2, search page 10) may say "next page" without a cursor', async () => {
+      const noCursor = <T extends { pageInfo: object }>(c: T) => ({ ...c, pageInfo: { hasNextPage: true, endCursor: null } });
+      fake.route('OverviewBundle', {
+        body: bundleBody({ issues: nodes(ISSUE_NODE, 100, 500), issuesNext: 'i2', merged: [MERGED_NODE], mergedNext: 'p2' }),
+      });
+      const page2 = issuesPage(nodes(ISSUE_NODE, 100, 400));
+      fake.route(graphqlKey('OverviewIssuesPage', { cursor: 'i2' }), {
+        body: { data: { repository: { issues: noCursor(page2.data.repository.issues) } } },
+      });
+      for (let page = 2; page <= 9; page++) {
+        fake.route(graphqlKey('OverviewSearchPage', { section: 'merged', cursor: `p${page}` }), {
+          body: searchPage([], `p${page + 1}`),
+        });
+      }
+      fake.route(graphqlKey('OverviewSearchPage', { section: 'merged', cursor: 'p10' }), {
+        body: { data: { search: noCursor(searchPage([]).data.search) } },
+      });
+      const bundle = await runBundle();
+      expect(bundle.issues).toHaveLength(200);
+      expect(bundle.recentlyMerged).toHaveLength(1);
+      expect(ops()).toEqual(['OverviewBundle', 'OverviewIssuesPage', ...Array(9).fill('OverviewSearchPage.merged')]);
+    });
+
     it('caps open PRs at 30', async () => {
       fake.route('OverviewBundle', { body: bundleBody({ prs: nodes(PR_NODE, 35, 900) }) });
       const bundle = await runBundle();
@@ -457,13 +481,40 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
       ['an error with an empty path', { data: { repository: lists, closed: connection([]), merged: connection([]) }, errors: [error([])] }],
       ['an error on the issues path', { data: { repository: { ...lists, issues: null }, closed: connection([]), merged: connection([]) }, errors: [error(['repository', 'issues'])] }],
       ['one search error plus one list error', { data: { repository: { ...lists, pullRequests: null }, closed: null, merged: connection([]) }, errors: [error(['closed']), error(['repository', 'pullRequests'])] }],
-      ['RATE_LIMITED on a search path', { data: { repository: lists, closed: null, merged: connection([]) }, errors: [error(['closed'], { type: 'RATE_LIMITED' })] }],
-      ['a rate-limit message on a search path', { data: { repository: lists, closed: null, merged: connection([]) }, errors: [error(['merged'], { message: 'You have exceeded a secondary rate limit.' })] }],
       ['data: null', { data: null, errors: [error(['closed'])] }],
       ['non-JSON stdout', 'upstream connect error or disconnect/reset before headers'],
     ])('%s: whole failure with gh\'s status and stderr', async (_name, body) => {
       fake.route('OverviewBundle', { body, stderr: GH_STDERR, code: 1 });
       expectWholeFailure(await runConcept('overview-bundle'), 1, GH_STDERR);
+      expect(isRateLimitError(GH_STDERR)).toBe(false);
+    });
+
+    // gh's own stderr may not say "rate limit" when only the body does. The script names it,
+    // because the forge layer's rate limiter reads stderr alone.
+    it.each([
+      ['RATE_LIMITED on a search path', error(['closed'], { type: 'RATE_LIMITED' })],
+      ['a rate-limit message on a search path', error(['merged'], { message: 'You have exceeded a secondary rate limit.' })],
+    ])('%s: whole failure, gh\'s stderr replayed, and the rate limit named for the limiter', async (_name, err) => {
+      const body = { data: { repository: lists, closed: null, merged: connection([]) }, errors: [err] };
+      fake.route('OverviewBundle', { body, stderr: GH_STDERR, code: 1 });
+      const result = await runConcept('overview-bundle');
+      expect(result.data).toBeNull();
+      expect(result.error?.exitCode).toBe(1);
+      const stderr = result.error?.stderr ?? '';
+      expect(stderr.startsWith(GH_STDERR)).toBe(true);
+      const added = stderr.slice(GH_STDERR.length);
+      expect(added).toMatch(/^overview-bundle: GitHub reported a rate limit: /);
+      expect(isRateLimitError(added)).toBe(true);
+    });
+
+    it('a body-only rate limit on a follow-up page is named for the limiter too', async () => {
+      fake.route('OverviewBundle', { body: bundleBody({ issuesNext: 'i2' }) });
+      fake.route(graphqlKey('OverviewIssuesPage', { cursor: 'i2' }), {
+        body: { data: null, errors: [error(undefined, { type: 'RATE_LIMITED' })] }, stderr: GH_STDERR, code: 1,
+      });
+      const result = await runConcept('overview-bundle');
+      expect(result.error?.exitCode).toBe(1);
+      expect(isRateLimitError(result.error?.stderr ?? '')).toBe(true);
     });
 
     it('rate-limit text on stderr only: whole failure', async () => {

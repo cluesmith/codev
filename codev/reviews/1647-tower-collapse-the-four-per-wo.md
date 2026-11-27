@@ -68,8 +68,12 @@ refresh against 7 for the four calls.
       four-call variant kept. (Phase 3)
 - [x] All four concept-enumerating docs describe `overview-bundle`, and the stale "18 concepts"
       counts are corrected to 21. (Phases 2 and 4)
-- [ ] Verify-phase items, still open by design: the Windows workflow run (dispatched on this PR's
-      branch) and a browser check of the Work view on the architect's install.
+- [x] Windows (Git Bash): the on-demand `windows.yml` run on this branch passed
+      ([45952952774](https://github.com/cluesmith/codev/actions/runs/45952952774): CLI tests,
+      unit tests, install verification, both probes). It was re-dispatched after the PR-review
+      fixes changed the script. (Review)
+- [ ] Verify-phase item, still open by design: a browser check of the Work view on the
+      architect's install.
 
 ## Deviations from Plan
 
@@ -103,7 +107,9 @@ refresh against 7 for the four calls.
   two counters.
 - **Review.** `main` had moved 35 commits. Its #1844 change added an import on the line next to
   this branch's import in `overview.ts`, so the merge needed one conflict resolved (both lines
-  kept). The build and full suite were re-run on the merge commit.
+  kept). The build and full suite were re-run on the merge commit. The PR review then added two
+  script hardenings, a body-only rate limit named on stderr and no cursor check on the last
+  page, plus a lock trap in the fake `gh` (see Consultation Feedback).
 
 ## Consultation Feedback
 
@@ -212,6 +218,19 @@ re-reviewed. The owner approved the spec as written.
 - **Concern**: the GitLab sketch ignores `CODEV_SINCE_DATE` → **Addressed**: the sketch says so and says how to use it.
 - **Concern**: `grep "18 concepts"` matches `.builder-state.md` → **N/A**: untracked builder scratch, never committed.
 - **Concern**: combined doctor reasons not documented → **Addressed**.
+
+### Review Phase, PR #2004 (Round 1): codex REQUEST_CHANGES, claude APPROVE
+
+#### Codex
+- **Concern**: the Windows workflow run had not finished → **Addressed**: it passed, and the result is recorded here and in the PR.
+
+#### Claude
+- **Concern**: a rate limit reported only in the GraphQL body never reaches stderr, so the budget is not suspended → **Addressed**: `fail_with_gh` names it on stderr in a line the limiter matches; three tests, mutation-checked.
+- **Concern**: `invalidate()`'s docstring is stale for bundled mode → **Addressed**.
+- **Concern**: the fake `gh`'s lock can leak and hang a test → **Addressed**: a trap set only while the lock is held. The suggested whole-script `EXIT` trap would race with other processes' locks.
+- **Concern**: the last issue page's cursor check can fail a healthy bundle → **Addressed**: issue page 2 and search page 10 skip `pageInfo`; one test, mutation-checked.
+- **Concern**: the Windows run was in flight → **Addressed**: same as codex.
+- **Concern**: a "future-dated" fixture note → **Rebutted**: all dates are UTC, and it was 2026-11-27 UTC.
 
 ## Lessons Learned
 

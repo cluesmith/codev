@@ -1372,7 +1372,8 @@ export class OverviewCache {
    * review queue call this after every mutation, so it is not a human signal
    * (#1645): it never clears a suspension or a cached failure, never touches
    * the search or identity caches, and a list is refetched for it at most once
-   * per `INVALIDATE_DEBOUNCE_MS` per workspace.
+   * per `INVALIDATE_DEBOUNCE_MS` per workspace. In bundled mode the bundle entry
+   * is a list entry, so the two 24 h searches it carries refresh with it (Spec 1647).
    */
   invalidate(): void {
     this.invalidatedAt = this.now();

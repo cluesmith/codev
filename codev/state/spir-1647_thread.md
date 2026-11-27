@@ -217,3 +217,12 @@ SPIR, soft mode. Spawned by architect `porchless`.
   points with `rateLimit(dryRun: true)`). No hot-tier change; both hot files are at their caps.
 - Still open for verify: the Windows workflow run on this branch, and the Work view browser check
   on the architect's install.
+- PR #2004 opened. Windows run 45952952774 green on 42231b9aa.
+- PR consultation: codex REQUEST_CHANGES only because the Windows run was still in flight;
+  claude APPROVE with six nits. Fixed four in place:
+  - a body-only `RATE_LIMITED` is now named on stderr, so the limiter suspends;
+  - the `invalidate()` docstring;
+  - the fake `gh` lock trap, held-only (the suggested whole-script EXIT trap would race);
+  - no cursor check on the last issue page or search page 10.
+  The "future-dated" fixture note is rebutted: the dates are UTC. Both script fixes were
+  mutation-checked.

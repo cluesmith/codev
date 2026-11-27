@@ -30,10 +30,17 @@ export const posixWithJq = process.platform !== 'win32' && hasJq();
 const FAKE_GH = `#!/bin/sh
 dir="$(dirname "$0")"
 # The overview cache runs several gh processes at once: number the calls under a lock.
+# The trap releases the lock only while this process holds it, so a fake gh killed inside
+# the window cannot leave the next one spinning, and one that exits later cannot remove a
+# lock another process has since taken.
 until mkdir "$dir/lock" 2>/dev/null; do :; done
+trap 'rmdir "$dir/lock" 2>/dev/null' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 n=$(( $(cat "$dir/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$dir/count"
 rmdir "$dir/lock"
+trap - EXIT TERM INT
 printf '%s\\000' "$@" > "$dir/call.$n.argv"
 echo "$$" > "$dir/call.$n.pid"
 key=
