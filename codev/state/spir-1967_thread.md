@@ -494,3 +494,6 @@ above is struck through. A test breaks both invariants by hand and finds neither
   `tunnel-client.test.ts` 83 tests, together): 15.7 s, 16.3 s and 17.3 s over three runs.
   Porch's full tests command: 468 files passed, 14 skipped; 10 508 tests passed, 116 skipped;
   235.4 s; exit 0. The build check passed.
+- Windows workflow dispatched at 4defee646 (load 1.75): probe with the three-shell `afx://`
+  argv steps, plus `suites=true`.
+  https://github.com/cluesmith/codev/actions/runs/45929432410
