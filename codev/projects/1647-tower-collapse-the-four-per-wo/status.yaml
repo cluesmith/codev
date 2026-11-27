@@ -8,14 +8,14 @@ plan_phases:
     status: complete
   - id: phase_2
     title: Overview mode resolution, spend projection and doctor reporting
-    status: in_progress
+    status: complete
   - id: phase_3
     title: Overview cache bundle path
-    status: pending
+    status: in_progress
   - id: phase_4
     title: Adopter documentation
     status: pending
-current_plan_phase: phase_2
+current_plan_phase: phase_3
 gates:
   spec-approval:
     status: approved
@@ -30,10 +30,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T05:38:43.485Z'
+updated_at: '2026-11-27T05:42:35.004Z'
 force_advanced:
   phase: specify
   iteration: 3
@@ -50,3 +50,5 @@ context_refreshes:
   - boundary: plan-phase:phase_2
     at: '2026-11-27T05:23:28.162Z'
     acknowledged_at: '2026-11-27T05:24:27.269Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-11-27T05:42:35.004Z'
