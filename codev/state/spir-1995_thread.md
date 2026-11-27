@@ -196,3 +196,22 @@ Claude's non-blocking notes, all taken:
   Users only; parity exact on erigon and microsoft/fluentui-android.
 - Nit: an all-empty error message made the salvage die on an opaque jq error. It now salvages
   with "window search failed".
+
+## 2026-11-27 — Phase 2 forge_config_null_disables: built
+- Fix: `loadConfig` now merges each layer through `mergeConfigLayer`, which is `deepMerge`
+  except that, when both sides carry a `forge` object, the section is a flat spread (higher
+  layer's string or null wins, single-layer keys kept). `deepMerge` itself is unchanged
+  (`commands/update.ts` uses it). A whole-section `"forge": null` still deletes the section, and
+  nulls outside `forge` still delete.
+- Reproduced first: the five bug-shaped cases in `config.test.ts` (project null under a global or
+  framework-cache forge object, local null over project string, four-layer key retention, and
+  `getForgeCommand` on `loadForgeConfig`) fail on the pre-fix file and pass with it. The three
+  guard cases (project string over global null, `forge: null`, non-forge null) pass on both.
+- `provider: null` is now kept as null rather than deleted, once a lower layer has a forge
+  object. Every reader treats it as unset already (`?? 'github'` or a truthiness check), and a
+  project with no lower forge layer could already produce it, so nothing new.
+- Deferred to Phase 4 docs: a line in forge.md "Disabling Concepts" saying the null holds in
+  any config layer. The PR body names this as a pre-existing bug fixed in place.
+- Noted, not changed: the legacy one-shot `af-config.json` → `.codev/config.json` merge in
+  `commands/update.ts` still uses plain `deepMerge`, so it would drop a forge null only when
+  both files carry a `forge` object. The plan keeps `deepMerge` and that caller as they are.
