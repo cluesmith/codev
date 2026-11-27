@@ -1423,3 +1423,80 @@ a line this phase wrote.
   - Layer C, load 1.5, port 14102: 17 of 17 in 5.5 s, nothing left. With the `exec` caller:
     17 of 17 in 5.2 s.
   - Layer A: 11 011 passed, 116 skipped, 242 s.
+
+## Phase 13: docs in both trees, the walkthrough end to end, and Windows (2026-11-27)
+
+- **The architect's ruling on the Peers section, done as its own commit (`7dc60fd54`).** The
+  section is hidden when this Tower has no Codev Cloud registration and remote messaging is off,
+  and shown in every other case. "No registration" is `towerName === null`: it is null exactly
+  when `readCloudConfig()` is, since `tower_name` is a required field. One unit test for each
+  side (`peer-panel-template.test.ts`, which evaluates the template's own functions); the
+  negative run fails without the condition. The unmocked Playwright case now asserts the section
+  is absent; screenshot `peers-hidden-unregistered.png`. Layer C 17 of 17 in 5.6 s.
+- **Docs (`f9d21e1d5`)**, found by grepping both trees for the addressing forms, `afx peer`,
+  `afx inbox` and the stage 1 refusal text. The grep found one file pair the plan did not list:
+  `overview.md` in both trees (`afx peer`, and release under `afx inbox`).
+  - `arch.md` still said stage 1 refuses any Tower address (`CROSS_TOWER_UNAVAILABLE`); that code
+    no longer exists in production code. Corrected, and section 10 added. The hot tier is not
+    grown.
+  - The 34 unit test files that read these docs: 809 passed.
+- **The walkthrough (`02f0c8e7a`)**, `peer-walkthrough.e2e.test.ts`: steps 1 to 9 as exact
+  command lines through the CLI's parser, each printed line asserted; each skipped-step row
+  (taken back with `afx peer off` or `afx peer revoke`, restored with the walkthrough's own
+  command); devvm asleep via the stand-in's `setOffline`; then the secrets and bodies check.
+  7 of 7 in 16 s. A negative run with a secret and a MAC planted in a Tower's directory failed on
+  exactly that file.
+- **Review doc (`cd31f8bcb`)**: phase 12 in the force-advance section; a new list of what waits
+  for the real-cloud run at verify-approval, the no-relay Peers state among them.
+- **Readings for the architect.**
+  - The plan asks that each template pair's diff be empty. On main, `CLAUDE.md` and `AGENTS.md`
+    in `codev/templates/` and `codev-skeleton/templates/` differ by design: the title line and
+    the AGENTS.md note. I kept those two hunks and made every edit identical in both.
+  - PTY session logs (`<agent-farm>/logs/<terminal id>.log`, #1238) are a terminal's transcript,
+    so they hold the body of a message delivered to that terminal. The check allows a body only
+    in its recipient terminal's transcript, and a secret, statement or MAC nowhere.
+  - In-process, a refused `afx send` logs its thrown exit as a second `[error] exit 1` line that a
+    real process never prints; the walkthrough's runner drops that one line.
+  - devvm's `codev` workspace also has a `main` architect, since a workspace's first architect is
+    always `main`; the walkthrough's `local` is the second.
+- **Merged `origin/main` (`9f2048c78`)**, bringing in #1977 (the `/health/live` liveness route)
+  and #1992. There were four conflicts, each kept both sides:
+  - `send.ts`: main's three-argument `explainNotFound` around this branch's `explainMalformed`
+    and the receiving Tower's detail;
+  - the SDK's `tower-client.ts`: a union of the imports, with both blocks of declarations kept;
+  - `server-utils.ts` and `tower-routes.ts`: unions of the imports.
+
+  After the merge the CLI asks `/health/live` first, so the send CLI test's fake Tower answers
+  it (`63624ca42`). The architect will read the four resolutions at the pr gate.
+- **The full `afx status` cannot run in layer B.** I tried it on the walkthrough's harness Tower
+  as the claude review of phase 11 asked. It printed "Workspace: not active in tower", and
+  `/health` said 0 workspaces. The cause is pre-existing: Tower's `getInstances` leaves out every
+  workspace in a temp directory (`isTempDirectory`), and harness workspaces must stay in one. I
+  removed the case. The architect put the run on the verify-approval list for a real Tower.
+- **Runs on the finished branch.**
+  - Layer A: 11 022 passed, 242 s.
+  - Layer B, the seven two-Tower files: 63/63 in 59 s, at a load of 2.8.
+  - Layer C: 17/17 in 5.5 s.
+- **Windows, run 1 (`46006429938`): red**, with six failures in two of this spec's files on
+  their first Windows run. I reported it before any rerun.
+  - `peer-inbox.test.ts`: its workspace was the POSIX literal `/work/codev`, which the route
+    normalizes to a drive-letter path, so nothing matched. Fixed with `resolve()`
+    (`b5123888d`).
+  - `peer-pipeline.test.ts`: a 50-message backlog passed 30 s; the file took 172 s against
+    1.9 s here. On the architect's word, one commit (`47e830c3a`) added a Windows-only 120 s
+    limit and temporary test-side timing, then one dispatch.
+- **Windows, run 2 (`46009240887`): green.** Unit tests 10 712 passed. The timing put the cost
+  in SQLite commits that wait on a sync to disk. Per message: about 120 ms in R's writes, 70 ms
+  in S's outbox writes, 45 ms in the send, 5 ms in loopback HTTP. The test databases use the
+  rollback journal; production is WAL.
+  - That is about 0.25 s a message, under the architect's one-second line for a product
+    matter.
+  - The timing is removed (`b95f451a8`). The limit stays, with the cause in its comment and in
+    the review.
+- **The scenario-to-test table** is in the review: 71 rows, five of them waiting for the real
+  cloud or real Towers, and 11 partial gaps named with what was searched. A subagent drafted
+  it; I checked five of its test titles and one gap against the sources.
+- **The architect's word on the second run (2026-11-27T13:57Z).** They read the middle case as
+  I did, so keep-and-remove stands, and the test databases' pragmas stay as they are. No third
+  Windows run is needed for `b95f451a8` and `09ea39d00`, a test-only removal and a document.
+  The PR body says the Windows run is on `914765b38` and lists what came after it.
