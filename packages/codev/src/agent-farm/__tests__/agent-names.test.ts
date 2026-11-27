@@ -11,6 +11,7 @@ import {
   namesATower,
   CROSS_TOWER_UNAVAILABLE_MESSAGE,
   resolveAgentName,
+  taskBuilderId,
 } from '../utils/agent-names.js';
 import type { Builder } from '../types.js';
 
@@ -27,6 +28,17 @@ function makeBuilder(id: string, overrides?: Partial<Builder>): Builder {
     ...overrides,
   };
 }
+
+describe('taskBuilderId (#1992)', () => {
+  it('names a task builder from its worktree name or short id, as spawn does', () => {
+    expect(taskBuilderId('task-bEPd')).toBe('builder-task-bepd');
+    expect(taskBuilderId('bEPd')).toBe('builder-task-bepd');
+    expect(taskBuilderId('task-S0-L')).toBe('builder-task-s0-l');
+    expect(taskBuilderId('task-_-LM')).toBe('builder-task-_-lm');
+    expect(taskBuilderId('task-0123')).toBe('builder-task-123');
+    expect(taskBuilderId('0123')).toBe('builder-task-123');
+  });
+});
 
 describe('buildAgentName', () => {
   it('generates spec builder names with default spir protocol', () => {
