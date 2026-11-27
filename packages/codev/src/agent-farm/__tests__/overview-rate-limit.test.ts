@@ -29,6 +29,12 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
   return {
     ...actual,
     overviewBackend: (concept: string, cwd: string) => fake.backend(concept, cwd),
+    // Spec 1647: these tests are the kept four-call variant; the bundle has its own.
+    overviewPlan: () => ({
+      mode: 'four-call',
+      cause: { kind: 'bundle-disabled' },
+      runnable: ['pr-list', 'issue-list', 'recently-closed', 'recently-merged'],
+    }),
     fetchForOverview: (concept: string, cwd: string) => {
       fake.calls.push({ concept, cwd });
       return fake.behaviour[concept](cwd);

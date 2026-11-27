@@ -219,6 +219,44 @@ export interface PrViewResult {
 }
 
 // =============================================================================
+// Overview concepts (Spec 1647)
+// =============================================================================
+
+/**
+ * Output of the `overview-bundle` concept command: the four forge-backed sections of
+ * Tower's overview from one invocation, in place of `pr-list`, `issue-list`,
+ * `recently-closed` and `recently-merged`.
+ *
+ * **Input.** `CODEV_SINCE_DATE`, always set by the caller: the start of the two 24 h
+ * windows, an ISO-8601 UTC timestamp at seconds precision (`YYYY-MM-DDTHH:MM:SSZ`), as
+ * the two search concepts receive it. The GitHub script exits non-zero, before sending
+ * any request, on a missing or malformed value.
+ *
+ * **Output on exit 0.** One JSON object with these four required keys. Each holds what
+ * the corresponding concept emits for the same repository state, under that concept's
+ * contract, or `null`, which means that section alone could not be fetched. Items are
+ * held to those contracts, not to any one CLI's full output: the GitHub script emits only
+ * the contract fields, so its items are narrower than `gh --json`'s (no `is_bot`, no label
+ * `color`). Extra top-level keys are ignored, as extra item fields are.
+ *
+ * **Non-zero exit.** The whole bundle failed. stderr carries the reason; the rate
+ * limiter reads it.
+ *
+ * **Malformed output** is a whole-bundle failure: not JSON, not an object, a required
+ * key missing, or a section that is neither an array nor `null`.
+ */
+export interface OverviewBundleResult {
+  /** As `pr-list`: open PRs, newest first, up to 30. */
+  prs: PrListResult | null;
+  /** As `issue-list`: open issues, newest first, up to 200. */
+  issues: IssueListResult | null;
+  /** As `recently-closed`: issues closed after `CODEV_SINCE_DATE`, up to 1,000. */
+  recentlyClosed: RecentlyClosedResult | null;
+  /** As `recently-merged`: PRs merged after `CODEV_SINCE_DATE`, up to 1,000. */
+  recentlyMerged: RecentlyMergedResult | null;
+}
+
+// =============================================================================
 // Commit and workflow concepts (Spec 1951)
 // =============================================================================
 

@@ -1,0 +1,1091 @@
+[
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-27T04:08:37Z",
+  "headRefName": "renovate/marked-18.x",
+  "mergedAt": "2026-11-27T04:23:24Z",
+  "number": 139081,
+  "title": "fix(deps): update dependency marked to v18.3.0",
+  "url": "https://github.com/grafana/grafana/pull/139081"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-27T01:07:40Z",
+  "headRefName": "renovate/jest-canvas-mock-2.x",
+  "mergedAt": "2026-11-27T01:49:29Z",
+  "number": 139076,
+  "title": "chore(deps): update dependency jest-canvas-mock to v2.5.8",
+  "url": "https://github.com/grafana/grafana/pull/139076"
+ },
+ {
+  "body": ":robot: Automatic download of translatio",
+  "createdAt": "2026-11-27T00:15:28Z",
+  "headRefName": "i18n_crowdin_translations",
+  "mergedAt": "2026-11-27T00:28:30Z",
+  "number": 139074,
+  "title": "I18n: Download translations from Crowdin",
+  "url": "https://github.com/grafana/grafana/pull/139074"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T22:07:41Z",
+  "headRefName": "renovate/ignore-7.x",
+  "mergedAt": "2026-11-26T22:49:47Z",
+  "number": 139064,
+  "title": "chore(deps): update dependency ignore to v7.0.16",
+  "url": "https://github.com/grafana/grafana/pull/139064"
+ },
+ {
+  "body": "**What is this feature?**\r\n\r\nAdds RBAC m",
+  "createdAt": "2026-11-26T20:22:49Z",
+  "headRefName": "stevesg/rbac-mapper-alerting-queries",
+  "mergedAt": "2026-11-27T01:05:41Z",
+  "number": 139062,
+  "title": "authz: Map template groups, time intervals, inhibition rules, alert enrichments and saved queries to their RBAC actions",
+  "url": "https://github.com/grafana/grafana/pull/139062"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T19:06:43Z",
+  "headRefName": "renovate/i18next-27.x-lockfile",
+  "mergedAt": "2026-11-26T19:49:46Z",
+  "number": 139060,
+  "title": "chore(deps): update dependency i18next to v27.2.6",
+  "url": "https://github.com/grafana/grafana/pull/139060"
+ },
+ {
+  "body": "**What is this feature?**\r\n\r\nThis change",
+  "createdAt": "2026-11-26T18:28:23Z",
+  "headRefName": "jesdavpet/distracted-by-broken-devenv-tempo-yaml-file",
+  "mergedAt": "2026-11-26T18:42:59Z",
+  "number": 139056,
+  "title": "Devenv: Update Tempo config YAML to newer schema",
+  "url": "https://github.com/grafana/grafana/pull/139056"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\nThis",
+  "createdAt": "2026-11-26T16:23:17Z",
+  "headRefName": "cursor/operator-tracer-wrappers-5eb8",
+  "mergedAt": "2026-11-26T17:21:43Z",
+  "number": 139047,
+  "title": "Operators: use the runtime tracer in provisioning and drop deprecated Run wrappers",
+  "url": "https://github.com/grafana/grafana/pull/139047"
+ },
+ {
+  "body": "Restores `github.com/grafana/grafana/pkg",
+  "createdAt": "2026-11-26T16:20:27Z",
+  "headRefName": "pluginoperator/v2-tenant-from-namespace",
+  "mergedAt": "2026-11-27T01:48:22Z",
+  "number": 139046,
+  "title": "Extensions: Restore operators/runner in the generated enterprise imports",
+  "url": "https://github.com/grafana/grafana/pull/139046"
+ },
+ {
+  "body": "follow up for: https://github.com/grafan",
+  "createdAt": "2026-11-26T16:09:06Z",
+  "headRefName": "iam2543/openfeature-permission-cache",
+  "mergedAt": "2026-11-26T19:24:13Z",
+  "number": 139045,
+  "title": "IAM: Chore: move to OpenFeature Client for FlagExcludeRedundantManagedPermissions",
+  "url": "https://github.com/grafana/grafana/pull/139045"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T16:08:02Z",
+  "headRefName": "renovate/fs-extra-11.x",
+  "mergedAt": "2026-11-26T16:49:45Z",
+  "number": 139044,
+  "title": "chore(deps): update dependency fs-extra to ^11.4.0",
+  "url": "https://github.com/grafana/grafana/pull/139044"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T16:07:49Z",
+  "headRefName": "renovate/esbuild-0.x",
+  "mergedAt": "2026-11-26T16:50:12Z",
+  "number": 139043,
+  "title": "chore(deps): update dependency esbuild to v0.28.2",
+  "url": "https://github.com/grafana/grafana/pull/139043"
+ },
+ {
+  "body": "**What is this feature?**\n\nBreaks the ci",
+  "createdAt": "2026-11-26T16:06:27Z",
+  "headRefName": "cursor/bc-7f50dbb1-3538-43b1-8103-4707304c20fc-8385",
+  "mergedAt": "2026-11-26T16:23:34Z",
+  "number": 139042,
+  "title": "Chore: fix circular dependency — alerting insights panel helpers",
+  "url": "https://github.com/grafana/grafana/pull/139042"
+ },
+ {
+  "body": "**What is this feature?**\n\nReplaces the ",
+  "createdAt": "2026-11-26T14:46:45Z",
+  "headRefName": "janthoe/setting-client-use-swr-cache-for-list",
+  "mergedAt": "2026-11-26T16:49:38Z",
+  "number": 139036,
+  "title": "refactor(setting-service): use swrcache for the List cache",
+  "url": "https://github.com/grafana/grafana/pull/139036"
+ },
+ {
+  "body": "**What is this feature?**\n\n`Collapse` an",
+  "createdAt": "2026-11-26T14:45:27Z",
+  "headRefName": "grafana-ui/collapse-data-attributes",
+  "mergedAt": "2026-11-26T17:08:46Z",
+  "number": 139035,
+  "title": "Collapse: Forward data attributes to the toggle button",
+  "url": "https://github.com/grafana/grafana/pull/139035"
+ },
+ {
+  "body": "**What is this feature?**\n\n`section-logi",
+  "createdAt": "2026-11-26T14:10:04Z",
+  "headRefName": "assistant/flaky-section-login-title-suffix",
+  "mergedAt": "2026-11-26T15:24:22Z",
+  "number": 139033,
+  "title": "E2E: Fix flaky section-login-title test dashboard uid collisions",
+  "url": "https://github.com/grafana/grafana/pull/139033"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T13:08:44Z",
+  "headRefName": "renovate/swagger-ui-react-5.x",
+  "mergedAt": "2026-11-26T13:50:21Z",
+  "number": 139024,
+  "title": "fix(deps): update dependency swagger-ui-react to v5.36.0",
+  "url": "https://github.com/grafana/grafana/pull/139024"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\nThis",
+  "createdAt": "2026-11-26T13:08:09Z",
+  "headRefName": "cursor/folder-operator-runner-5eb8",
+  "mergedAt": "2026-11-26T15:46:12Z",
+  "number": 139023,
+  "title": "Folder: run the folder operator on the operator runner",
+  "url": "https://github.com/grafana/grafana/pull/139023"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T13:07:42Z",
+  "headRefName": "renovate/i18next-27.x-lockfile",
+  "mergedAt": "2026-11-26T13:49:38Z",
+  "number": 139022,
+  "title": "chore(deps): update dependency i18next to v27.2.5",
+  "url": "https://github.com/grafana/grafana/pull/139022"
+ },
+ {
+  "body": "In MT, every signed-in user request to a",
+  "createdAt": "2026-11-26T12:42:27Z",
+  "headRefName": "router/v2-settings-user-rbac",
+  "mergedAt": "2026-11-26T13:49:10Z",
+  "number": 139017,
+  "title": "Router: Check MT app access with AuthZ Check",
+  "url": "https://github.com/grafana/grafana/pull/139017"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\nThis",
+  "createdAt": "2026-11-26T12:33:57Z",
+  "headRefName": "cursor/operator-runner-5eb8",
+  "mergedAt": "2026-11-26T15:19:18Z",
+  "number": 139016,
+  "title": "Operators: add a shared operator runner and move common helpers into it",
+  "url": "https://github.com/grafana/grafana/pull/139016"
+ },
+ {
+  "body": "Set the service identity claim to `plugi",
+  "createdAt": "2026-11-26T12:30:05Z",
+  "headRefName": "stevesg/plugin-local-token-service-identity",
+  "mergedAt": "2026-11-26T14:05:54Z",
+  "number": 139015,
+  "title": "Plugins: Set serviceIdentity on locally signed plugin access tokens",
+  "url": "https://github.com/grafana/grafana/pull/139015"
+ },
+ {
+  "body": "Adds a prototype Grafana backend that se",
+  "createdAt": "2026-11-26T11:32:05Z",
+  "headRefName": "pstibrany/search-grpc-backend",
+  "mergedAt": "2026-11-26T15:57:57Z",
+  "number": 139012,
+  "title": "Unified search: add a prototype gRPC search backend",
+  "url": "https://github.com/grafana/grafana/pull/139012"
+ },
+ {
+  "body": "**What is this feature?**\n\nUpdates `gith",
+  "createdAt": "2026-11-26T11:02:36Z",
+  "headRefName": "ferruvich/nanogit-v1.7.7-update",
+  "mergedAt": "2026-11-26T11:43:09Z",
+  "number": 139009,
+  "title": "Provisioning: Update nanogit to v1.7.7",
+  "url": "https://github.com/grafana/grafana/pull/139009"
+ },
+ {
+  "body": "<!--\n\nThank you for sending a pull reque",
+  "createdAt": "2026-11-26T10:28:01Z",
+  "headRefName": "tskarhed/bump-pnpm-setup",
+  "mergedAt": "2026-11-26T10:41:38Z",
+  "number": 139006,
+  "title": "Actions: Update pnpm/setup version to v3.2.0",
+  "url": "https://github.com/grafana/grafana/pull/139006"
+ },
+ {
+  "body": "<!--\n\nThank you for sending a pull reque",
+  "createdAt": "2026-11-26T10:26:59Z",
+  "headRefName": "ash/upgrade-memoize-one",
+  "mergedAt": "2026-11-26T10:44:51Z",
+  "number": 139005,
+  "title": "Chore: Upgrade `memoize-one`",
+  "url": "https://github.com/grafana/grafana/pull/139005"
+ },
+ {
+  "body": "Follow-up to https://github.com/grafana/",
+  "createdAt": "2026-11-26T10:19:42Z",
+  "headRefName": "pstibrany/rebuild-snapshot-tracing",
+  "mergedAt": "2026-11-26T11:39:57Z",
+  "number": 139003,
+  "title": "Unified Search: Trace snapshot eligibility for rebuilds",
+  "url": "https://github.com/grafana/grafana/pull/139003"
+ },
+ {
+  "body": "## What changes\n\nAdd the initial dashboa",
+  "createdAt": "2026-11-26T10:07:45Z",
+  "headRefName": "RafaelPaulovic/dashboard-compat-02-classic-round-trip",
+  "mergedAt": "2026-11-26T18:45:05Z",
+  "number": 139001,
+  "title": "Dashboards: compatibility tests for v1 history, trash and restore",
+  "url": "https://github.com/grafana/grafana/pull/139001"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T10:07:00Z",
+  "headRefName": "renovate/node-forge-1.x-lockfile",
+  "mergedAt": "2026-11-26T10:49:44Z",
+  "number": 139000,
+  "title": "chore(deps): update dependency node-forge to v1.4.4",
+  "url": "https://github.com/grafana/grafana/pull/139000"
+ },
+ {
+  "body": "With `grafana.panelActionsPopover` on, E",
+  "createdAt": "2026-11-26T10:01:06Z",
+  "headRefName": "oscar/panel-popover-explore-link",
+  "mergedAt": "2026-11-26T13:55:13Z",
+  "number": 138998,
+  "title": "Dashboards: Make Explore in the panel actions popover a link",
+  "url": "https://github.com/grafana/grafana/pull/138998"
+ },
+ {
+  "body": "## What changes\n\n- Add converter tests f",
+  "createdAt": "2026-11-26T09:57:57Z",
+  "headRefName": "RafaelPaulovic/dashboard-compat-01-api-tests",
+  "mergedAt": "2026-11-26T14:05:39Z",
+  "number": 138997,
+  "title": "Dashboards: Test conversion, editability, and trash metadata",
+  "url": "https://github.com/grafana/grafana/pull/138997"
+ },
+ {
+  "body": "**What changed**\n\n`DELETE /api/orgs/:org",
+  "createdAt": "2026-11-26T09:50:00Z",
+  "headRefName": "macabu/org-delete-invalid-id-404",
+  "mergedAt": "2026-11-26T10:19:58Z",
+  "number": 138996,
+  "title": "Org: Return 404 when deleting an org with a negative ID",
+  "url": "https://github.com/grafana/grafana/pull/138996"
+ },
+ {
+  "body": "**What is this feature?**\n\nBehind a new ",
+  "createdAt": "2026-11-26T09:45:36Z",
+  "headRefName": "duologic/resourcepermissions-bulk-user-writes",
+  "mergedAt": "2026-11-26T13:28:20Z",
+  "number": 138995,
+  "title": "perf(resourcepermissions): write user permissions in bulk",
+  "url": "https://github.com/grafana/grafana/pull/138995"
+ },
+ {
+  "body": "## Problem\n\nA malformed continuation tok",
+  "createdAt": "2026-11-26T09:36:10Z",
+  "headRefName": "fix/bb10-sql-continue-bad-request",
+  "mergedAt": "2026-11-26T15:18:33Z",
+  "number": 138993,
+  "title": "Unified storage: Return HTTP 400 for malformed SQL continue tokens",
+  "url": "https://github.com/grafana/grafana/pull/138993"
+ },
+ {
+  "body": "**What is this feature?**\n\n`ConfirmModal",
+  "createdAt": "2026-11-26T09:28:44Z",
+  "headRefName": "grafana-ui/confirm-modal-data-attributes",
+  "mergedAt": "2026-11-26T11:17:04Z",
+  "number": 138992,
+  "title": "ConfirmModal: Forward data attributes to the dialog element",
+  "url": "https://github.com/grafana/grafana/pull/138992"
+ },
+ {
+  "body": "**What is this feature?**\n\n`Combobox` an",
+  "createdAt": "2026-11-26T09:28:36Z",
+  "headRefName": "grafana-ui/combobox-data-attributes",
+  "mergedAt": "2026-11-26T11:17:30Z",
+  "number": 138991,
+  "title": "Combobox: Forward data attributes to the combobox input",
+  "url": "https://github.com/grafana/grafana/pull/138991"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\nProv",
+  "createdAt": "2026-11-26T09:23:05Z",
+  "headRefName": "cursor/provisioning-usage-stats-service-3daa",
+  "mergedAt": "2026-11-26T10:53:55Z",
+  "number": 138990,
+  "title": "Provisioning: register usage stats from a background service",
+  "url": "https://github.com/grafana/grafana/pull/138990"
+ },
+ {
+  "body": "<!--\r\n\r\nThank you for sending a pull req",
+  "createdAt": "2026-11-26T09:05:37Z",
+  "headRefName": "dmihai/iam-use-kubernetes-users-read-api",
+  "mergedAt": "2026-11-26T14:26:47Z",
+  "number": 138988,
+  "title": "IAM: Add iam.useKubernetesUsersReadApi frontend feature flag",
+  "url": "https://github.com/grafana/grafana/pull/138988"
+ },
+ {
+  "body": "more tests.\n\nthis will help with later r",
+  "createdAt": "2026-11-26T08:45:44Z",
+  "headRefName": "gabor/qs-more-tests",
+  "mergedAt": "2026-11-26T13:14:54Z",
+  "number": 138986,
+  "title": "datasources: querier: added more tests",
+  "url": "https://github.com/grafana/grafana/pull/138986"
+ },
+ {
+  "body": "**What is this feature?**\n\nPages that re",
+  "createdAt": "2026-11-26T07:17:53Z",
+  "headRefName": "alexk/discovery-optional-resources",
+  "mergedAt": "2026-11-26T07:32:43Z",
+  "number": 138984,
+  "title": "API server: Fix frontend crash when a discovery version has no resources",
+  "url": "https://github.com/grafana/grafana/pull/138984"
+ },
+ {
+  "body": "**What is this feature?**\n\nRemoves 5 `@g",
+  "createdAt": "2026-11-26T07:07:32Z",
+  "headRefName": "cursor/bc-6f9b4c75-eff9-4e4c-bf0c-71441adbb1b4-89d2",
+  "mergedAt": "2026-11-26T10:40:46Z",
+  "number": 138983,
+  "title": "Chore: fix eslint suppressions — require-no-margin in org UserInviteForm and NewOrgPage",
+  "url": "https://github.com/grafana/grafana/pull/138983"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T07:07:06Z",
+  "headRefName": "renovate/css-loader-7.x",
+  "mergedAt": "2026-11-26T07:22:31Z",
+  "number": 138982,
+  "title": "chore(deps): update dependency css-loader to v7.1.5",
+  "url": "https://github.com/grafana/grafana/pull/138982"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T07:06:18Z",
+  "headRefName": "renovate/formatjs-intl-durationformat-0.x-lockfile",
+  "mergedAt": "2026-11-26T09:38:55Z",
+  "number": 138981,
+  "title": "chore(deps): update dependency @formatjs/intl-durationformat to v0.13.1",
+  "url": "https://github.com/grafana/grafana/pull/138981"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T04:08:23Z",
+  "headRefName": "renovate/rspack-dev-server-2.x",
+  "mergedAt": "2026-11-26T04:49:49Z",
+  "number": 138975,
+  "title": "chore(deps): update dependency @rspack/dev-server to v2.2.2",
+  "url": "https://github.com/grafana/grafana/pull/138975"
+ },
+ {
+  "body": "**What is this feature?**\n\nThis PR makes",
+  "createdAt": "2026-11-26T03:04:55Z",
+  "headRefName": "plugins/v2-resources-identity",
+  "mergedAt": "2026-11-26T07:32:51Z",
+  "number": 138973,
+  "title": "Plugins: App settings act as the caller in ST, and publish their schema in MT and discovery",
+  "url": "https://github.com/grafana/grafana/pull/138973"
+ },
+ {
+  "body": "> [!NOTE]\n> This PR body was truncated d",
+  "createdAt": "2026-11-26T01:08:02Z",
+  "headRefName": "renovate/pnpm-12.x",
+  "mergedAt": "2026-11-26T01:50:17Z",
+  "number": 138972,
+  "title": "chore(deps): update pnpm to v12.23.0",
+  "url": "https://github.com/grafana/grafana/pull/138972"
+ },
+ {
+  "body": ":robot: Automatic download of translatio",
+  "createdAt": "2026-11-26T00:14:59Z",
+  "headRefName": "i18n_crowdin_translations",
+  "mergedAt": "2026-11-26T00:27:34Z",
+  "number": 138971,
+  "title": "I18n: Download translations from Crowdin",
+  "url": "https://github.com/grafana/grafana/pull/138971"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-25T23:28:00Z",
+  "headRefName": "renovate/dompurify-3.x-lockfile",
+  "mergedAt": "2026-11-26T01:21:55Z",
+  "number": 138968,
+  "title": "chore(deps): update dependency dompurify to v3.5.0",
+  "url": "https://github.com/grafana/grafana/pull/138968"
+ },
+ {
+  "body": "<!--\n\nThank you for sending a pull reque",
+  "createdAt": "2026-11-25T23:14:01Z",
+  "headRefName": "folder-async-cascade-delete-reconcile",
+  "mergedAt": "2026-11-26T20:09:14Z",
+  "number": 138966,
+  "title": "Folders: Make the async cascade-delete flag decide how a folder is deleted",
+  "url": "https://github.com/grafana/grafana/pull/138966"
+ },
+ {
+  "body": "Follow-up to [grafana/grafana#138591](ht",
+  "createdAt": "2026-11-25T22:38:45Z",
+  "headRefName": "dprokop/megamenu-section-footer",
+  "mergedAt": "2026-11-26T09:23:27Z",
+  "number": 138964,
+  "title": "Navigation: Put the menu action below the mega menu section",
+  "url": "https://github.com/grafana/grafana/pull/138964"
+ },
+ {
+  "body": "Embedded NATS peer discovery decides eac",
+  "createdAt": "2026-11-25T22:25:10Z",
+  "headRefName": "gassis/nats-discovery-observer-liveness",
+  "mergedAt": "2026-11-26T12:02:37Z",
+  "number": 138963,
+  "title": "NATS: Judge discovery peer liveness by row changes on the observer's clock",
+  "url": "https://github.com/grafana/grafana/pull/138963"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-25T22:06:19Z",
+  "headRefName": "renovate/i18next-27.x-lockfile",
+  "mergedAt": "2026-11-25T23:49:35Z",
+  "number": 138961,
+  "title": "chore(deps): update dependency i18next to v27.2.4",
+  "url": "https://github.com/grafana/grafana/pull/138961"
+ },
+ {
+  "body": "**What is this feature?**\n\nRemoves `hasE",
+  "createdAt": "2026-11-25T20:51:47Z",
+  "headRefName": "jesdavpet/278-remove-has-edit-permissions-in-folders-calculation-st-backend",
+  "mergedAt": "2026-11-26T19:41:08Z",
+  "number": 138959,
+  "title": "ST Bootdata: Drop `hasEditPermissionInFolders` calculation from ST bootdata backend",
+  "url": "https://github.com/grafana/grafana/pull/138959"
+ },
+ {
+  "body": "<!--\n\nThank you for sending a pull reque",
+  "createdAt": "2026-11-25T20:24:33Z",
+  "headRefName": "folder-delete-require-folders-delete",
+  "mergedAt": "2026-11-25T20:44:16Z",
+  "number": 138953,
+  "title": "Folders: Require folders:delete on the folder during cascade delete",
+  "url": "https://github.com/grafana/grafana/pull/138953"
+ },
+ {
+  "body": "### What is this feature?\r\n\r\nConverts co",
+  "createdAt": "2026-11-25T20:23:30Z",
+  "headRefName": "jesdavpet/276-compute-has-edit-permissions-in-folders-not-bootdata-frontend",
+  "mergedAt": "2026-11-26T19:17:36Z",
+  "number": 138952,
+  "title": "Bootdata: Compute `hasEditPermissionsInFolders` from existing permissions, not bootdata",
+  "url": "https://github.com/grafana/grafana/pull/138952"
+ },
+ {
+  "body": "## Problem \r\n\r\nAuto-sizing and multi-com",
+  "createdAt": "2026-11-25T19:28:02Z",
+  "headRefName": "torkel/combobox-autosize-fixes",
+  "mergedAt": "2026-11-26T13:42:33Z",
+  "number": 138946,
+  "title": "Combobox: Fix auto size truncating values and collapsing pills",
+  "url": "https://github.com/grafana/grafana/pull/138946"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-25T19:07:12Z",
+  "headRefName": "renovate/tanstack-virtual-monorepo",
+  "mergedAt": "2026-11-25T19:49:45Z",
+  "number": 138945,
+  "title": "chore(deps): update dependency @tanstack/react-virtual to v3.14.28",
+  "url": "https://github.com/grafana/grafana/pull/138945"
+ },
+ {
+  "body": "Backport 04feb18b376f4c14f0bf46637269db7",
+  "createdAt": "2026-11-25T17:21:58Z",
+  "headRefName": "backport-138831-to-release-13.3.3",
+  "mergedAt": "2026-11-25T19:16:54Z",
+  "number": 138943,
+  "title": "[release-13.3.3] Reporting: set ErrorConcurrentLimitReached to true for PDFs",
+  "url": "https://github.com/grafana/grafana/pull/138943"
+ },
+ {
+  "body": "Backport 04feb18b376f4c14f0bf46637269db7",
+  "createdAt": "2026-11-25T17:21:45Z",
+  "headRefName": "backport-138831-to-release-13.2.8",
+  "mergedAt": "2026-11-25T19:16:58Z",
+  "number": 138942,
+  "title": "[release-13.2.8] Reporting: set ErrorConcurrentLimitReached to true for PDFs",
+  "url": "https://github.com/grafana/grafana/pull/138942"
+ },
+ {
+  "body": "Backport 04feb18b376f4c14f0bf46637269db7",
+  "createdAt": "2026-11-25T17:21:29Z",
+  "headRefName": "backport-138831-to-release-13.1.12",
+  "mergedAt": "2026-11-25T19:17:09Z",
+  "number": 138941,
+  "title": "[release-13.1.12] Reporting: set ErrorConcurrentLimitReached to true for PDFs",
+  "url": "https://github.com/grafana/grafana/pull/138941"
+ },
+ {
+  "body": "Backport 04feb18b376f4c14f0bf46637269db7",
+  "createdAt": "2026-11-25T17:21:15Z",
+  "headRefName": "backport-138831-to-release-13.0.15",
+  "mergedAt": "2026-11-25T19:17:12Z",
+  "number": 138940,
+  "title": "[release-13.0.15] Reporting: set ErrorConcurrentLimitReached to true for PDFs",
+  "url": "https://github.com/grafana/grafana/pull/138940"
+ },
+ {
+  "body": "Backport 04feb18b376f4c14f0bf46637269db7",
+  "createdAt": "2026-11-25T17:21:01Z",
+  "headRefName": "backport-138831-to-release-12.4.17",
+  "mergedAt": "2026-11-25T19:17:14Z",
+  "number": 138939,
+  "title": "[release-12.4.17] Reporting: set ErrorConcurrentLimitReached to true for PDFs",
+  "url": "https://github.com/grafana/grafana/pull/138939"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\nFoll",
+  "createdAt": "2026-11-25T16:45:12Z",
+  "headRefName": "cursor/job-cleanup-service-tests-c8ad",
+  "mergedAt": "2026-11-25T17:01:38Z",
+  "number": 138938,
+  "title": "Provisioning: add tests for JobCleanupService",
+  "url": "https://github.com/grafana/grafana/pull/138938"
+ },
+ {
+  "body": "**What is this feature?**\r\n\r\nStops the g",
+  "createdAt": "2026-11-25T16:36:31Z",
+  "headRefName": "rodrigopk/memoize-alerting-rule-rows-01d1931f",
+  "mergedAt": "2026-11-26T15:58:17Z",
+  "number": 138936,
+  "title": "Alerting: Stop group view polls from re-rendering every rule row",
+  "url": "https://github.com/grafana/grafana/pull/138936"
+ },
+ {
+  "body": "Follow-up to #138862. Companion: https:/",
+  "createdAt": "2026-11-25T16:32:20Z",
+  "headRefName": "router-mt-v2-token-exchange",
+  "mergedAt": "2026-11-25T19:08:33Z",
+  "number": 138935,
+  "title": "Router: Authenticate MT v2 plugin calls with the v3 token exchange",
+  "url": "https://github.com/grafana/grafana/pull/138935"
+ },
+ {
+  "body": "Search pod CPU profiles showed that Blev",
+  "createdAt": "2026-11-25T16:22:16Z",
+  "headRefName": "pstibrany/bleve-merge-logging",
+  "mergedAt": "2026-11-26T15:52:42Z",
+  "number": 138934,
+  "title": "Unified Search: Log expensive Bleve disk merges",
+  "url": "https://github.com/grafana/grafana/pull/138934"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-25T16:19:06Z",
+  "headRefName": "renovate/node-26.x",
+  "mergedAt": "2026-11-25T23:18:15Z",
+  "number": 138933,
+  "title": "chore(deps): update dependency @types/node to v26.6.6",
+  "url": "https://github.com/grafana/grafana/pull/138933"
+ },
+ {
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-25T16:18:44Z",
+  "headRefName": "renovate/rspack-plugin-react-refresh-2.x",
+  "mergedAt": "2026-11-25T17:00:17Z",
+  "number": 138932,
+  "title": "chore(deps): update dependency @rspack/plugin-react-refresh to v2.0.3",
+  "url": "https://github.com/grafana/grafana/pull/138932"
+ },
+ {
+  "body": "Follow-up to #138907. Skip cluster-scope",
+  "createdAt": "2026-11-25T15:59:41Z",
+  "headRefName": "pstibrany/search-startup-and-rebuild-fixes",
+  "mergedAt": "2026-11-26T09:49:58Z",
+  "number": 138931,
+  "title": "Unified Search: Fix startup restoration and rebuild sizing",
+  "url": "https://github.com/grafana/grafana/pull/138931"
+ },
+ {
+  "body": "<!--\r\n\r\nThank you for sending a pull req",
+  "createdAt": "2026-11-25T15:51:01Z",
+  "headRefName": "folder-async-cascade-no-deletecollection",
+  "mergedAt": "2026-11-25T17:35:02Z",
+  "number": 138929,
+  "title": "Folders: Reject DeleteCollection while async cascade delete is enabled",
+  "url": "https://github.com/grafana/grafana/pull/138929"
+ },
+ {
+  "body": "**What is this feature?**\n\nThe Starred n",
+  "createdAt": "2026-11-25T15:47:46Z",
+  "headRefName": "alexk/stars-nav-section",
+  "mergedAt": "2026-11-26T11:50:03Z",
+  "number": 138927,
+  "title": "Nav: Show the Starred section to every signed-in user",
+  "url": "https://github.com/grafana/grafana/pull/138927"
+ },
+ {
+  "body": "**What is this feature?**\n\nThe logs pane",
+  "createdAt": "2026-11-25T15:08:12Z",
+  "headRefName": "brojd/popout-logs-copy-other-window",
+  "mergedAt": "2026-11-26T19:49:06Z",
+  "number": 138924,
+  "title": "Logs: Copy log lines when the logs panel is in another window",
+  "url": "https://github.com/grafana/grafana/pull/138924"
+ },
+ {
+  "body": "**What is this feature?**\n\nIn the logs p",
+  "createdAt": "2026-11-25T15:05:04Z",
+  "headRefName": "brojd/popout-logs-other-window",
+  "mergedAt": "2026-11-26T19:49:22Z",
+  "number": 138923,
+  "title": "Logs: Keep log line clicks and the selection menu working in another window",
+  "url": "https://github.com/grafana/grafana/pull/138923"
+ },
+ {
+  "body": "**What is this feature?**\n\nFixes a race ",
+  "createdAt": "2026-11-25T15:04:26Z",
+  "headRefName": "notebooks/fix-pagination-e2e-race",
+  "mergedAt": "2026-11-25T20:33:37Z",
+  "number": 138921,
+  "title": "Notebooks: Fix pagination e2e race with debounced search",
+  "url": "https://github.com/grafana/grafana/pull/138921"
+ },
+ {
+  "body": "**What is this feature?**\r\n\r\nUpdates `gi",
+  "createdAt": "2026-11-25T14:56:07Z",
+  "headRefName": "dgiagio/bump-plugin-sdk-v0.303.0",
+  "mergedAt": "2026-11-26T14:01:23Z",
+  "number": 138917,
+  "title": "Chore: Update grafana-plugin-sdk-go to v0.303.0",
+  "url": "https://github.com/grafana/grafana/pull/138917"
+ },
+ {
+  "body": "<!--\r\n\r\nThank you for sending a pull req",
+  "createdAt": "2026-11-25T13:51:12Z",
+  "headRefName": "dmihai/fix-openapi-response-users-teams",
+  "mergedAt": "2026-11-26T14:27:14Z",
+  "number": 138906,
+  "title": "IAM: Fix OpenAPI response schema for searchUsers and searchTeams",
+  "url": "https://github.com/grafana/grafana/pull/138906"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n**Wh",
+  "createdAt": "2026-11-25T13:44:50Z",
+  "headRefName": "cursor/provisioning-bootstrap-service-8c57",
+  "mergedAt": "2026-11-25T17:38:04Z",
+  "number": 138904,
+  "title": "Provisioning: Move bootstrap repository reconcile into a background service",
+  "url": "https://github.com/grafana/grafana/pull/138904"
+ },
+ {
+  "body": "**What is this feature?**\n\nAdds optional",
+  "createdAt": "2026-11-25T13:42:23Z",
+  "headRefName": "hugoh/add-request-options",
+  "mergedAt": "2026-11-26T07:20:45Z",
+  "number": 138903,
+  "title": "Plugins: add datasource proxy request options",
+  "url": "https://github.com/grafana/grafana/pull/138903"
+ },
+ {
+  "body": "\r\n<!--\r\n\r\nThank you for sending a pull r",
+  "createdAt": "2026-11-25T13:42:00Z",
+  "headRefName": "jackw/agents-no-merge",
+  "mergedAt": "2026-11-26T11:28:17Z",
+  "number": 138902,
+  "title": "Agents: clarify when agents sync branches with main",
+  "url": "https://github.com/grafana/grafana/pull/138902"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\nThis",
+  "createdAt": "2026-11-25T13:17:39Z",
+  "headRefName": "cursor/folder-settings-controller-setup-5eb8",
+  "mergedAt": "2026-11-26T16:01:31Z",
+  "number": 138900,
+  "title": "Provisioning: run the provisioning operators on the operator runner",
+  "url": "https://github.com/grafana/grafana/pull/138900"
+ },
+ {
+  "body": "**What is this feature?**\n\nThe navtree u",
+  "createdAt": "2026-11-25T12:02:13Z",
+  "headRefName": "sven/assistant-onboarding-navtree-id",
+  "mergedAt": "2026-11-25T18:09:05Z",
+  "number": 138894,
+  "title": "Navigation: Use the renamed Assistant onboarding plugin ID",
+  "url": "https://github.com/grafana/grafana/pull/138894"
+ },
+ {
+  "body": "**What is this feature?**\n\nFollow-up to ",
+  "createdAt": "2026-11-25T11:52:49Z",
+  "headRefName": "roberto/manager-kind-single-registry",
+  "mergedAt": "2026-11-25T17:16:40Z",
+  "number": 138890,
+  "title": "App Platform: Make RegisterManagerKind the only way to add a manager kind",
+  "url": "https://github.com/grafana/grafana/pull/138890"
+ },
+ {
+  "body": "**What is this feature?**\n\nBehind a new ",
+  "createdAt": "2026-11-25T09:43:41Z",
+  "headRefName": "duologic/scim-bulk-members",
+  "mergedAt": "2026-11-26T14:12:19Z",
+  "number": 138877,
+  "title": "perf(resourcepermissions): validate users in bulk when setting permissions",
+  "url": "https://github.com/grafana/grafana/pull/138877"
+ },
+ {
+  "body": "**What is this feature?**\n\nThe homepage ",
+  "createdAt": "2026-11-25T06:34:40Z",
+  "headRefName": "alexk/alerts-homepage",
+  "mergedAt": "2026-11-26T15:30:36Z",
+  "number": 138866,
+  "title": "Homepage: Fix firing alerts failing to load for users in many teams",
+  "url": "https://github.com/grafana/grafana/pull/138866"
+ },
+ {
+  "body": "**What is this feature?**\n\nA `Select` th",
+  "createdAt": "2026-11-24T22:42:03Z",
+  "headRefName": "fix/select-open-on-mount-activedescendant",
+  "mergedAt": "2026-11-26T17:01:14Z",
+  "number": 138852,
+  "title": "Select: Fix options not announced when the menu starts open",
+  "url": "https://github.com/grafana/grafana/pull/138852"
+ },
+ {
+  "body": "**What is this feature?**\r\n\r\nMoves the h",
+  "createdAt": "2026-11-24T22:05:47Z",
+  "headRefName": "rodrigopk/build-row-menu-hooks-only-when-menu-opens-76e5d740",
+  "mergedAt": "2026-11-26T15:44:47Z",
+  "number": 138847,
+  "title": "Alerting: Build the rule row menu's hooks only when the menu opens",
+  "url": "https://github.com/grafana/grafana/pull/138847"
+ },
+ {
+  "body": "**What is this feature?**\n\nOn the dashbo",
+  "createdAt": "2026-11-24T20:50:31Z",
+  "headRefName": "juan/dashboard-prompt-focus-request",
+  "mergedAt": "2026-11-26T18:53:18Z",
+  "number": 138843,
+  "title": "Dashboard: Focus the Assistant prompt after picking a landing template",
+  "url": "https://github.com/grafana/grafana/pull/138843"
+ },
+ {
+  "body": "issue:  https://github.com/grafana/ident",
+  "createdAt": "2026-11-24T19:29:28Z",
+  "headRefName": "assistant/fix-legacy-check-empty-action-sentinel",
+  "mergedAt": "2026-11-26T15:03:30Z",
+  "number": 138839,
+  "title": "AccessControl: Treat empty-action evaluator as never-true in LegacyCheck expressions",
+  "url": "https://github.com/grafana/grafana/pull/138839"
+ },
+ {
+  "body": "Registers the disabled-by-default `grafa",
+  "createdAt": "2026-11-24T19:16:43Z",
+  "headRefName": "codex/responsive-timepicker-flag",
+  "mergedAt": "2026-11-25T17:06:32Z",
+  "number": 138837,
+  "title": "TimePicker: Register responsive tabs rollout flag",
+  "url": "https://github.com/grafana/grafana/pull/138837"
+ },
+ {
+  "body": "",
+  "createdAt": "2026-11-24T18:34:41Z",
+  "headRefName": "reporting/return-concurrency-limit-error",
+  "mergedAt": "2026-11-25T17:13:48Z",
+  "number": 138831,
+  "title": "Reporting: set ErrorConcurrentLimitReached to true for PDFs",
+  "url": "https://github.com/grafana/grafana/pull/138831"
+ },
+ {
+  "body": "**What is this feature?**\n\nA `ColorPicke",
+  "createdAt": "2026-11-24T17:53:58Z",
+  "headRefName": "fix/color-picker-field-label",
+  "mergedAt": "2026-11-26T17:14:01Z",
+  "number": 138830,
+  "title": "ColorPicker: Add the field label to the accessible name",
+  "url": "https://github.com/grafana/grafana/pull/138830"
+ },
+ {
+  "body": "**What is this feature?**\n\nThe data sour",
+  "createdAt": "2026-11-24T17:07:33Z",
+  "headRefName": "fix/ds-picker-focus-ring",
+  "mergedAt": "2026-11-26T17:09:51Z",
+  "number": 138818,
+  "title": "DataSourcePicker: Add a focus ring for keyboard navigation",
+  "url": "https://github.com/grafana/grafana/pull/138818"
+ },
+ {
+  "body": "## What does this PR do?\n\nAdds two backe",
+  "createdAt": "2026-11-24T13:34:38Z",
+  "headRefName": "duologic/user-page-tab-routes",
+  "mergedAt": "2026-11-25T18:27:47Z",
+  "number": 138775,
+  "title": "fix(users): support user tab routes and org membership reads",
+  "url": "https://github.com/grafana/grafana/pull/138775"
+ },
+ {
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n**Wh",
+  "createdAt": "2026-11-24T12:36:50Z",
+  "headRefName": "cursor/provisioning-controller-setup-e8a4",
+  "mergedAt": "2026-11-26T09:08:48Z",
+  "number": 138766,
+  "title": "Provisioning: Give every controller service one shape and share controller setup with the operators",
+  "url": "https://github.com/grafana/grafana/pull/138766"
+ },
+ {
+  "body": "remove plan",
+  "createdAt": "2026-11-24T12:15:10Z",
+  "headRefName": "live-plan-doc-ha",
+  "mergedAt": "2026-11-26T14:22:02Z",
+  "number": 138761,
+  "title": "Live: remove plan",
+  "url": "https://github.com/grafana/grafana/pull/138761"
+ },
+ {
+  "body": "**What is this feature?**\n\nAdds `Gradien",
+  "createdAt": "2026-11-24T12:10:39Z",
+  "headRefName": "cursor/button-ai-variant",
+  "mergedAt": "2026-11-26T10:22:10Z",
+  "number": 138760,
+  "title": "Grafana UI: Add GradientButton component",
+  "url": "https://github.com/grafana/grafana/pull/138760"
+ },
+ {
+  "body": "**What is this feature?**\n\nDocs only. Ad",
+  "createdAt": "2026-11-24T12:08:38Z",
+  "headRefName": "cursor/button-state-guidance-sidebar-docs-559f",
+  "mergedAt": "2026-11-25T17:10:07Z",
+  "number": 138759,
+  "title": "Grafana UI: Document toggle, selected and expanded states in Button and add Sidebar docs",
+  "url": "https://github.com/grafana/grafana/pull/138759"
+ },
+ {
+  "body": "## Why\n\nContinue the standalone legacy e",
+  "createdAt": "2026-11-24T10:39:23Z",
+  "headRefName": "authz/remote-legacy-permissions",
+  "mergedAt": "2026-11-26T10:49:52Z",
+  "number": 138748,
+  "title": "AuthZ: Add authenticated remote legacy permission enumeration",
+  "url": "https://github.com/grafana/grafana/pull/138748"
+ },
+ {
+  "body": "This PR adds reusable `Menu`, `MenuItem`",
+  "createdAt": "2026-11-23T21:06:37Z",
+  "headRefName": "codex/menu-api-foundation",
+  "mergedAt": "2026-11-25T17:07:35Z",
+  "number": 138707,
+  "title": "Menu: Add density, link variant, and autofocus options",
+  "url": "https://github.com/grafana/grafana/pull/138707"
+ },
+ {
+  "body": "The datasource `/access` subresource now",
+  "createdAt": "2026-11-23T20:49:40Z",
+  "headRefName": "gamab/datasource-access-client",
+  "mergedAt": "2026-11-26T17:08:23Z",
+  "number": 138705,
+  "title": "Datasource: Report effective access through AccessClient",
+  "url": "https://github.com/grafana/grafana/pull/138705"
+ },
+ {
+  "body": "Moves the mapping from `[unified_alertin",
+  "createdAt": "2026-11-23T20:40:29Z",
+  "headRefName": "stevesg/core-apps-server-historian",
+  "mergedAt": "2026-11-26T10:33:18Z",
+  "number": 138704,
+  "title": "Alerting: Build the historian app config in a shared appconfig package",
+  "url": "https://github.com/grafana/grafana/pull/138704"
+ },
+ {
+  "body": "**What is this feature?**\r\n\r\nFixes sidew",
+  "createdAt": "2026-11-20T16:09:11Z",
+  "headRefName": "fix/narrow-screen-overflow",
+  "mergedAt": "2026-11-25T22:38:35Z",
+  "number": 138502,
+  "title": "Page: Wrap header actions and landing page cards on narrow screens",
+  "url": "https://github.com/grafana/grafana/pull/138502"
+ },
+ {
+  "body": "Fixes #94966  \nRef #138284  \n\n### Proble",
+  "createdAt": "2026-11-20T15:22:10Z",
+  "headRefName": "fix/modal-drawer-prevent-body-scroll",
+  "mergedAt": "2026-11-26T10:28:14Z",
+  "number": 138489,
+  "title": "Modal, Drawer: Prevent scrolling underlying page when overlay is open",
+  "url": "https://github.com/grafana/grafana/pull/138489"
+ },
+ {
+  "body": "**What is this feature?**\n\nThis PR moves",
+  "createdAt": "2026-11-20T13:50:39Z",
+  "headRefName": "issue-127031-v8-s4g",
+  "mergedAt": "2026-11-26T09:26:28Z",
+  "number": 138478,
+  "title": "Alerting: Use the async rules source list in the v1 rule list views",
+  "url": "https://github.com/grafana/grafana/pull/138478"
+ },
+ {
+  "body": "These tests generate a random set of ope",
+  "createdAt": "2026-11-20T00:11:33Z",
+  "headRefName": "renato.costa/kv-property-test",
+  "mergedAt": "2026-11-26T15:34:32Z",
+  "number": 138417,
+  "title": "unified-storage: add property-based test to the shared KV suite",
+  "url": "https://github.com/grafana/grafana/pull/138417"
+ },
+ {
+  "body": "## What changed\n\nAdds an opt-in compact ",
+  "createdAt": "2026-11-19T23:29:41Z",
+  "headRefName": "codex/responsive-timepicker",
+  "mergedAt": "2026-11-25T17:43:43Z",
+  "number": 138415,
+  "title": "TimePicker: Add opt-in compact tabs and inline calendar",
+  "url": "https://github.com/grafana/grafana/pull/138415"
+ },
+ {
+  "body": "## What changed\n\nBrowse Dashboards searc",
+  "createdAt": "2026-11-19T11:53:54Z",
+  "headRefName": "fix/dashboard-search-pagination",
+  "mergedAt": "2026-11-26T13:24:14Z",
+  "number": 138325,
+  "title": "Dashboards: Stop search pagination at the last visible result",
+  "url": "https://github.com/grafana/grafana/pull/138325"
+ },
+ {
+  "body": "Deleting a dashboard managed by a regist",
+  "createdAt": "2026-11-18T21:12:29Z",
+  "headRefName": "jess/grafana-cloud-block-delete",
+  "mergedAt": "2026-11-26T16:14:55Z",
+  "number": 138274,
+  "title": "Dashboards API: block grafana-cloud deletes",
+  "url": "https://github.com/grafana/grafana/pull/138274"
+ },
+ {
+  "body": "<!--\n\nThank you for sending a pull reque",
+  "createdAt": "2026-11-18T03:01:33Z",
+  "headRefName": "folder-picker-send-create-permission",
+  "mergedAt": "2026-11-26T17:17:37Z",
+  "number": 138144,
+  "title": "Folder picker: Always send permission=create for dashboard destinations",
+  "url": "https://github.com/grafana/grafana/pull/138144"
+ },
+ {
+  "body": "**What is this feature?**\n\nAdds a conten",
+  "createdAt": "2026-11-17T20:16:12Z",
+  "headRefName": "evictorero/notebooks-content-outline",
+  "mergedAt": "2026-11-25T19:52:58Z",
+  "number": 138118,
+  "title": "Notebooks: Add content outline",
+  "url": "https://github.com/grafana/grafana/pull/138118"
+ },
+ {
+  "body": "<!--\r\n\r\nThank you for sending a pull req",
+  "createdAt": "2026-11-17T17:25:40Z",
+  "headRefName": "folder-cascade-alert-rule-handler",
+  "mergedAt": "2026-11-27T01:31:58Z",
+  "number": 138093,
+  "title": "Folders: Add an alert rule kind to the cascade-delete controller",
+  "url": "https://github.com/grafana/grafana/pull/138093"
+ },
+ {
+  "body": "**What is this feature?**\n\n`Float.Unmars",
+  "createdAt": "2026-11-16T00:41:45Z",
+  "headRefName": "adamyeats/graphite-float-parse",
+  "mergedAt": "2026-11-26T16:26:48Z",
+  "number": 137902,
+  "title": "Graphite: Parse numbers directly when decoding render responses",
+  "url": "https://github.com/grafana/grafana/pull/137902"
+ },
+ {
+  "body": "**What is this feature?**\n\nA worked `[pr",
+  "createdAt": "2026-11-13T08:32:28Z",
+  "headRefName": "MissingRoberto/devenv-bootstrap-git-sync",
+  "mergedAt": "2026-11-26T08:58:39Z",
+  "number": 137801,
+  "title": "Provisioning: Add a devenv provisioning-bootstrap example",
+  "url": "https://github.com/grafana/grafana/pull/137801"
+ },
+ {
+  "body": "Data-link menus use different typography",
+  "createdAt": "2026-11-12T20:31:00Z",
+  "headRefName": "draft/panel-data-link-menu-consistency",
+  "mergedAt": "2026-11-25T20:40:04Z",
+  "number": 137775,
+  "title": "Panels: Unify data link menus and tooltip surfaces",
+  "url": "https://github.com/grafana/grafana/pull/137775"
+ },
+ {
+  "body": "## What\n\nThe provisioning operators stop",
+  "createdAt": "2026-11-12T13:39:53Z",
+  "headRefName": "MissingRoberto/operators-index-dependency-retire",
+  "mergedAt": "2026-11-26T16:11:29Z",
+  "number": 137708,
+  "title": "Provisioning: Retire the operator's unified-storage dial",
+  "url": "https://github.com/grafana/grafana/pull/137708"
+ },
+ {
+  "body": "issue: https://github.com/grafana/identi",
+  "createdAt": "2026-11-04T15:31:44Z",
+  "headRefName": "iam2543/handle-FlagExcludeRedundantManagedPermissions-correctly",
+  "mergedAt": "2026-11-26T14:44:12Z",
+  "number": 136996,
+  "title": "AuthZ: Fix: handle FlagExcludeRedundantManagedPermissions correctly",
+  "url": "https://github.com/grafana/grafana/pull/136996"
+ },
+ {
+  "body": "Part of #134797. PR 3 of 5, stacked on #",
+  "createdAt": "2026-11-04T11:01:34Z",
+  "headRefName": "eledobleefe/plugin-compat-pr-title-check",
+  "mergedAt": "2026-11-26T17:09:41Z",
+  "number": 136955,
+  "title": "chore: Check conventional commit titles of independently released packages",
+  "url": "https://github.com/grafana/grafana/pull/136955"
+ },
+ {
+  "body": "**What is this feature?**\n\nRemoves the `",
+  "createdAt": "2026-11-03T21:21:25Z",
+  "headRefName": "grambbledook/kube-aggregator-toggle-cleanup",
+  "mergedAt": "2026-11-26T11:57:05Z",
+  "number": 136900,
+  "title": "App Platform: Remove kubernetesAggregator feature toggles",
+  "url": "https://github.com/grafana/grafana/pull/136900"
+ },
+ {
+  "body": "Part of #134797. PR 2 of 5, stacked on #",
+  "createdAt": "2026-10-30T13:28:37Z",
+  "headRefName": "eledobleefe/plugin-compat-version-plans",
+  "mergedAt": "2026-11-26T17:09:39Z",
+  "number": 136602,
+  "title": "chore: Version plugin-compat from conventional commits",
+  "url": "https://github.com/grafana/grafana/pull/136602"
+ },
+ {
+  "body": "Part of #134797 (publish `@grafana/plugi",
+  "createdAt": "2026-10-30T13:28:35Z",
+  "headRefName": "eledobleefe/plugin-compat-release-group",
+  "mergedAt": "2026-11-26T17:09:37Z",
+  "number": 136601,
+  "title": "chore: Add an independent-packages release group",
+  "url": "https://github.com/grafana/grafana/pull/136601"
+ },
+ {
+  "body": "**What is this feature?**\n\n`RuleDetailsD",
+  "createdAt": "2026-10-30T12:33:29Z",
+  "headRefName": "issue-127031-v4",
+  "mergedAt": "2026-11-26T13:53:30Z",
+  "number": 136595,
+  "title": "Alerting: Migrate RuleDetailsDataSources to async DataSource API",
+  "url": "https://github.com/grafana/grafana/pull/136595"
+ }
+]

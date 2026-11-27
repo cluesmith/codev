@@ -11,10 +11,19 @@
 
 import { execFile } from 'node:child_process';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
-import { executeForgeCommand, executeForgeCommandDetailed, resolveForgeBackend, type ForgeConfig, type ForgeCommandResult } from './forge.js';
+import {
+  executeForgeCommand,
+  executeForgeCommandDetailed,
+  loadForgeConfig,
+  resolveForgeBackend,
+  resolveOverviewPlan,
+  type ForgeConfig,
+  type ForgeCommandResult,
+} from './forge.js';
 import type { RateLimitProbeResult } from './forge-rate-limit.js';
+import type { OverviewPlan } from './overview-budget.js';
 import { getRepoInfo } from './team-github.js';
-import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem } from './forge-contracts.js';
+import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem, OverviewBundleResult } from './forge-contracts.js';
 import { ISSUE_KEY_SOURCE, canonicalIssueId } from './issue-id.js';
 
 // =============================================================================
@@ -254,15 +263,63 @@ export async function fetchRecentMergedPRs(
 // limit from a missing CLI, and know which backend each concept spends on.
 // =============================================================================
 
-export type OverviewConcept = 'pr-list' | 'issue-list' | 'recently-closed' | 'recently-merged' | 'user-identity';
+export type OverviewConcept =
+  | 'pr-list' | 'issue-list' | 'recently-closed' | 'recently-merged' | 'user-identity' | 'overview-bundle';
 
 /** Resolved backend key for an overview concept in `cwd` (see `resolveForgeBackend`). */
 export function overviewBackend(concept: OverviewConcept, cwd: string): string | null {
   return resolveForgeBackend(concept, { cwd });
 }
 
+/**
+ * Whether `cwd`'s overview uses `overview-bundle` or the four per-section calls
+ * (Spec 1647). A config that fails to load counts as none, as `resolveForgeBackend`
+ * treats it: the default is the bundle, whose own dispatch then reports the load
+ * error as a whole-bundle failure.
+ */
+export function overviewPlan(cwd: string): OverviewPlan {
+  let forgeConfig: ForgeConfig | null;
+  try {
+    forgeConfig = loadForgeConfig(cwd);
+  } catch {
+    forgeConfig = null;
+  }
+  return resolveOverviewPlan(forgeConfig);
+}
+
+/**
+ * The bundle's own limits: twice the per-concept time limit and four times its
+ * output limit, because one bundle carries what four concepts did under four
+ * parallel 30 s / 10 MB limits (Spec 1647, Desired State item 1).
+ */
+export const OVERVIEW_BUNDLE_TIMEOUT_MS = 60_000;
+export const OVERVIEW_BUNDLE_MAX_BUFFER = 40 * 1024 * 1024;
+
+const OVERVIEW_BUNDLE_SECTIONS = ['prs', 'issues', 'recentlyClosed', 'recentlyMerged'] as const;
+
+export interface OverviewFetchResult extends ForgeCommandResult {
+  /**
+   * Set when the command exited 0 but its output broke the concept's contract:
+   * what is wrong with it. The result then also carries an error and no data.
+   */
+  malformed?: string;
+}
+
+/** What is wrong with an `overview-bundle` output, or null when it meets the contract. */
+function bundleContractViolation(output: unknown): string | null {
+  // The dispatcher turns empty or unparseable stdout into null.
+  if (output === null || output === undefined) return 'not JSON';
+  if (typeof output !== 'object' || Array.isArray(output)) return 'not an object';
+  for (const key of OVERVIEW_BUNDLE_SECTIONS) {
+    if (!(key in output)) return `missing ${key}`;
+    const section = (output as Record<string, unknown>)[key];
+    if (section !== null && !Array.isArray(section)) return `${key} is neither an array nor null`;
+  }
+  return null;
+}
+
 /** Run one overview concept, post-processed exactly like its `fetch*` counterpart. */
-export async function fetchForOverview(concept: OverviewConcept, cwd: string): Promise<ForgeCommandResult> {
+export async function fetchForOverview(concept: OverviewConcept, cwd: string): Promise<OverviewFetchResult> {
   switch (concept) {
     case 'user-identity': {
       const r = await executeForgeCommandDetailed(concept, {}, { cwd, raw: true });
@@ -273,9 +330,41 @@ export async function fetchForOverview(concept: OverviewConcept, cwd: string): P
       const r = await executeForgeCommandDetailed(concept, { CODEV_SINCE_DATE: sinceTimestamp24h() }, { cwd });
       return { ...r, data: withinLast24h(r.data, concept === 'recently-closed' ? 'closedAt' : 'mergedAt') };
     }
+    case 'overview-bundle':
+      return fetchOverviewBundle(cwd);
     default:
       return executeForgeCommandDetailed(concept, {}, { cwd });
   }
+}
+
+/**
+ * Run `overview-bundle`, hold its output to the contract, and post-filter both
+ * search sections to the last 24 hours as their own concepts are. Malformed
+ * output is a whole-bundle failure; extra top-level keys are dropped.
+ */
+async function fetchOverviewBundle(cwd: string): Promise<OverviewFetchResult> {
+  const r = await executeForgeCommandDetailed('overview-bundle', { CODEV_SINCE_DATE: sinceTimestamp24h() }, {
+    cwd,
+    timeoutMs: OVERVIEW_BUNDLE_TIMEOUT_MS,
+    maxBuffer: OVERVIEW_BUNDLE_MAX_BUFFER,
+  });
+  if (r.error) return r;
+  const malformed = bundleContractViolation(r.data);
+  if (malformed !== null) {
+    return {
+      data: null,
+      error: { message: `overview-bundle output malformed: ${malformed}`, stderr: '', exitCode: 0, timedOut: false },
+      malformed,
+    };
+  }
+  const bundle = r.data as OverviewBundleResult;
+  const data: OverviewBundleResult = {
+    prs: bundle.prs,
+    issues: bundle.issues,
+    recentlyClosed: withinLast24h(bundle.recentlyClosed, 'closedAt') as OverviewBundleResult['recentlyClosed'],
+    recentlyMerged: withinLast24h(bundle.recentlyMerged, 'mergedAt') as OverviewBundleResult['recentlyMerged'],
+  };
+  return { data, error: null };
 }
 
 /**

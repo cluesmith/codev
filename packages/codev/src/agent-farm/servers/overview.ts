@@ -13,11 +13,13 @@ import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import {
   fetchForOverview,
   overviewBackend,
+  overviewPlan,
   parseLinkedIssue,
   parseLabelDefaults,
   parseArea,
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem, OverviewConcept } from '../../lib/github.js';
+import type { MergedPrItem, OverviewBundleResult } from '../../lib/forge-contracts.js';
 import { ForgeRateLimiter, budgetKeyFor, type RateLimitProbe } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
@@ -37,6 +39,7 @@ import { heldSummaryForWorkspace } from '../db/mailbox.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
 import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId, isIssueKey } from '../../lib/issue-id.js';
 import { resolveIssueIdKind, loadForgeConfig } from '../../lib/forge.js';
+import { LIST_TTL_MS, SEARCH_TTL_MS, USER_TTL_MS, INVALIDATE_DEBOUNCE_MS } from '../../lib/overview-budget.js';
 import { buildAgentName } from '../utils/agent-names.js';
 
 // =============================================================================
@@ -1031,13 +1034,52 @@ export function deriveBacklog(
 // =============================================================================
 
 /** One cached concept result per workspace. `data: null` is a cached failure (#1645). */
-interface CacheEntry<T> { data: T | null; fetchedAt: number; expiresAt: number }
+interface CacheEntry<T> {
+  data: T | null;
+  fetchedAt: number;
+  expiresAt: number;
+  /** On a cached failure whose output broke the concept's contract: what was wrong (Spec 1647). */
+  reason?: string;
+}
 
 interface FetchOutcome<T> {
   data: T | null;
   /** Set when the concept's budget was suspended at read time (data, if any, is stale). */
   rateLimitedUntil: number | null;
   backend: string | null;
+  /** The failed entry's `reason`, carried on every poll inside its failure window. */
+  reason?: string;
+  /** The bundle succeeded but returned `null` for this section (Spec 1647). */
+  nullSection?: boolean;
+}
+
+/** The four forge-backed sections, in `getOverview`'s order, whichever mode fetched them. */
+type SectionOutcomes = [
+  FetchOutcome<ForgePR[]>,
+  FetchOutcome<ForgeIssueListItem[]>,
+  FetchOutcome<ForgeIssueListItem[]>,
+  FetchOutcome<MergedPrItem[]>,
+];
+
+/**
+ * Turn one bundle outcome into the four per-section outcomes the rest of
+ * `getOverview` consumes (Spec 1647). All four share the bundle's suspension and
+ * backend; a failed bundle gives four missing sections carrying its reason; a
+ * `null` section of a successful bundle is flagged as such.
+ */
+function splitBundle(bundle: FetchOutcome<OverviewBundleResult>): SectionOutcomes {
+  const section = <T>(pick: (b: OverviewBundleResult) => T | null): FetchOutcome<T> => {
+    const shared = { rateLimitedUntil: bundle.rateLimitedUntil, backend: bundle.backend };
+    if (bundle.data === null) return { ...shared, data: null, reason: bundle.reason };
+    const data = pick(bundle.data);
+    return data === null ? { ...shared, data: null, nullSection: true } : { ...shared, data };
+  };
+  return [
+    section(b => b.prs),
+    section(b => b.issues),
+    section(b => b.recentlyClosed),
+    section(b => b.recentlyMerged),
+  ];
 }
 
 export interface OverviewCacheOptions {
@@ -1047,14 +1089,6 @@ export interface OverviewCacheOptions {
   probe?: RateLimitProbe;
 }
 
-/** Open lists: what porch/VS Code invalidation refreshes. */
-const LIST_TTL_MS = 180_000;
-/** The two 24 h searches: invalidation never touches these. */
-const SEARCH_TTL_MS = 600_000;
-/** GitHub identity is session-stable. */
-const USER_TTL_MS = 3_600_000;
-/** A list refetches at most once per minute per workspace because of invalidation. */
-const INVALIDATE_DEBOUNCE_MS = 60_000;
 /** Failure window: 60 s, doubling per window (not per failed command) to 15 min. */
 const FAILURE_WINDOW_MIN_MS = 60_000;
 const FAILURE_WINDOW_MAX_MS = 15 * 60_000;
@@ -1063,7 +1097,9 @@ export class OverviewCache {
   private prCache = new Map<string, CacheEntry<ForgePR[]>>();
   private issueCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
   private closedCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
-  private mergedPRCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private mergedPRCache = new Map<string, CacheEntry<MergedPrItem[]>>();
+  /** All four sections from one `overview-bundle` call, where configuration selects it (Spec 1647). */
+  private bundleCache = new Map<string, CacheEntry<OverviewBundleResult>>();
   private currentUserCache = new Map<string, CacheEntry<string>>();
   /** Single-flight per `<workspace>:<concept>` (#1645). */
   private inflight = new Map<string, Promise<FetchOutcome<unknown>>>();
@@ -1160,12 +1196,12 @@ export class OverviewCache {
     );
 
     // 2. Fetch PRs, issues, recently closed, merged PRs, and current user in
-    //    parallel (each is independently cached)
-    const [prsOutcome, issuesOutcome, closedOutcome, mergedOutcome, userOutcome] = await Promise.all([
-      this.cachedFetch<ForgePR[]>(this.prCache, workspaceRoot, 'pr-list', LIST_TTL_MS, true),
-      this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, workspaceRoot, 'issue-list', LIST_TTL_MS, true),
-      this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, workspaceRoot, 'recently-closed', SEARCH_TTL_MS, false),
-      this.cachedFetch<ForgePR[]>(this.mergedPRCache, workspaceRoot, 'recently-merged', SEARCH_TTL_MS, false),
+    //    parallel. Configuration picks one bundle entry or four independently
+    //    cached sections (Spec 1647); a failed bundle is never retried as four.
+    const [[prsOutcome, issuesOutcome, closedOutcome, mergedOutcome], userOutcome] = await Promise.all([
+      overviewPlan(workspaceRoot).mode === 'bundled'
+        ? this.fetchBundledSections(workspaceRoot)
+        : this.fetchFourSections(workspaceRoot),
       this.cachedFetch<string>(this.currentUserCache, workspaceRoot, 'user-identity', USER_TTL_MS, false),
     ]);
     const prs = prsOutcome.data;
@@ -1255,7 +1291,8 @@ export class OverviewCache {
       if (mergedPRs) {
         for (const pr of mergedPRs) {
           const linkedIssue = parseLinkedIssue(pr.body || '', pr.title);
-          if (linkedIssue !== null) {
+          // `url` is optional on the recently-merged contract; a PR without one links nothing.
+          if (linkedIssue !== null && pr.url) {
             issueToPrUrl.set(linkedIssue, pr.url);
           }
         }
@@ -1335,7 +1372,8 @@ export class OverviewCache {
    * review queue call this after every mutation, so it is not a human signal
    * (#1645): it never clears a suspension or a cached failure, never touches
    * the search or identity caches, and a list is refetched for it at most once
-   * per `INVALIDATE_DEBOUNCE_MS` per workspace.
+   * per `INVALIDATE_DEBOUNCE_MS` per workspace. In bundled mode the bundle entry
+   * is a list entry, so the two 24 h searches it carries refresh with it (Spec 1647).
    */
   invalidate(): void {
     this.invalidatedAt = this.now();
@@ -1348,6 +1386,23 @@ export class OverviewCache {
   // ===========================================================================
   // Private cache helpers (#1645)
   // ===========================================================================
+
+  /** One `overview-bundle` entry, cached and invalidated as the open lists are. */
+  private async fetchBundledSections(cwd: string): Promise<SectionOutcomes> {
+    return splitBundle(
+      await this.cachedFetch<OverviewBundleResult>(this.bundleCache, cwd, 'overview-bundle', LIST_TTL_MS, true),
+    );
+  }
+
+  /** The four per-section concepts, each cached on its own. */
+  private fetchFourSections(cwd: string): Promise<SectionOutcomes> {
+    return Promise.all([
+      this.cachedFetch<ForgePR[]>(this.prCache, cwd, 'pr-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, cwd, 'issue-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, cwd, 'recently-closed', SEARCH_TTL_MS, false),
+      this.cachedFetch<MergedPrItem[]>(this.mergedPRCache, cwd, 'recently-merged', SEARCH_TTL_MS, false),
+    ]);
+  }
 
   /**
    * Serve `concept` for `cwd` from cache, or dispatch exactly one fetch.
@@ -1372,7 +1427,7 @@ export class OverviewCache {
     const rateLimitedUntil = budget === null ? null : this.limiter.resetAt(budget, now);
 
     if (withinTtl && !invalidated) {
-      return Promise.resolve({ data: entry.data, rateLimitedUntil, backend });
+      return Promise.resolve({ data: entry.data, rateLimitedUntil, backend, reason: entry.reason });
     }
     if (rateLimitedUntil !== null) {
       // Suspended: a list still inside its TTL is served stale; an expired one is empty.
@@ -1405,19 +1460,21 @@ export class OverviewCache {
     const dispatchedAt = this.now();
     let data: T | null = null;
     let errorText: string | null = null;
+    let reason: string | undefined;
     try {
       const result = await fetchForOverview(concept, cwd);
       data = result.data as T | null;
       if (result.error) errorText = `${result.error.stderr}\n${result.error.message}`;
       else if (data === null) errorText = '';
+      if (result.malformed !== undefined) reason = `${concept} output malformed (${result.malformed})`;
     } catch (err) {
       errorText = err instanceof Error ? err.message : String(err);
     }
     const now = this.now();
     if (errorText !== null) {
       const suspended = this.limiter.noteFailure(budget, backend, cwd, errorText, now);
-      cache.set(cwd, { data: null, fetchedAt: dispatchedAt, expiresAt: now + this.failureWindow(`${cwd}:${budget}`, now) });
-      return { data: null, rateLimitedUntil: suspended ? this.limiter.resetAt(budget, now) : null, backend };
+      cache.set(cwd, { data: null, fetchedAt: dispatchedAt, expiresAt: now + this.failureWindow(`${cwd}:${budget}`, now), reason });
+      return { data: null, rateLimitedUntil: suspended ? this.limiter.resetAt(budget, now) : null, backend, reason };
     }
     this.limiter.noteSuccess(budget, dispatchedAt);
     this.failureWindows.delete(`${cwd}:${budget}`);
@@ -1442,5 +1499,8 @@ function describeMissing(outcome: FetchOutcome<unknown>, what: string): string {
     return `${outcome.backend} rate limited until ${new Date(outcome.rateLimitedUntil).toISOString()} — ${what} unavailable`;
   }
   if (outcome.backend === null) return `forge concept disabled — ${what} unavailable`;
+  // The two bundle cases: the CLI ran fine, so "CLI unavailable" would be wrong (Spec 1647).
+  if (outcome.nullSection) return `overview-bundle returned no ${what}`;
+  if (outcome.reason !== undefined) return `${outcome.reason} — could not fetch ${what}`;
   return `${outcome.backend} CLI unavailable — could not fetch ${what}`;
 }

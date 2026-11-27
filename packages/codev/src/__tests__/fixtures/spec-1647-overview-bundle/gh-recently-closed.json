@@ -1,0 +1,368 @@
+[
+ {
+  "closedAt": "2026-11-25T22:24:04Z",
+  "createdAt": "2026-11-25T22:19:29Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWwxMjk2NTA1NDgy",
+    "name": "area/datasource",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABishpQQ",
+    "name": "type/new-plugin-request",
+    "description": "",
+    "color": "27BD64"
+   }
+  ],
+  "number": 138962,
+  "title": "test",
+  "url": "https://github.com/grafana/grafana/issues/138962"
+ },
+ {
+  "closedAt": "2026-11-26T11:50:05Z",
+  "createdAt": "2026-11-24T07:13:49Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   }
+  ],
+  "number": 138732,
+  "title": "Stars: Backend sends the Starred nav section to every signed-in user",
+  "url": "https://github.com/grafana/grafana/issues/138732"
+ },
+ {
+  "closedAt": "2026-11-26T17:01:17Z",
+  "createdAt": "2026-11-21T04:28:17Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjYyNDAyMDY0",
+    "name": "type/accessibility",
+    "description": "Accessibility problem / enhancement",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwyMTIxMDA1NDc4",
+    "name": "area/panel/edit",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 138552,
+  "title": "[A11ySev2] Panel Edit: New value mapping items are not announced by screen reader",
+  "url": "https://github.com/grafana/grafana/issues/138552"
+ },
+ {
+  "closedAt": "2026-11-26T17:14:03Z",
+  "createdAt": "2026-11-21T04:28:16Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWwxMjYyNDAyMDY0",
+    "name": "type/accessibility",
+    "description": "Accessibility problem / enhancement",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwxNDkwNTUzMzA3",
+    "name": "area/dashboard/data-links",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 138551,
+  "title": "[A11ySev2] Panel Edit: Data actions button style label is not programmatically associated with the color button under the pane.",
+  "url": "https://github.com/grafana/grafana/issues/138551"
+ },
+ {
+  "closedAt": "2026-11-26T17:09:53Z",
+  "createdAt": "2026-11-21T04:08:14Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjYyNDAyMDY0",
+    "name": "type/accessibility",
+    "description": "Accessibility problem / enhancement",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwyMTIxMDA1NDc4",
+    "name": "area/panel/edit",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABjxeYmQ",
+    "name": "area/dashboard/edit",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 138543,
+  "title": "[A11ySev2] Data source picker menu items does not have focus ring when tabbing through",
+  "url": "https://github.com/grafana/grafana/issues/138543"
+ },
+ {
+  "closedAt": "2026-11-25T22:38:37Z",
+  "createdAt": "2026-11-20T15:27:12Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjYyNDAyMDY0",
+    "name": "type/accessibility",
+    "description": "Accessibility problem / enhancement",
+    "color": "dddddd"
+   },
+   {
+    "id": "MDU6TGFiZWwxNTQ0OTY3NTU0",
+    "name": "area/navigation",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAACrpsmKw",
+    "name": "issue/auto-triaged",
+    "description": "",
+    "color": "25542c"
+   }
+  ],
+  "number": 138490,
+  "title": "Page: Header actions and section landing pages scroll sideways on phones",
+  "url": "https://github.com/grafana/grafana/issues/138490"
+ },
+ {
+  "closedAt": "2026-11-26T16:33:56Z",
+  "createdAt": "2026-11-02T18:30:39Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "LA_kwDOAOaWjc71J3MZ",
+    "name": "area/auth/serviceaccount",
+    "description": "Grafana service accounts",
+    "color": "C5DEF5"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABT38U-A",
+    "name": "team/grafana-dashboards",
+    "description": "Dashboards squad",
+    "color": "3D1ED3"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABwgMV7A",
+    "name": "area/dashboard/kiosk",
+    "description": "",
+    "color": "ededed"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABwh5Q-g",
+    "name": "area/dashboard/variable",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 136778,
+  "title": "apikey login drops all request headers, so POST requests without ? fail (query variables, user storage)",
+  "url": "https://github.com/grafana/grafana/issues/136778"
+ },
+ {
+  "closedAt": "2026-11-26T08:12:19Z",
+  "createdAt": "2026-09-03T13:14:48Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "MDU6TGFiZWwxNzQ5MTc1ODk=",
+    "name": "area/auth",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 131930,
+  "title": "Auth: token rotate endpoint returns 401 without clearing session cookies when the token no longer exists, causing an infinite page reload loop (auth proxy + enable_login_token)",
+  "url": "https://github.com/grafana/grafana/issues/131930"
+ },
+ {
+  "closedAt": "2026-11-26T10:09:38Z",
+  "createdAt": "2026-04-27T15:38:08Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "MDU6TGFiZWwxNTAxMDQyMTQ=",
+    "name": "area/security",
+    "description": "",
+    "color": "bfd4f2"
+   },
+   {
+    "id": "MDU6TGFiZWw3OTgyMTU5MTA=",
+    "name": "area/backend",
+    "description": "",
+    "color": "c7def8"
+   },
+   {
+    "id": "LA_kwDOAOaWjc79pWIZ",
+    "name": "area/public-dashboards",
+    "description": "",
+    "color": "C5DEF5"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABvBbUbA",
+    "name": "automated-triage",
+    "description": "",
+    "color": "ededed"
+   }
+  ],
+  "number": 123661,
+  "title": "assert.Equal(t, fakeResponse.Responses[\"A\"].Frames[0].Meta.Custom, map[string]string{\"test1\": \"test1\"})",
+  "url": "https://github.com/grafana/grafana/issues/123661"
+ },
+ {
+  "closedAt": "2026-11-26T04:28:44Z",
+  "createdAt": "2026-03-04T16:57:05Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAACAOzQ2w",
+    "name": "team/grafana-datapro",
+    "description": "",
+    "color": "5319e7"
+   }
+  ],
+  "number": 119529,
+  "title": "Configure split test logic in `PanelEditNext` with OpenFeature client",
+  "url": "https://github.com/grafana/grafana/issues/119529"
+ },
+ {
+  "closedAt": "2026-11-26T04:28:52Z",
+  "createdAt": "2026-03-04T16:53:54Z",
+  "labels": [
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   }
+  ],
+  "number": 119526,
+  "title": "Split test to detect v1/v2 preference",
+  "url": "https://github.com/grafana/grafana/issues/119526"
+ },
+ {
+  "closedAt": "2026-11-26T10:28:16Z",
+  "createdAt": "2024-10-18T12:53:47Z",
+  "labels": [
+   {
+    "id": "MDU6TGFiZWw3MDE3NjMxOA==",
+    "name": "type/bug",
+    "description": "",
+    "color": "d73a4a"
+   },
+   {
+    "id": "MDU6TGFiZWwyNTc2NTkxMTg=",
+    "name": "prio/medium",
+    "description": "Important over the long term, but may not be staffed and/or may need multiple releases to complete.",
+    "color": "FBCA04"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjE0MzAzODY3",
+    "name": "area/grafana/ui",
+    "description": "Issues that belong to components in the @grafana/ui library",
+    "color": "c5def5"
+   },
+   {
+    "id": "MDU6TGFiZWwxMjYyNDAyMDY0",
+    "name": "type/accessibility",
+    "description": "Accessibility problem / enhancement",
+    "color": "dddddd"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABJRJ43w",
+    "name": "effort/medium",
+    "description": "",
+    "color": "5A923E"
+   },
+   {
+    "id": "LA_kwDOAOaWjc8AAAABMfRx5Q",
+    "name": "internal",
+    "description": "for issues made by grafanistas",
+    "color": "E38D41"
+   }
+  ],
+  "number": 94966,
+  "title": "Modal/Drawer: Prevent being able to scroll the underlying page",
+  "url": "https://github.com/grafana/grafana/issues/94966"
+ }
+]

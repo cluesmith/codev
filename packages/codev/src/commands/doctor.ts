@@ -9,7 +9,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
-import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, isHybridProvider, type ConceptResolution } from '../lib/forge.js';
+import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, resolveOverviewPlan, isHybridProvider, type ConceptResolution } from '../lib/forge.js';
+import { projectHourlyForgeCalls, type OverviewPlan } from '../lib/overview-budget.js';
 import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
@@ -1050,6 +1051,45 @@ const TRACKER_LOGIN_HINTS: Record<string, string> = {
   linear: 'set LINEAR_API_KEY',
 };
 
+/** "a", "a and b", "a, b and c". */
+function joinWithAnd(items: readonly string[]): string {
+  return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/** Why this workspace's overview fetches the way it does (Spec 1647). */
+export function describeOverviewPlan(plan: OverviewPlan): string {
+  if (plan.mode === 'bundled') {
+    if (plan.bypassed.length === 0) return 'bundled';
+    const overridden = plan.bypassed.filter((b) => b.how === 'overridden').map((b) => b.concept);
+    const disabled = plan.bypassed.filter((b) => b.how === 'disabled').map((b) => b.concept);
+    const hidden = [
+      ...(overridden.length > 0 ? [`the ${joinWithAnd(overridden)} ${overridden.length === 1 ? 'override' : 'overrides'}`] : []),
+      ...(disabled.length > 0 ? [`the disabled ${joinWithAnd(disabled)}`] : []),
+    ];
+    return `bundled (overview-bundle override; bypasses ${hidden.join(' and ')})`;
+  }
+  const { cause } = plan;
+  switch (cause.kind) {
+    case 'bundle-disabled':
+      return 'four calls: overview-bundle disabled';
+    case 'preset-disabled':
+      return `four calls: disabled by the ${cause.provider} preset`;
+    case 'constituents': {
+      const parts = [
+        ...(cause.overridden.length > 0 ? [`${joinWithAnd(cause.overridden)} overridden`] : []),
+        ...(cause.disabled.length > 0 ? [`${joinWithAnd(cause.disabled)} disabled`] : []),
+      ];
+      return `four calls: ${parts.join(', ')}`;
+    }
+  }
+}
+
+/** The doctor `overview` line: the mode, its reason, and the projected forge calls per hour. */
+export function formatOverviewLine(plan: OverviewPlan): string {
+  const { idle, churn } = projectHourlyForgeCalls(plan);
+  return `${describeOverviewPlan(plan)} — ${idle} forge calls/h idle, ${churn} under constant invalidation`;
+}
+
 const AGY_INSTALL_HINT = 'install: curl -fsSL https://antigravity.google/cli/install.sh | bash, then run `agy` once to sign in';
 
 /**
@@ -1692,7 +1732,7 @@ export async function doctor(): Promise<number> {
       console.log('');
     }
 
-    // Full forge concept reporting: all 18 concepts with resolution source and executable check
+    // Full forge concept reporting: every known concept with resolution source and executable check
     const forgeConfig = loadForgeConfig(workspaceRoot);
     const provider = forgeConfig?.provider ?? 'github';
     console.log(chalk.bold('Forge Concepts') + ` (provider: ${provider})`);
@@ -1710,7 +1750,7 @@ export async function doctor(): Promise<number> {
       }
     }
 
-    // Report all 18 concepts with source and executable availability
+    // Report every known concept with source and executable availability
     const resolutions = resolveAllConcepts(forgeConfig);
     const missingExecs = new Set<string>();
 
@@ -1731,6 +1771,9 @@ export async function doctor(): Promise<number> {
         missingExecs.add(r.executable!);
       }
     }
+
+    // How the overview will fetch, why, and what it costs (Spec 1647).
+    console.log(`  ${chalk.blue('-')} ${'overview'.padEnd(20)} ${formatOverviewLine(resolveOverviewPlan(forgeConfig))}`);
 
     if (missingExecs.size > 0) {
       warnings++;

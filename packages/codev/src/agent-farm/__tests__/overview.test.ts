@@ -64,6 +64,12 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchRecentMergedPRs: mockFetchMergedPRs,
     fetchCurrentUser: mockFetchCurrentUser,
     overviewBackend: () => 'gh',
+    // Spec 1647: these tests are the kept four-call variant; the bundle has its own.
+    overviewPlan: () => ({
+      mode: 'four-call',
+      cause: { kind: 'bundle-disabled' },
+      runnable: ['pr-list', 'issue-list', 'recently-closed', 'recently-merged'],
+    }),
     fetchForOverview: async (concept: string, cwd: string) => {
       const data = await byConcept[concept](cwd);
       return data === null

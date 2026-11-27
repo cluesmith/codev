@@ -1,0 +1,139 @@
+[
+ {
+  "author": {
+   "id": "MDQ6VXNlcjg3NzAxOTI=",
+   "is_bot": false,
+   "login": "floriecai",
+   "name": "Florie Cai"
+  },
+  "body": "A branch migration cannot take folders o",
+  "createdAt": "2026-11-27T04:08:59Z",
+  "isDraft": true,
+  "number": 139086,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "ferruvich"
+   },
+   {
+    "__typename": "User",
+    "login": "MissingRoberto"
+   },
+   {
+    "__typename": "Team",
+    "name": "Constructed Team",
+    "slug": "constructed-team"
+   }
+  ],
+  "title": "Provisioning: Take over folders after a branch migration is merged",
+  "url": "https://github.com/grafana/grafana/pull/139086"
+ },
+ {
+  "author": {
+   "id": "MDQ6VXNlcjcwNTk1MQ==",
+   "is_bot": false,
+   "login": "ryantxu",
+   "name": "Ryan McKinley"
+  },
+  "body": "**What is this feature?**\n\nInside Grafan",
+  "createdAt": "2026-11-27T03:10:21Z",
+  "isDraft": false,
+  "number": 139080,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "floriecai"
+   },
+   {
+    "__typename": "User",
+    "login": "frossano-grafana"
+   },
+   {
+    "__typename": "User",
+    "login": "charandas"
+   }
+  ],
+  "title": "Router: Sign remote service requests as the kube-aggregator does",
+  "url": "https://github.com/grafana/grafana/pull/139080"
+ },
+ {
+  "author": {
+   "id": "MDQ6VXNlcjE2NzQ4OTM=",
+   "is_bot": false,
+   "login": "MissingRoberto",
+   "name": "Roberto Jiménez Sánchez"
+  },
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n**Wh",
+  "createdAt": "2026-11-27T02:04:40Z",
+  "isDraft": true,
+  "number": 139079,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "title": "Provisioning: Add generated v1beta2 RTK Query client",
+  "url": "https://github.com/grafana/grafana/pull/139079"
+ },
+ {
+  "author": {
+   "is_bot": true,
+   "login": "app/"
+  },
+  "body": "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->\n**Wh",
+  "createdAt": "2026-11-27T01:59:09Z",
+  "isDraft": true,
+  "number": 139078,
+  "reviewDecision": "",
+  "reviewRequests": [],
+  "title": "Provisioning: serve the v1beta2 write and action connectors",
+  "url": "https://github.com/grafana/grafana/pull/139078"
+ },
+ {
+  "author": {
+   "is_bot": true,
+   "login": "app/renovate-sh-app"
+  },
+  "body": "This PR contains the following updates:\n",
+  "createdAt": "2026-11-26T19:07:16Z",
+  "isDraft": false,
+  "number": 139061,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "jackw"
+   },
+   {
+    "__typename": "User",
+    "login": "ashharrison90"
+   }
+  ],
+  "title": "fix(deps): update faro-web-sdk monorepo to v2.15.0",
+  "url": "https://github.com/grafana/grafana/pull/139061"
+ },
+ {
+  "author": {
+   "id": "MDQ6VXNlcjU0NjQ1ODc=",
+   "is_bot": false,
+   "login": "jesdavpet",
+   "name": "Jesse David Peterson"
+  },
+  "body": "This change re-enables the CI check for ",
+  "createdAt": "2026-11-26T18:47:47Z",
+  "isDraft": false,
+  "number": 139057,
+  "reviewDecision": "APPROVED",
+  "reviewRequests": [
+   {
+    "__typename": "User",
+    "login": "jackw"
+   },
+   {
+    "__typename": "User",
+    "login": "eledobleefe"
+   }
+  ],
+  "title": "CI/CD: Enable CI check for `frontend-service` in local `devenv` when changed.",
+  "url": "https://github.com/grafana/grafana/pull/139057"
+ }
+]

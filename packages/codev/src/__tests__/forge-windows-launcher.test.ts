@@ -35,7 +35,7 @@ const CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
+  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs', 'overview-bundle',
 ];
 
 const CWD = 'C:\\Users\\dev\\repo';
@@ -131,14 +131,15 @@ describe('forge concepts on native Windows', () => {
 });
 
 describe('forge concepts on POSIX', () => {
-  it('runs the command string through exec, with no MSYS variables', async () => {
+  it('runs the shipped script through exec, as `exec <path>`, with no MSYS variables', async () => {
     forceHostPlatform('linux');
     const forgeConfig = { provider: 'github' };
     const script = getForgeCommand('issue-view', forgeConfig);
     await executeForgeCommand('issue-view', { CODEV_ISSUE_ID: '1' }, { cwd: '/repo', forgeConfig });
     expect(childProcess.execFile).not.toHaveBeenCalled();
     const [command, opts] = childProcess.exec.mock.calls[0];
-    expect(command).toBe(script);
+    // `exec`: the script replaces the shell, so a timeout signals the script (Spec 1647).
+    expect(command).toBe(`exec '${script}'`);
     expect(opts.cwd).toBe('/repo');
     expect(opts.env.MSYS_NO_PATHCONV).toBeUndefined();
     expect(opts.windowsHide).toBeUndefined();

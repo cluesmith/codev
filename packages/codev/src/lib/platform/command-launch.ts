@@ -55,7 +55,11 @@ export interface TerminalProfile {
 export interface CommandLaunch {
   /** A shell string as a child process (runStreaming, porch runCheck). */
   spawnShellString(script: string, options: SpawnOptions, context: ShellStringContext): ChildProcess;
-  /** A shell string, buffered; resolves to stdout (forge concepts). */
+  /**
+   * A shell string, buffered; resolves to stdout (forge concepts). A bare path to an
+   * existing `.sh` file runs as that script, with no shell process left between it and
+   * the caller, so a timeout's signal reaches the script (Spec 1647).
+   */
   execShellString(script: string, options: ShellExecOptions): Promise<string>;
   /** Synchronous `execShellString` (forge concepts). */
   execShellStringSync(script: string, options: ShellExecOptions): string;

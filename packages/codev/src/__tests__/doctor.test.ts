@@ -36,23 +36,28 @@ const executeForgeCommandSyncMock = vi.hoisted(() => vi.fn((concept: string) => 
 const loadForgeConfigMock = vi.hoisted(() => vi.fn(() => null));
 const validateForgeConfigMock = vi.hoisted(() => vi.fn(() => []));
 const resolveAllConceptsMock = vi.hoisted(() => vi.fn(() => {
-  // All 20 concepts (KNOWN_CONCEPTS in lib/forge.ts) as default/gh-based, so the
+  // Every known concept (KNOWN_CONCEPTS in lib/forge.ts) as default/gh-based, so the
   // doctor report's rendering is exercised for every row it actually prints.
   const concepts = [
     'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
     'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
     'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-    'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
+    'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs', 'overview-bundle',
   ];
   return concepts.map(c => ({ concept: c, command: `gh ${c}`, source: 'default', executable: 'gh' }));
 }));
-vi.mock('../lib/forge.js', () => ({
-  executeForgeCommandSync: executeForgeCommandSyncMock,
-  loadForgeConfig: loadForgeConfigMock,
-  validateForgeConfig: validateForgeConfigMock,
-  resolveAllConcepts: resolveAllConceptsMock,
-  isHybridProvider: (provider?: string) => provider === 'linear' || provider === 'jira',
-}));
+vi.mock('../lib/forge.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/forge.js')>('../lib/forge.js');
+  return {
+    executeForgeCommandSync: executeForgeCommandSyncMock,
+    loadForgeConfig: loadForgeConfigMock,
+    validateForgeConfig: validateForgeConfigMock,
+    resolveAllConcepts: resolveAllConceptsMock,
+    // The real resolver (Spec 1647): the overview line follows from the mocked forge config.
+    resolveOverviewPlan: actual.resolveOverviewPlan,
+    isHybridProvider: (provider?: string) => provider === 'linear' || provider === 'jira',
+  };
+});
 
 // A minimal fake child process for the async `spawn`-based agy auth probe.
 // verifyAgy streams stdout/stderr and kills on the OAuth marker.
@@ -546,6 +551,52 @@ describe('doctor command', () => {
         expect(out.some(l => / auth\s/.test(l) && /authenticated/.test(l)), provider).toBe(false);
         expect(executeForgeCommandSyncMock.mock.calls.some(c => c[0] === 'auth-status'), provider).toBe(false);
       }
+    });
+  });
+
+  describe('overview line (Spec 1647)', () => {
+    async function overviewOutput(forgeConfig: Record<string, string | null> | null): Promise<string[]> {
+      loadForgeConfigMock.mockImplementation(() => forgeConfig as never);
+      vi.mocked(execSync).mockImplementation(() => Buffer.from('/usr/bin/command'));
+      vi.mocked(spawnSync).mockImplementation(() => ({
+        status: 0, stdout: 'working', stderr: '', signal: null, output: [null, 'working', ''], pid: 0,
+      }));
+      vi.resetModules();
+      const logOutput: string[] = [];
+      vi.spyOn(console, 'log').mockImplementation((...args) => { logOutput.push(args.join(' ')); });
+      const { doctor } = await import('../commands/doctor.js');
+      await doctor();
+      return logOutput;
+    }
+    const overviewLine = (out: string[]) => out.filter(l => /^\s+- overview\s/.test(l));
+
+    afterEach(() => {
+      loadForgeConfigMock.mockImplementation(() => null);
+    });
+
+    it('default github: bundled, 20 idle and 60 under churn', async () => {
+      expect(overviewLine(await overviewOutput(null)))
+        .toEqual([expect.stringContaining('bundled — 20 forge calls/h idle, 60 under constant invalidation')]);
+    });
+
+    it('an issue-list override: four calls, 52 idle and 132 under churn', async () => {
+      expect(overviewLine(await overviewOutput({ 'issue-list': 'my-issues' })))
+        .toEqual([expect.stringContaining('four calls: issue-list overridden — 52 forge calls/h idle, 132 under constant invalidation')]);
+    });
+
+    it('the gitlab preset: four calls, disabled by the preset', async () => {
+      expect(overviewLine(await overviewOutput({ provider: 'gitlab' })))
+        .toEqual([expect.stringContaining('four calls: disabled by the gitlab preset')]);
+    });
+
+    it('a bundle override discloses the constituent override it bypasses', async () => {
+      expect(overviewLine(await overviewOutput({ 'overview-bundle': 'my-bundle', 'issue-list': 'my-issues' })))
+        .toEqual([expect.stringContaining('bundled (overview-bundle override; bypasses the issue-list override)')]);
+    });
+
+    it('lists overview-bundle among the concept rows with its source and executable', async () => {
+      const out = await overviewOutput(null);
+      expect(out.some(l => /✓ overview-bundle\s+default\s+gh$/.test(l))).toBe(true);
     });
   });
 

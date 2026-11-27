@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { IssueIdKind } from '@cluesmith/codev-types';
 import { loadConfig as loadCodevConfig } from './config.js';
 import { commandLaunch } from './platform/command-launch.js';
+import { OVERVIEW_CONSTITUENTS, type FourCallCause, type OverviewConstituent, type OverviewPlan } from './overview-budget.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -68,7 +69,7 @@ const KNOWN_CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
+  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs', 'overview-bundle',
 ] as const;
 
 // =============================================================================
@@ -132,17 +133,22 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     // concept falls through to the github default and would run `gh` on a GitLab or
     // Gitea workspace. Neither could be verified against a real glab or Gitea server, so
     // `codev check` reports them as "not run" by name until a project supplies an override.
-    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs']),
-    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs']),
+    // overview-bundle (Spec 1647) is disabled on every non-GitHub preset for the same reason:
+    // the overview then makes its four per-section calls through the preset's own scripts.
+    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs', 'overview-bundle']),
+    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs', 'overview-bundle']),
     // Linear is a hybrid forge (spec 719): it owns *issues*, while every PR
     // concept — pr-create included — deliberately falls through to the github
     // default. Disabling pr-create here would leave Linear the one provider
     // that can merge a PR but not open one.
-    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    // For the hybrids, disabling overview-bundle is a correctness requirement, not a
+    // capability gap: the github bundle would fill the backlog with GitHub issues instead
+    // of the tracker's (Spec 1647).
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps', 'overview-bundle']),
     // Jira Cloud via Atlassian's `acli` (#1740) is hybrid on the Linear model:
     // issue concepts only, every PR concept (pr-create included) on the github
     // default.
-    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps']),
+    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps', 'overview-bundle']),
   };
   return _providerPresets;
 }
@@ -170,12 +176,13 @@ const ISSUE_ID_KIND_BY_PROVIDER: Record<string, IssueIdKind> = {
   jira: 'key',
 };
 
-const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed'];
+const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed', 'overview-bundle'];
 
 /**
  * The shape of the workspace's issue ids, from its provider (#1740). Undefined
  * when a hand-written override replaces an issue concept: the provider then no
  * longer says what the ids look like, so this reports nothing rather than guess.
+ * An overridden `overview-bundle` counts: it supplies the overview's issues (Spec 1647).
  */
 export function resolveIssueIdKind(forgeConfig: ForgeConfig | null | undefined): IssueIdKind | undefined {
   if (forgeConfig && ISSUE_CONCEPTS.some((concept) => typeof forgeConfig[concept] === 'string')) {
@@ -195,19 +202,19 @@ export interface ConceptResolution {
 }
 
 /**
- * Resolve every known concept with its source and executable.
- * Used by `codev doctor` for full concept reporting.
+ * Every known concept's command and where it came from, with no file I/O. The
+ * overview resolves its plan from this on every poll (Spec 1647), so it must not
+ * read the concept scripts the way the executable lookup does.
  */
-export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {
+function resolveConceptSources(forgeConfig?: ForgeConfig | null): Array<Omit<ConceptResolution, 'executable'>> {
   const concepts = Object.keys(getDefaultCommands());
   return concepts.map((concept) => {
     // Check manual override first
     if (forgeConfig && concept !== 'provider' && concept in forgeConfig) {
       const cmd = forgeConfig[concept];
-      if (cmd === null) {
-        return { concept, command: null, source: 'disabled' as ConceptSource, executable: null };
-      }
-      return { concept, command: cmd, source: 'override' as ConceptSource, executable: extractExecutable(cmd) };
+      return cmd === null
+        ? { concept, command: null, source: 'disabled' as ConceptSource }
+        : { concept, command: cmd, source: 'override' as ConceptSource };
     }
 
     // Check provider preset
@@ -215,17 +222,68 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
       const preset = getProviderPresets()[forgeConfig.provider];
       if (preset && concept in preset) {
         const cmd = preset[concept];
-        if (cmd === null) {
-          return { concept, command: null, source: 'disabled' as ConceptSource, executable: null };
-        }
-        return { concept, command: cmd, source: 'preset' as ConceptSource, executable: extractExecutable(cmd) };
+        return cmd === null
+          ? { concept, command: null, source: 'disabled' as ConceptSource }
+          : { concept, command: cmd, source: 'preset' as ConceptSource };
       }
     }
 
     // Default
-    const cmd = getDefaultCommands()[concept] ?? null;
-    return { concept, command: cmd, source: 'default' as ConceptSource, executable: cmd ? extractExecutable(cmd) : null };
+    return { concept, command: getDefaultCommands()[concept] ?? null, source: 'default' as ConceptSource };
   });
+}
+
+/**
+ * Resolve every known concept with its source and executable.
+ * Used by `codev doctor` for full concept reporting.
+ */
+export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptResolution[] {
+  return resolveConceptSources(forgeConfig).map((r) => {
+    let executable: string | null;
+    if (r.source === 'disabled') executable = null;
+    else if (r.source === 'default') executable = r.command ? extractExecutable(r.command) : null;
+    else executable = extractExecutable(r.command as string);
+    return { ...r, executable };
+  });
+}
+
+/**
+ * Whether the overview uses `overview-bundle` or its four constituents, decided
+ * from configuration alone; there is no runtime fallback (Spec 1647). The bundle
+ * is used when it resolves to a command and either the project overrides it, or
+ * no constituent is overridden or disabled, so a project's own `issue-list`
+ * stays in force. An overridden bundle discloses the constituent settings it hides.
+ */
+export function resolveOverviewPlan(forgeConfig?: ForgeConfig | null): OverviewPlan {
+  const sources = new Map(resolveConceptSources(forgeConfig).map((r) => [r.concept, r.source]));
+  const sourceOf = (concept: OverviewConstituent) => sources.get(concept);
+  const overridden = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) === 'override');
+  const disabled = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) === 'disabled');
+  const runnable = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) !== 'disabled');
+
+  const bundleSource = sources.get('overview-bundle');
+  if (bundleSource === 'disabled') {
+    // Only a project null or a preset can disable it, so a missing provider means the
+    // project's own null; that arm exists for type narrowing and is otherwise unreachable.
+    const provider = forgeConfig?.provider;
+    const cause: FourCallCause = forgeConfig?.['overview-bundle'] === null || provider === undefined
+      ? { kind: 'bundle-disabled' }
+      : { kind: 'preset-disabled', provider };
+    return { mode: 'four-call', cause, runnable };
+  }
+  if (bundleSource === 'override') {
+    return {
+      mode: 'bundled',
+      bypassed: [
+        ...overridden.map((concept) => ({ concept, how: 'overridden' as const })),
+        ...disabled.map((concept) => ({ concept, how: 'disabled' as const })),
+      ],
+    };
+  }
+  if (overridden.length > 0 || disabled.length > 0) {
+    return { mode: 'four-call', cause: { kind: 'constituents', overridden, disabled }, runnable };
+  }
+  return { mode: 'bundled', bypassed: [] };
 }
 
 /**

@@ -6,8 +6,27 @@
  */
 
 import { exec, execSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
+import { shellEscapeSingleQuote } from '../../shell-quote.js';
 import type { CommandLaunch } from '../command-launch.js';
+
+/**
+ * A buffered shell string for `/bin/sh -c`. A bare absolute path to an existing
+ * `.sh` file (a shipped forge concept script) runs as `exec '<path>'`, so the
+ * script replaces the shell and is the process a timeout signals (Spec 1647).
+ * Debian and Ubuntu build dash without the "exec the last command of `sh -c`"
+ * optimization (Debian patch 0004), so a plain `sh -c <path>` forks there: the
+ * timeout's SIGTERM kills only the shell, and the script, its traps unrun, keeps
+ * running with its child. Anything else is passed through unchanged.
+ */
+function shellExecString(script: string): string {
+  if (isAbsolute(script) && script.endsWith('.sh') && existsSync(script)) {
+    return `exec '${shellEscapeSingleQuote(script)}'`;
+  }
+  return script;
+}
 
 export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
   spawnShellString(script, options, context) {
@@ -29,7 +48,7 @@ export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
   async execShellString(script, options) {
     // promisified per call: modules that only spawn never touch `exec`.
     // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
-    const { stdout } = await promisify(exec)(script, {
+    const { stdout } = await promisify(exec)(shellExecString(script), {
       cwd: options.cwd,
       env: options.env,
       timeout: options.timeout,
@@ -40,7 +59,7 @@ export const posixCommandLaunch: CommandLaunch = Object.freeze<CommandLaunch>({
 
   execShellStringSync(script, options) {
     // windows-console: posix-only (commandLaunch() selects this implementation off Windows)
-    return execSync(script, {
+    return execSync(shellExecString(script), {
       cwd: options.cwd,
       env: options.env,
       encoding: 'utf-8',
