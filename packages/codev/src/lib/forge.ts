@@ -349,6 +349,42 @@ export function getForgeCommand(
   return getDefaultCommands()[concept] ?? null;
 }
 
+// =============================================================================
+// Overview path (Spec 1995)
+// =============================================================================
+
+/** The four concepts one `overview-bundle` call replaces. */
+export const OVERVIEW_BUNDLE_CONSTITUENTS = ['pr-list', 'issue-list', 'recently-closed', 'recently-merged'] as const;
+
+/** How Tower fetches a workspace's overview lists: one bundle call, or the four concepts. */
+export type OverviewPath = { kind: 'bundle' } | { kind: 'four-call'; reason: string };
+
+/**
+ * The overview path a forge config selects (Spec 1995, Decision 1). The bundle
+ * is used only when it resolves to a command and the config neither overrides
+ * nor disables any of the four concepts it replaces, so an adopter's override
+ * is never bypassed. A preset's own concept scripts are not overrides: a
+ * project's `overview-bundle` on linear or jira selects the bundle.
+ *
+ * Tower runs this on every poll, so it reads only the config object and the
+ * cached presets: no script reads, and no resolution of every concept.
+ */
+export function resolveOverviewPath(forgeConfig: ForgeConfig | null | undefined): OverviewPath {
+  if (getForgeCommand('overview-bundle', forgeConfig) === null) {
+    const reason = forgeConfig && 'overview-bundle' in forgeConfig
+      ? 'project config disables overview-bundle'
+      : `provider ${forgeConfig?.provider} disables overview-bundle`;
+    return { kind: 'four-call', reason };
+  }
+  for (const concept of OVERVIEW_BUNDLE_CONSTITUENTS) {
+    if (forgeConfig && concept in forgeConfig) {
+      const verb = forgeConfig[concept] === null ? 'disables' : 'overrides';
+      return { kind: 'four-call', reason: `project config ${verb} ${concept}` };
+    }
+  }
+  return { kind: 'bundle' };
+}
+
 /**
  * Check if a concept is explicitly disabled (set to null in config).
  */

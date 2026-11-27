@@ -11,7 +11,10 @@
 
 import { execFile } from 'node:child_process';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
-import { executeForgeCommand, executeForgeCommandDetailed, resolveForgeBackend, type ForgeConfig, type ForgeCommandResult } from './forge.js';
+import {
+  executeForgeCommand, executeForgeCommandDetailed, loadForgeConfig, resolveForgeBackend, resolveOverviewPath,
+  type ForgeConfig, type ForgeCommandResult, type OverviewPath,
+} from './forge.js';
 import type { RateLimitProbeResult } from './forge-rate-limit.js';
 import { getRepoInfo } from './team-github.js';
 import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem, MergedPrItem, OverviewBundleResult } from './forge-contracts.js';
@@ -274,6 +277,21 @@ export interface OverviewFetchOptions {
 /** Resolved backend key for an overview concept in `cwd` (see `resolveForgeBackend`). */
 export function overviewBackend(concept: OverviewConcept, cwd: string): string | null {
   return resolveForgeBackend(concept, { cwd });
+}
+
+/**
+ * The overview path for `cwd` (Spec 1995): one config load, no script reads.
+ * A config that fails to load selects the bundle, whose call then fails with
+ * that config error, as each of the four calls would.
+ */
+export function overviewPath(cwd: string): OverviewPath {
+  let forgeConfig: ForgeConfig | null;
+  try {
+    forgeConfig = loadForgeConfig(cwd);
+  } catch {
+    return { kind: 'bundle' };
+  }
+  return resolveOverviewPath(forgeConfig);
 }
 
 /**

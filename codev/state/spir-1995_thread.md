@@ -224,3 +224,35 @@ Claude's non-blocking notes:
   that disable is the one the spec's fallback rule depends on.
 - Carried to Phase 4: the forge.md "Disabling Concepts" line that a null holds in any layer.
 - `isPlainObject` has no existing twin in packages/codev/src (grepped); left local.
+
+## 2026-11-27 — Phase 3 bundle_cache_path: built
+- `resolveOverviewPath(forgeConfig)` (forge.ts, pure): bundle, or four-call with a reason —
+  `provider <p> disables overview-bundle`, `project config disables overview-bundle`,
+  `project config overrides|disables <concept>`. It reads the config object and the cached presets
+  only. `overviewPath(cwd)` (github.ts) loads the config once; a config that fails to load selects
+  the bundle, whose call then fails with that error.
+- `OverviewCache`: `getOverview` picks the path per poll. The four-call path is the same four
+  `cachedFetch` calls, moved into `fourCallLists`. The bundle path (`bundleLists`) keeps two
+  positive-only groups (open: 180 s + invalidate; windows: 600 s, never invalidated), gates on
+  suspension / a read-only `isFailureWindowOpen` / null backend, carries the windows iff (none, or
+  age ≥ 420 s) and their own failure window is closed, and is single-flight per
+  `<ws>:overview-bundle`. A whole-call failure escalates `<ws>:<budget>` and touches neither group;
+  `windowsError` escalates `<ws>:<budget>:windows` and goes through `noteFailure`. Steps 3–5 of the
+  payload are untouched, except one type: `recently-merged` items are now typed `MergedPrItem`
+  (their real contract; `url` is optional), so the issue→PR-url map is `string | undefined`.
+- Tests: new `spec-1995-overview-bundle-cache.test.ts` (26) and `spec-1995-overview-bundle-gh.test.ts`
+  (5); `overview-rate-limit.test.ts` now runs every case on both paths (19); the 1645 quota harness
+  has a bundle case and keeps the four-call case on a fallback workspace; `overview.test.ts` pins
+  the path to the bundle, and the two per-concept-isolation tests (#400, #465) run on a fallback
+  workspace next to bundle counterparts.
+- Mutation check, by hand: 8 mutants of the bundle path (ride-along at 600 s, a poll escalating the
+  failure window, windows ignoring their failure window, no single-flight, a failure clearing the
+  groups, a failure falling back to the four calls, windowsError not suspending, invalidate()
+  expiring the windows) — each fails at least one targeted test.
+- **Deviation (stronger than the plan):** the cache test fakes the forge one level lower, at
+  `executeForgeCommandDetailed`, not `fetchForOverview`, so the real conformance check and 24 h
+  filter run on both paths. The gh harness serves both transports for one repo state (gh `--json`
+  rendering and raw GraphQL), so parity (7) also runs on the real scripts: bot/deleted authors,
+  null reviewDecision, team and bot reviewers.
+- **Real data, by hand, not committed:** `getOverview` on cluesmith/codev, bundle vs
+  `"overview-bundle": null` → payloads deep-equal (7 PRs, 198 backlog, 2 recently closed, ok).

@@ -32,7 +32,7 @@ import {
 // Mocks
 // ============================================================================
 
-const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol, mockFetchCurrentUser, dbState } = vi.hoisted(() => ({
+const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchMergedPRs, mockLoadProtocol, mockFetchCurrentUser, dbState, pathState } = vi.hoisted(() => ({
   mockFetchPRList: vi.fn(),
   mockFetchIssueList: vi.fn(),
   mockFetchRecentlyClosed: vi.fn(),
@@ -42,6 +42,10 @@ const { mockFetchPRList, mockFetchIssueList, mockFetchRecentlyClosed, mockFetchM
   // Issue #1118: overview reads builders from getGlobalDbPath(); point it at a
   // per-test path under tmpDir so each test is isolated.
   dbState: { globalDbPath: '' },
+  // Spec 1995: the overview path is pinned to the bundle, so no test depends on
+  // a config file on the machine running it. A fallback-workspace test switches
+  // to the real resolver and asserts the path it gets.
+  pathState: { real: false },
 }));
 
 vi.mock('../../lib/github.js', async (importOriginal) => {
@@ -56,6 +60,21 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     'recently-merged': mockFetchMergedPRs,
     'user-identity': mockFetchCurrentUser,
   };
+  const failure = { data: null, error: { message: 'mock failure', stderr: '', exitCode: 1 } };
+  // Spec 1995: the bundle is composed from the same per-concept mocks. The open
+  // mocks are always called and the window mocks only when the windows are
+  // requested; a null open mock fails the call, a null window mock is a
+  // window-only error.
+  const bundle = async (cwd: string, includeWindows: boolean) => {
+    const [prs, issues] = await Promise.all([mockFetchPRList(cwd), mockFetchIssueList(cwd)]);
+    if (prs === null || issues === null) return failure;
+    if (!includeWindows) return { data: { prs, issues }, error: null };
+    const [recentlyClosed, recentlyMerged] = await Promise.all([mockFetchRecentlyClosed(cwd), mockFetchMergedPRs(cwd)]);
+    if (recentlyClosed === null || recentlyMerged === null) {
+      return { data: { prs, issues, windowsError: 'mock window failure' }, error: null };
+    }
+    return { data: { prs, issues, recentlyClosed, recentlyMerged }, error: null };
+  };
   return {
     ...actual,
     fetchPRList: mockFetchPRList,
@@ -64,12 +83,12 @@ vi.mock('../../lib/github.js', async (importOriginal) => {
     fetchRecentMergedPRs: mockFetchMergedPRs,
     fetchCurrentUser: mockFetchCurrentUser,
     overviewBackend: () => 'gh',
-    fetchForOverview: async (concept: string, cwd: string) => {
+    overviewPath: (cwd: string) => (pathState.real ? actual.overviewPath(cwd) : { kind: 'bundle' }),
+    fetchForOverview: vi.fn(async (concept: string, cwd: string, options: { includeWindows?: boolean } = {}) => {
+      if (concept === 'overview-bundle') return bundle(cwd, options.includeWindows === true);
       const data = await byConcept[concept](cwd);
-      return data === null
-        ? { data: null, error: { message: 'mock failure', stderr: '', exitCode: 1 } }
-        : { data, error: null };
-    },
+      return data === null ? failure : { data, error: null };
+    }),
   };
 });
 
@@ -84,6 +103,7 @@ vi.mock('../db/index.js', async (importOriginal) => {
   return { ...actual, getGlobalDbPath: () => dbState.globalDbPath };
 });
 
+import { fetchForOverview, overviewPath } from '../../lib/github.js';
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { buildAgentName } from '../utils/agent-names.js';
 
@@ -131,6 +151,17 @@ function createReviewFile(root: string, issueNumber: number, name: string): void
   const reviewsDir = path.join(root, 'codev', 'reviews');
   fs.mkdirSync(reviewsDir, { recursive: true });
   fs.writeFileSync(path.join(reviewsDir, `${issueNumber}-${name}.md`), `# ${name}`);
+}
+
+/**
+ * Spec 1995: run the test on the four-call path, through the real path
+ * resolver, and prove that is the path it gets before relying on it.
+ */
+function useFallbackWorkspace(): void {
+  fs.mkdirSync(path.join(tmpDir, '.codev'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, '.codev', 'config.json'), JSON.stringify({ forge: { 'overview-bundle': null } }));
+  pathState.real = true;
+  expect(overviewPath(tmpDir)).toEqual({ kind: 'four-call', reason: 'project config disables overview-bundle' });
 }
 
 function issueItem(number: number, title: string, labels: Array<{ name: string }> = []): { number: number; title: string; url: string; labels: Array<{ name: string }>; createdAt: string } {
@@ -182,6 +213,7 @@ function createStateDb(
 describe('overview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pathState.real = false;
     tmpDir = makeTmpDir();
     // Issue #1118: per-test global.db path (file created lazily by createStateDb).
     dbState.globalDbPath = path.join(tmpDir, '.agent-farm', 'global.db');
@@ -2451,7 +2483,33 @@ describe('overview', () => {
       }
     });
 
-    it('fetches PRs, issues, recently closed, and merged PRs in parallel (Bugfix #400)', async () => {
+    it('fetches all four lists in one bundle call, in parallel with identity (Bugfix #400, Spec 1995)', async () => {
+      const callLog: string[] = [];
+      const delayed = (name: string, value: unknown) => () => {
+        callLog.push(`${name}-start`);
+        return new Promise(resolve => {
+          setTimeout(() => { callLog.push(`${name}-end`); resolve(value); }, 50);
+        });
+      };
+      mockFetchPRList.mockImplementation(delayed('pr', []));
+      mockFetchIssueList.mockImplementation(delayed('issue', []));
+      mockFetchCurrentUser.mockImplementation(delayed('user', 'octocat'));
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+
+      const concepts = vi.mocked(fetchForOverview).mock.calls.map(([concept, , options]) => ({ concept, options }));
+      expect(concepts.filter(c => c.concept !== 'user-identity')).toEqual([
+        { concept: 'overview-bundle', options: { includeWindows: true } },
+      ]);
+      // The bundle and identity are in flight together.
+      expect(callLog.slice(0, 3).sort()).toEqual(['issue-start', 'pr-start', 'user-start']);
+      expect(mockFetchRecentlyClosed).toHaveBeenCalledTimes(1);
+      expect(mockFetchMergedPRs).toHaveBeenCalledTimes(1);
+    });
+
+    it('fetches PRs, issues, recently closed, and merged PRs in parallel on a fallback workspace (Bugfix #400)', async () => {
+      useFallbackWorkspace();
       // Track the order of mock call starts and completions to verify concurrency.
       // If calls are sequential, each starts after the previous completes.
       // If parallel, all start before any completes.
@@ -2553,7 +2611,26 @@ describe('overview', () => {
       expect(item99.reviewPath).toBeUndefined();
     });
 
-    it('handles null merged PRs gracefully (Bugfix #465)', async () => {
+    it('a window-only error blanks both windows and keeps the open lists (Bugfix #465, Spec 1995)', async () => {
+      mockFetchPRList.mockResolvedValue([
+        { number: 10, title: 'Open PR', url: 'https://github.com/org/repo/pull/10', reviewDecision: '', body: '', createdAt: '2026-01-10T00:00:00Z' },
+      ]);
+      mockFetchRecentlyClosed.mockResolvedValue([
+        { number: 50, title: 'Bug', url: 'https://github.com/org/repo/issues/50', labels: [{ name: 'bug' }], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
+      ]);
+      mockFetchMergedPRs.mockResolvedValue(null);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.pendingPRs).toHaveLength(1);
+      expect(data.recentlyClosed).toEqual([]);
+      expect(data.forgeStatus).toBe('unavailable');
+      expect(data.errors).toBeUndefined();
+    });
+
+    it('handles null merged PRs gracefully on a fallback workspace (Bugfix #465)', async () => {
+      useFallbackWorkspace();
       mockFetchRecentlyClosed.mockResolvedValue([
         { number: 50, title: 'Bug', url: 'https://github.com/org/repo/issues/50', labels: [{ name: 'bug' }], createdAt: '2026-01-01T00:00:00Z', closedAt: new Date().toISOString() },
       ]);
