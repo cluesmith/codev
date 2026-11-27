@@ -36,27 +36,20 @@ export const scriptTestTimeoutMs = process.platform === 'win32' ? 120_000 : 30_0
 
 const FAKE_GH = `#!/bin/sh
 dir="$(dirname "$0")"
-# The overview cache runs several gh processes at once: number the calls under a lock.
-# The trap releases the lock only while this process holds it, so a fake gh killed inside
-# the window cannot leave the next one spinning, and one that exits later cannot remove a
-# lock another process has since taken.
-spins=0
-until mkdir "$dir/lock" 2>/dev/null; do
-  spins=$((spins + 1))
-  if [ "$spins" -gt 2000 ]; then
-    printf '%s\\n' "lock never acquired" >> "$dir/violations"
+# The overview cache runs several gh processes at once. Each call claims the lowest free
+# number by creating its directory: mkdir is atomic, so no two calls share a number and the
+# numbers have no gaps. (A lock around a read-modify-write of a count file lost a call
+# under load on Linux CI.)
+n=1
+until mkdir "$dir/call.$n" 2>/dev/null; do
+  n=$((n + 1))
+  if [ "$n" -gt 1000 ]; then
+    printf '%s\\n' "no call number could be claimed" >> "$dir/violations"
     exit 97
   fi
 done
-trap 'rmdir "$dir/lock" 2>/dev/null' EXIT
-trap 'exit 143' TERM
-trap 'exit 130' INT
-n=$(( $(cat "$dir/count" 2>/dev/null || echo 0) + 1 ))
-echo "$n" > "$dir/count"
-rmdir "$dir/lock"
-trap - EXIT TERM INT
-printf '%s\\000' "$@" > "$dir/call.$n.argv"
-echo "$$" > "$dir/call.$n.pid"
+printf '%s\\000' "$@" > "$dir/call.$n/argv"
+echo "$$" > "$dir/call.$n/pid"
 key=
 case "$1 $2" in
   'pr list') key=pr-list; for a in "$@"; do [ "$a" = merged ] && key=recently-merged; done ;;
@@ -126,14 +119,15 @@ export class FakeGh {
 
   /** argv of every call, in order. */
   calls(): string[][] {
-    const countFile = path.join(this.dir, 'count');
-    const n = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, 'utf-8').trim()) : 0;
-    return Array.from({ length: n }, (_, i) =>
-      fs.readFileSync(path.join(this.dir, `call.${i + 1}.argv`), 'utf-8').split('\0').slice(0, -1));
+    const out: string[][] = [];
+    for (let n = 1; fs.existsSync(path.join(this.dir, `call.${n}`)); n++) {
+      out.push(fs.readFileSync(path.join(this.dir, `call.${n}`, 'argv'), 'utf-8').split('\0').slice(0, -1));
+    }
+    return out;
   }
 
   pid(call: number): number {
-    return Number(fs.readFileSync(path.join(this.dir, `call.${call}.pid`), 'utf-8').trim());
+    return Number(fs.readFileSync(path.join(this.dir, `call.${call}`, 'pid'), 'utf-8').trim());
   }
 
   violations(): string[] {

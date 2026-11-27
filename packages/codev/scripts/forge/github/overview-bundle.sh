@@ -25,7 +25,9 @@
 # data, go through `-f` so gh never type-converts them.
 #
 # Signals: every gh runs in the background and the script waits for it. The forge layer
-# enforces its time limit by sending SIGTERM to this shell alone, and POSIX sh defers a
+# runs this script as `exec '<path>'`, so this shell is the process its time limit signals
+# (Debian and Ubuntu's dash would otherwise fork for `sh -c <path>` and take the signal
+# itself). It sends SIGTERM to this shell alone, and POSIX sh defers a
 # trapped signal until the running foreground command returns, so a foreground gh would
 # hold the call open until it finished. `wait` returns at once on a trapped signal; the
 # trap then kills the in-flight gh and exits, and the EXIT trap removes the temp directory.

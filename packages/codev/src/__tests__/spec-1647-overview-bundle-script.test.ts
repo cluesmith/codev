@@ -628,6 +628,9 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
       expect(Date.now() - started).toBeLessThan(20_000);
       expect(result.data).toBeNull();
       expect(result.error?.timedOut).toBe(true);
+      // The script exits through its TERM trap (143): the signal reached the script itself,
+      // not a shell in front of it (Debian and Ubuntu's dash forks for `sh -c <path>`).
+      expect(result.error?.exitCode, 'the time limit signalled a shell, not the script').toBe(143);
 
       expect(fake.calls(), 'the limit fired before gh started').toHaveLength(1);
       const ghPid = fake.pid(1);

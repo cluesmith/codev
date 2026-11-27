@@ -96,6 +96,29 @@ describe('POSIX implementation: the pre-refactor calls, verbatim', () => {
     });
   });
 
+  it('execShellString: a bare absolute path to an existing .sh file is exec\'d, so the script is the process signalled (Spec 1647)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec1647-exec-it's "));
+    try {
+      const script = join(dir, 'overview-bundle.sh');
+      writeFileSync(script, '#!/bin/sh\n');
+      childProcess.execSync.mockReturnValue('sync-out');
+      const options = { cwd: dir, env: {}, timeout: 30_000, maxBuffer: 10 };
+      await posixCommandLaunch.execShellString(script, options);
+      const quoted = `exec '${script.replace(/'/g, "'\\''")}'`;
+      expect(childProcess.exec.mock.calls[0][0]).toBe(quoted);
+      posixCommandLaunch.execShellStringSync(script, options);
+      expect(childProcess.execSync.mock.calls[0][0]).toBe(quoted);
+      // Anything that is not an absolute path to an existing .sh file is passed through.
+      for (const other of [join(dir, 'missing.sh'), 'overview-bundle.sh', `${script} --flag`, 'gh pr list']) {
+        childProcess.exec.mockClear();
+        await posixCommandLaunch.execShellString(other, options);
+        expect(childProcess.exec.mock.calls[0][0]).toBe(other);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('argv forms: the caller-named shell, /bin/bash for scripts', () => {
     expect(posixCommandLaunch.shellStringArgv('npm run dev', { command: '/bin/sh', flag: '-lc' })).toEqual({ command: '/bin/sh', args: ['-lc', 'npm run dev'] });
     expect(posixCommandLaunch.shellStringArgv('ls', { command: '/bin/bash', flag: '-c' })).toEqual({ command: '/bin/bash', args: ['-c', 'ls'] });
