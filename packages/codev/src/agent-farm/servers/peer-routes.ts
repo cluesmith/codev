@@ -87,6 +87,15 @@ class RequestError extends Error {
   }
 }
 
+/**
+ * A refusal made safe to print: a refusal can quote what the request named, and the CLI
+ * prints it on a terminal. Control characters, format characters (bidi overrides, zero
+ * widths) and line and paragraph separators become `?`; letters of any script are kept.
+ */
+function printable(message: string): string {
+  return message.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '?');
+}
+
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -97,7 +106,7 @@ async function readObject(req: http.IncomingMessage): Promise<Record<string, unk
   try {
     body = await parseJsonBody(req, MAX_BODY_BYTES);
   } catch (err) {
-    throw new RequestError(400, 'INVALID_PARAMS', `Request body is not valid JSON (${(err as Error).message}).`);
+    throw new RequestError(400, 'INVALID_PARAMS', `Request body refused (${(err as Error).message}).`);
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw new RequestError(400, 'INVALID_PARAMS', 'Request body must be a JSON object.');
@@ -138,7 +147,8 @@ function recipientsOf(body: Record<string, unknown>): GrantRecipientsInput {
 }
 
 function isOverTunnel(req: http.IncomingMessage): boolean {
-  return req.headers[TUNNEL_PROXY_HEADER] === '1';
+  // Any value counts, as for the shutdown route: for a refusal the wider test is the safe one.
+  return req.headers[TUNNEL_PROXY_HEADER] !== undefined;
 }
 
 function refuseOverTunnel(act: string): never {
@@ -325,7 +335,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
       }
       return sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED', message: `${method} is not allowed on ${url.pathname}` });
     } catch (err) {
-      if (err instanceof RequestError) return sendJson(res, err.status, { error: err.code, message: err.message });
+      if (err instanceof RequestError) return sendJson(res, err.status, { error: err.code, message: printable(err.message) });
       deps.log('ERROR', `Peer route ${method} ${url.pathname} failed: ${(err as Error).message}`);
       return sendJson(res, 500, { error: 'INTERNAL_ERROR', message: 'The peer route failed; see the Tower log.' });
     }

@@ -189,16 +189,16 @@ function targetOfAddress(
   if (address.tower !== undefined) {
     return refuse(
       'INVALID_PARAMS',
-      `'${text}' leaves this Tower. A grant names recipients on this Tower, written as local addresses (codev:architect:<name>).`,
+      `'${shown(text)}' leaves this Tower. A grant names recipients on this Tower, written as local addresses (codev:architect:<name>).`,
     );
   }
   if (address.workspace === undefined) {
-    return refuse('INVALID_PARAMS', `'${text}' names no workspace. Write it with the workspace in front: <workspace>:${text}.`);
+    return refuse('INVALID_PARAMS', `'${shown(text)}' names no workspace. Write it with the workspace in front: <workspace>:${shown(text)}.`);
   }
   if (address.kind !== 'architect') {
     return refuse(
       'NOT_GRANTABLE',
-      `'${text}' is not an architect. ${GRANTABLE}; builders are covered only by --all.`,
+      `'${shown(text)}' is not an architect. ${GRANTABLE}; builders are covered only by --all.`,
     );
   }
   const workspace = lookUpWorkspace(address.workspace, world);

@@ -416,3 +416,12 @@ above is struck through. A test breaks both invariants by hand and finds neither
 - Layer A wall time: 0.9 s for the three new codev files (80 tests), 0.19 s for the SDK's
   address + peer-client files (188 tests), three runs each. Full `npm test` (porch's
   command): 467 files, 10436 passed, 230.7 s.
+- **Phase 4 review (iter 1): codex APPROVE, claude APPROVE**, both HIGH. Taken from claude's
+  non-blocking comments, as a follow-up commit: every peer-route refusal message is passed
+  through one sanitizer as it leaves Tower (Cc, Cf, Zl, Zp → `?`; letters of any script kept),
+  which also covers what the reviewer did not list (the architect name in "not registered",
+  the shared workspace lookup's not-found echo); `shown()` at the address-quoting sites; the
+  tunnel marker refuses on any value (the shutdown route's idiom); an oversized body is no
+  longer called "not valid JSON". Not taken: moving `PEER_MIN_RETENTION_DAYS` into
+  codev-types. `lib/config.ts` already imports from `agent-farm/`, and retention is
+  Tower-local policy, not wire protocol. The lazy-withdrawal carry-forward stays with phase 6.

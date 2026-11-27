@@ -212,6 +212,11 @@ describe('afx peer on / off', () => {
     expect(store.readRemoteMessaging(harness.db).state).toBe('off');
   });
 
+  it('takes any value of the tunnel marker as the tunnel', async () => {
+    const answer = await harness.raw('PUT', '/api/peer/switch', { state: 'on', humanApproved: true }, { 'x-codev-tunnel-proxy': 'yes' });
+    expect(answer).toMatchObject({ status: 403, body: { error: 'NOT_OVER_TUNNEL' } });
+  });
+
   it('refuses a malformed switch request', async () => {
     expect((await harness.raw('PUT', '/api/peer/switch', { state: 'maybe' })).body.error).toBe('INVALID_PARAMS');
     expect((await harness.raw('PUT', '/api/peer/switch', ['on'])).body.error).toBe('INVALID_PARAMS');
@@ -325,6 +330,28 @@ describe('afx peer grant', () => {
     expect((await run((d) => peerGrant({ tower: 'mbp', all: true, ...HUMAN }, d))).error).toBe(
       "'mbp' is a former name of the Tower now called 'laptop'. Name it 'laptop'. (UNKNOWN_TOWER)",
     );
+    expect(store.listGrants(harness.db)).toEqual([]);
+  });
+});
+
+describe('a refusal that quotes the request', () => {
+  it('replaces control, format and separator characters, and keeps letters of any script', async () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const zwj = String.fromCodePoint(0x200d);
+    const lineSeparator = String.fromCodePoint(0x2028);
+    const cases = [
+      { addresses: [`codev:architect:${rlo}niam`] },
+      { workspace: `caf\u00e9${zwj}${lineSeparator}` },
+    ];
+    for (const recipients of cases) {
+      const answer = await harness.raw('POST', '/api/peer/grants', { tower: 'mbp', humanApproved: true, ...recipients });
+      expect(answer).toMatchObject({ status: 404, body: { error: 'NOT_FOUND' } });
+      const message = answer.body.message as string;
+      for (const unsafe of [rlo, zwj, lineSeparator]) expect(message).not.toContain(unsafe);
+      expect(message).toContain('?');
+    }
+    const accented = await harness.raw('POST', '/api/peer/grants', { tower: 'mbp', humanApproved: true, workspace: 'caf\u00e9' });
+    expect(accented.body.message).toContain('caf\u00e9');
     expect(store.listGrants(harness.db)).toEqual([]);
   });
 });

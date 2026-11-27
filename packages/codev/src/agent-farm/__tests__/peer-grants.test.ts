@@ -431,6 +431,12 @@ describe('the peer a tower-ref names', () => {
       expect(refused).toMatchObject({ ok: false, code: 'INVALID_PARAMS' });
       expect(!refused.ok && refused.message).toContain('contains a control character');
     }
+    // A format character is not a control character, so it reaches the refusal for a builder
+    // address, which quotes the address printable as well.
+    const rlo = String.fromCodePoint(0x202e);
+    const builderAddress = resolveGrantTargets({ addresses: [`codev:builder-${rlo}x`] }, world, 'grant');
+    expect(builderAddress).toMatchObject({ ok: false, code: 'NOT_GRANTABLE' });
+    expect(!builderAddress.ok && builderAddress.message).toMatch(/^[\x20-\x7e]*$/);
     for (const refused of [tower, address, named, workspace]) {
       expect(refused.ok).toBe(false);
       const message = refused.ok ? '' : refused.message;
