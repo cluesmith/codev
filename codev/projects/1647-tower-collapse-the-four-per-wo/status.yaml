@@ -27,46 +27,14 @@ gates:
     approved_at: '2026-11-27T04:41:52.726Z'
   pr:
     status: pending
+    requested_at: '2026-11-27T07:28:41.201Z'
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
-history:
-  - iteration: 1
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter1-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter1-claude.txt
-  - iteration: 2
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter2-codex.txt
-      - model: claude
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter2-claude.txt
-  - iteration: 3
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter3-codex.txt
-      - model: claude
-        verdict: APPROVE
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter3-claude.txt
+iteration: 1
+build_complete: false
+history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T07:28:38.965Z'
+updated_at: '2026-11-27T07:28:41.201Z'
 force_advanced:
   phase: review
   iteration: 3
@@ -97,3 +65,4 @@ pr_history:
     pr_number: 2004
     branch: builder/spir-1647
     created_at: '2026-11-27T06:36:55.515Z'
+pr_ready_for_human: true
