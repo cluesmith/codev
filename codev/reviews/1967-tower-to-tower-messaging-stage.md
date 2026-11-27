@@ -18,6 +18,21 @@ it.*
     the owner has been told and may overrule. The wire contract does not change, so nothing goes
     to the cloud side.
 
+## Phases closed by porch's force-advance
+
+Porch closes a plan phase at its 3-iteration ceiling when the last round still has a
+REQUEST_CHANGES. The fix for that round then gets no consult review before the next phase.
+
+- **Phase 7 (peer listing and the cloud client).** The iteration 3 fix, `3cd856ef1`, was not
+  re-reviewed by consult. The architect read its source diff, ran the three test files it
+  touches (86 passed) and found nothing to change (main, 2026-11-27T06:36Z).
+- **Phase 9 (afx send across Towers).** Iteration 3's codex point was right: the CLI's 1 MiB
+  guard measured each file, not the request Tower reads. The fix, `10e5fe397`, has the SDK
+  measure the encoded request and refuse one past Tower's ceiling with no call
+  (`REQUEST_TOO_LARGE`). It was not re-reviewed by consult. The architect read its source diff,
+  ran the two test files it touches (26 and 19 passed) and found nothing to change; the
+  PR-level review covers it (main, 2026-11-27T09:31Z).
+
 ## Known residuals
 
 - **A cloud-supplied reason can reach the status (phase 5, architect ruling 2026-11-27T03:36Z).**

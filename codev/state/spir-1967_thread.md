@@ -1025,3 +1025,10 @@ Surprises:
     address: …".
   - **Verified.** Layer A 10 888 passed, 116 skipped, 244.0 s. Layer B 20 of 20 in 59.6 s
     at load 3.1.
+- **Porch force-advanced phase 9** after the third review round, at its 3-iteration ceiling.
+  Consult never re-reviewed the iteration 3 fix (`10e5fe397`). I told the architect, who read
+  its source diff, ran the two test files it touches (26 and 19 passed) and found nothing to
+  change; the PR-level review covers it (main, 2026-11-27T09:31Z). Both force-advances, phase
+  7's and phase 9's, are now in the review document (phase 7's was only here before).
+- **Carried to phase 11 (the architect's reminder).** The held-on-fault words send the sender
+  to `afx inbox`, so by phase 11 `afx inbox` must list and dismiss an outbox row.
