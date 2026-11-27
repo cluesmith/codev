@@ -1561,3 +1561,13 @@ a line this phase wrote.
   `air-1977-liveness-route` has, and `path.join(tmpdir(), 'peers-run')`. The script passes and the
   three files pass, 50 tests. The lesson is in the review: check `gh pr checks` on the head before
   announcing a gate.
+- **CI on `653191119`: 7 of 8, Unit Tests green on Linux. Tower Integration red** in
+  `cross-workspace-addressing.e2e.test.ts` (stage 1's, not this project's): it still expected
+  stage 1's "not available in this version" refusal, which phase 9 replaced. On a fresh Tower the
+  switch is the first check, so the send prints the remote-off line. Same failure on the earlier
+  heads. Taken to the architect before any change. Their word (14:42Z): change the one assertion
+  to the remote-off line, keeping exit 1, no outcome lines, one stderr line and nothing stored, and
+  rename the test. Done; the title now says "while remote messaging is off". The lesson is in the
+  review: porch skips `e2e_tests` here and my layer B ran only this project's files, so stage 1's
+  e2e file should have been in the on-demand runs once phase 9 changed what an `afx://` address
+  does.

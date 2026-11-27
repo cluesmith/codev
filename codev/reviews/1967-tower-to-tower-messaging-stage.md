@@ -935,6 +935,11 @@ changes are in `a2f660715`.
 - **Check CI on the head before announcing a gate.** The `pr` gate was announced while CI was red and unseen: the Unit
   Tests job had failed at its `/tmp` residue check on every push since the PR opened, so the unit tests had never run
   on Linux. The check is `gh pr checks` on the head before the announcement.
+- **Run the earlier stage's e2e file once a phase changes what it pins.** Porch skips `e2e_tests` in this repository,
+  and the on-demand layer B runs covered only this project's seven two-Tower files, so the whole e2e suite first ran
+  against this branch in CI. There, stage 1's `cross-workspace-addressing.e2e.test.ts` still expected stage 1's
+  "not available in this version" refusal. It should have been in the on-demand runs once phase 9 changed what an
+  `afx://` address does.
 - **Write the scenario-to-test table with the plan, and keep it per phase.** The builder footer's
   two halves were built and tested in phases 6 and 8, and the missing round trip between them was
   found only at the end.
