@@ -215,3 +215,12 @@ Claude's non-blocking notes, all taken:
 - Noted, not changed: the legacy one-shot `af-config.json` → `.codev/config.json` merge in
   `commands/update.ts` still uses plain `deepMerge`, so it would drop a forge null only when
   both files carry a `forge` object. The plan keeps `deepMerge` and that caller as they are.
+
+## 2026-11-27 — Phase 2 consultation (iter 1): codex APPROVE, claude APPROVE
+Claude's non-blocking notes:
+- Taken: `provider: null` over a global provider is now pinned by a test (kept as null, resolves
+  as github, `validateForgeConfig` reports nothing).
+- Kept as is: the end-to-end test uses `overview-bundle` (Phase 1's script) on purpose, since
+  that disable is the one the spec's fallback rule depends on.
+- Carried to Phase 4: the forge.md "Disabling Concepts" line that a null holds in any layer.
+- `isPlainObject` has no existing twin in packages/codev/src (grepped); left local.

@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath } from '../lib/config.js';
 import { getActivityHooks } from '../agent-farm/utils/config.js';
-import { getForgeCommand, loadForgeConfig } from '../lib/forge.js';
+import { getDefaultCommand, getForgeCommand, loadForgeConfig, validateForgeConfig } from '../lib/forge.js';
 import { setFrameworkCacheDir } from '../lib/skeleton.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 
@@ -379,6 +379,15 @@ describe('loadConfig forge section layering', () => {
     const shell = loadConfig(tmpDir).shell!;
     expect('shell' in shell).toBe(false);
     expect(shell.architect).toBe('claude');
+  });
+
+  it('a project "provider": null over a global provider is kept, and reads as unset (github)', () => {
+    writeGlobalConfig({ forge: { provider: 'gitlab' } });
+    writeProjectConfig(tmpDir, { forge: { provider: null } });
+    const forge = loadForgeConfig(tmpDir)!;
+    expect(forge.provider).toBeNull();
+    expect(getForgeCommand('pr-list', forge)).toBe(getDefaultCommand('pr-list'));
+    expect(validateForgeConfig(forge)).toEqual([]);
   });
 
   it('a disabled concept resolves to no command through getForgeCommand', () => {
