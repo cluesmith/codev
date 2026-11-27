@@ -1,7 +1,7 @@
 id: '2008'
 title: vscode-pull-requests-group-sho
 protocol: pir
-phase: plan
+phase: implement
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -17,4 +17,4 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-27T21:08:33.721Z'
-updated_at: '2026-11-27T21:14:55.870Z'
+updated_at: '2026-11-27T21:14:58.545Z'
