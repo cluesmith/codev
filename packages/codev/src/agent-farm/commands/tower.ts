@@ -113,7 +113,10 @@ function logToFile(message: string): void {
  * answer (#1901): name the process, so the reader can see whether it is a Tower, and leave
  * replacing it to them.
  */
-async function unresponsivePortMessage(port: number, tower: { error: string; elapsedMs: number }): Promise<string> {
+async function unresponsivePortMessage(
+  port: number,
+  tower: { error: string; route: string; elapsedMs: number },
+): Promise<string> {
   const pids = getProcessesOnPort(port);
   let describe = (pid: number): string => `PID ${pid}`;
   if (pids.length > 0) {
@@ -125,7 +128,7 @@ async function unresponsivePortMessage(port: number, tower: { error: string; ela
     }
   }
   return [
-    `A process is listening on port ${port} but did not answer /health within ` +
+    `A process is listening on port ${port} but did not answer ${tower.route} within ` +
       `${Math.round(tower.elapsedMs / 1000)} s (${tower.error}):`,
     ...(pids.length > 0 ? pids.map((pid) => `  ${describe(pid)}`) : ['  (no listening PID found)']),
     'If the machine is busy, wait and run afx tower start again.',
@@ -273,7 +276,7 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     return;
   }
   if (tower.state === 'unresponsive') {
-    logToFile(`Port ${port} held but /health unanswered (${tower.error}); refusing to start`);
+    logToFile(`Port ${port} held but ${tower.route} unanswered (${tower.error}); refusing to start`);
     fatal(await unresponsivePortMessage(port, tower));
   }
 

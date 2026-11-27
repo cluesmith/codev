@@ -872,6 +872,26 @@ export interface TowerVersionInfo {
   startedAt: string;
 }
 
+// --- Tower liveness (GET /health/live) ---
+
+/** The route CLI commands probe to tell a busy Tower from one that is not running (#1977). */
+export const TOWER_LIVENESS_ROUTE = '/health/live';
+
+/**
+ * Response of `GET /health/live` (#1977): built from what the Tower process already holds, with
+ * no instance list, no process census and no database read, so a probe adds no load to a Tower
+ * whose event loop is already starved. `GET /health` keeps the census for the callers that want
+ * it. A Tower from before this route answers it with its catch-all 404.
+ */
+export interface TowerLiveness extends TowerVersionInfo {
+  status: 'healthy';
+  /**
+   * The global.db schema version this Tower's code migrates to at boot: a constant of the
+   * running code, not a value read from the database.
+   */
+  schemaVersion: number;
+}
+
 // --- Analytics (GET /api/analytics) ---
 
 export interface ProtocolStats {

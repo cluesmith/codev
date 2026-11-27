@@ -55,7 +55,7 @@ describe('afx status --json: busy apart from down (#1901)', () => {
   }
 
   it('reports an unresponsive Tower with its reason', async () => {
-    mockProbe.mockResolvedValue({ state: 'unresponsive', error: 'Request timeout' });
+    mockProbe.mockResolvedValue({ state: 'unresponsive', route: '/health/live', error: 'Request timeout' });
     expect(await towerField()).toEqual({ running: false, state: 'unresponsive', error: 'Request timeout' });
   });
 

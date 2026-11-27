@@ -22,7 +22,7 @@ const REPLAY_SETTLE_MS = 150;
 // 4s, 8s, 16s, 30s) and surface a terminal failure state.
 const MAX_RECONNECT_ATTEMPTS = 6;
 
-// Cap how long the exhausted-budget banner waits on the `/health` probe (#1681).
+// Cap how long the exhausted-budget banner waits on the liveness probe (#1681).
 // TowerClient.request uses a 10s request timeout, and a blackholed network — the
 // still-suspended stack this fix targets, or a remote Tower behind a dropped VPN
 // — hangs the probe for that full window while a stale "retrying (6/6)" notice
@@ -104,7 +104,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   private giveUpKind: 'transient' | 'permanent' | null = null;
   // Bumped on every give-up-state transition (enter or clear). The async
   // exhausted-budget banner (renderExhaustedGiveUp) captures this before it
-  // awaits the /health probe and renders only if it is unchanged — so a probe
+  // awaits the liveness probe and renders only if it is unchanged — so a probe
   // that outlives its give-up (a wake reconnects, or the reconnect then hits a
   // permanent 4xx) can't paint a stale banner over the current state.
   private giveUpToken = 0;
@@ -119,7 +119,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
     private wsUrl: string,
     private authKey: string | null,
     private outputChannel: vscode.OutputChannel,
-    // Optional one-shot Tower `/health` probe (#1681). When present, the
+    // Optional one-shot Tower liveness probe (#1681, #1977). When present, the
     // exhausted-budget give-up words its banner honestly — "Tower unreachable"
     // vs "reconnect failed (Tower is up)" — instead of the ambiguous
     // attempt-count message. `null` means reachability is unknown (no client
@@ -329,7 +329,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
    * retry-storm the budget was added to stop. Returns whether the state was
    * newly entered (false if already gave up), so the caller only renders a
    * banner once. Banner rendering is a separate step so the exhausted path can
-   * word it after an async /health probe.
+   * word it after an async liveness probe.
    */
   private enterGiveUp(kind: 'transient' | 'permanent'): boolean {
     if (this.gaveUp) { return false; }
@@ -370,7 +370,7 @@ export class CodevPseudoterminal implements vscode.Pseudoterminal {
   /**
    * Word the exhausted-budget banner honestly (#1681). The common cause of
    * exhausting the budget is a slept laptop firing all six attempts against a
-   * suspended network stack, not a dead Tower — so probe `/health` once (when a
+   * suspended network stack, not a dead Tower — so probe Tower's liveness once (when a
    * probe was injected) and distinguish "Tower unreachable" from "reconnect
    * failed (Tower is up)", the latter pointing the user at the click-to-retry
    * affordance. The give-up STATE is already set synchronously by enterGiveUp,
