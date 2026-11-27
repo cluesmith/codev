@@ -186,3 +186,24 @@ SPIR, soft mode. Spawned by architect `porchless`.
     instead with `rateLimit(dryRun: true)` inserted into the script's own query texts:
     `OverviewBundle` 3, `OverviewIssuesPage` 2, `OverviewSearchPage` 1, the spec's measured
     figures. So 5 points per refresh here, against 7 for the four calls.
+
+## Phase 4: adopter docs (2026-11-27)
+
+- `codev/resources/commands/forge.md`: a new "Tower Overview (`overview-bundle`)" section (input,
+  the four-key contract and what `null` means, failure semantics, 60 s / 40 MiB limits, cadence,
+  the eligibility rule with the override bypass, the presets that disable it, the issues-disabled
+  divergence, doctor's reason texts), and an override sketch for GitLab. The hybrid-preset
+  sentence and the GitLab/Gitea worked examples now list `overview-bundle` among the disabled
+  concepts.
+- Adjacent fix: forge.md's `codev doctor` sample was stale (an old "Concept 'x' overridden" format
+  doctor no longer prints). It is replaced with real output, captured from the built doctor in a
+  scratch gitlab repo with a `pr-merge` override, including the `overview` line.
+- The GitLab override sketch was run against a fake `glab`: all sections present → exit 0; the
+  closed search failing → `recentlyClosed: null`, exit 0, reason on stderr; `glab` missing →
+  exit 127. The doc says plainly that the sketch is still four `glab` processes and refreshes the
+  searches more often, so it shows the contract, not a saving.
+- `codev/resources/arch.md`: "18 concepts" → the 21 in `KNOWN_CONCEPTS`, plus one paragraph on
+  how the overview fetches and on `overview-budget.ts` owning the TTLs and the projection.
+- Both forge `SKILL.md` files: a concept row, an eligibility subsection, a preset note and a code
+  pointer. Still byte-identical (`cmp`). `codev-skeleton/` carries no forge docs, so there is
+  nothing to mirror.

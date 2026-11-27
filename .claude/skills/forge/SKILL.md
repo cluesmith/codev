@@ -24,6 +24,11 @@ Forge concept commands decouple codev from direct `gh` CLI calls. Each GitHub op
 | `auth-status` | — | Check forge authentication status |
 | `commit-checks` | `CODEV_COMMIT_SHA` | Check results on one commit (JSON array `[{name, state, url?, workflow?}]`; `state` is `pass`, `fail`, `pending`, `skipped` or `neutral`). Read-only, used by `codev check` |
 | `workflow-runs` | `CODEV_WORKFLOW`, `CODEV_BRANCH` | Runs of one workflow on one branch, newest first (JSON array `[{headSha, status, conclusion, url, createdAt}]`). Read-only, used by `codev check deploy` |
+| `overview-bundle` | `CODEV_SINCE_DATE` (always set: start of the 24 h windows, `YYYY-MM-DDTHH:MM:SSZ`) | Tower's four overview sections from one call (JSON object with four required keys `{prs, issues, recentlyClosed, recentlyMerged}`, each holding what `pr-list`, `issue-list`, `recently-closed`, `recently-merged` emit, or `null` when that section alone failed; non-zero exit fails the whole bundle) |
+
+### When the overview uses `overview-bundle`
+
+Decided from configuration, never as a runtime fallback. The bundle is used when it resolves to a command (not disabled) **and** either the project overrides `overview-bundle` itself, or none of `pr-list`, `issue-list`, `recently-closed`, `recently-merged` is overridden or disabled. Otherwise the overview makes those four calls, so a project's own `issue-list` override stays in force. An `overview-bundle` override bypasses every constituent override or disable, and `codev doctor` says so on its `overview` line, along with the mode and the projected forge calls per hour (bundled 20 idle / 60 under churn; four calls 52 / 132). A failed bundle is never retried as four calls. On a GitHub repo with issues disabled the bundle shows an empty backlog and `forgeStatus: ok`, where the four calls show "could not fetch issues".
 
 ## Configuration
 
@@ -49,6 +54,8 @@ Built-in presets: `github` (default), `gitlab` (via `glab`), `gitea` (via `tea`)
 
 `commit-checks` and `workflow-runs` are served by `github` (and by `linear` and `jira`, which use the github default for PR concepts). `gitlab` and `gitea` disable both, so `codev check` there reports `not run: commit-checks unavailable on gitlab` instead of calling `gh`; set an override to enable them.
 
+`overview-bundle` is served by `github` only. `gitlab`, `gitea`, `linear` and `jira` disable it, so their overview makes the four calls; for the hybrids this is a correctness rule, because their issues come from the tracker and a GitHub bundle would show GitHub's. Any forge may supply an `overview-bundle` override, which is then used.
+
 **Note:** Non-GitHub presets are best-effort. Output schemas may differ from GitHub's JSON contracts. Non-conforming JSON returns `null` — consumers handle this gracefully. Override individual concepts if a preset doesn't match your CLI version.
 
 **`CODEV_REPO` is overloaded.** For `repo-archive` it is an input: the `owner/repo` to download. For the Gitea preset's read concepts (`pr-view`, `pr-list`, `pr-exists`, `issue-view`, `recently-merged`) it is an override — `tea api` needs an explicit `owner/repo` in the endpoint path, which those scripts otherwise derive from the `origin` remote. Set it per invocation, not in your environment: exported globally it retargets every Gitea read at that repo.
@@ -72,4 +79,5 @@ Run `codev doctor` to see forge concept status, provider, and validation results
 
 - **Dispatcher**: `packages/codev/src/lib/forge.ts`
 - **Contracts**: `packages/codev/src/lib/forge-contracts.ts`
+- **Overview plan and spend projection**: `resolveOverviewPlan()` in `forge.ts`; `packages/codev/src/lib/overview-budget.ts`
 - **Spec**: `codev/specs/589-non-github-repository-support.md`

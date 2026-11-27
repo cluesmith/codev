@@ -18,7 +18,7 @@ Add to `.codev/config.json`:
 
 Available providers: `github` (default), `gitlab` (uses `glab` CLI), `gitea` (uses `tea` CLI), `linear` (uses the Linear API), `jira` (Jira Cloud, uses Atlassian's `acli` CLI).
 
-`linear` and `jira` are **hybrid** providers: they serve the issue concepts, and every PR concept deliberately falls through to the `gh` default, because the repository itself still lives on GitHub. Only `team-activity` and `on-it-timestamps` are disabled. A hybrid workspace therefore needs two logins, the tracker's and `gh`'s; `codev doctor` reports both.
+`linear` and `jira` are **hybrid** providers: they serve the issue concepts, and every PR concept deliberately falls through to the `gh` default, because the repository itself still lives on GitHub. Only `team-activity`, `on-it-timestamps` and `overview-bundle` are disabled (see [Tower Overview](#tower-overview-overview-bundle)). A hybrid workspace therefore needs two logins, the tracker's and `gh`'s; `codev doctor` reports both.
 
 > **Note:** Non-GitHub presets are best-effort. Their CLI tools may produce output schemas that differ from GitHub's JSON contracts. Codev handles this gracefully — concepts that return non-conforming JSON are treated as unavailable (null). If a preset command doesn't work correctly for your setup, override the individual concept with a command that produces the expected output.
 
@@ -130,6 +130,124 @@ call. Supply an override to enable them, e.g. `"commit-checks": "./scripts/my-ci
 | `team-activity` | `CODEV_GRAPHQL_QUERY` | JSON | Batched team activity query |
 | `user-identity` | — | plain text | Current user's handle |
 
+### Tower Overview (`overview-bundle`)
+
+| Concept | Env Vars | Output | Description |
+|---------|----------|--------|-------------|
+| `overview-bundle` | `CODEV_SINCE_DATE` | JSON object `{prs, issues, recentlyClosed, recentlyMerged}` | All four overview sections from one call |
+
+Tower's overview (the dashboard's Work view, and VS Code's) shows four forge-backed sections. On
+GitHub it fetches them by default with one `overview-bundle` call per workspace per refresh, in
+place of four calls to `pr-list`, `issue-list`, `recently-closed` and `recently-merged`. The
+github script sends one `gh api graphql` request. It sends a follow-up request only when a
+section overflows its first page: more than 100 open issues, or more than 100 results in a 24 h
+window.
+
+**Input.** `CODEV_SINCE_DATE`, always set by Tower: the start of the two 24 h windows, as
+`YYYY-MM-DDTHH:MM:SSZ` (UTC, seconds precision). The github script exits 2 without sending a
+request when it is missing or malformed.
+
+**Output.** On exit 0, one JSON object with exactly these four required keys:
+
+| Key | Holds what this concept emits | github cap |
+|-----|-------------------------------|------------|
+| `prs` | `pr-list` | 30 |
+| `issues` | `issue-list` | 200, newest first |
+| `recentlyClosed` | `recently-closed` | 1,000 |
+| `recentlyMerged` | `recently-merged` | 1,000 |
+
+Each key holds an array under that concept's contract, or `null`, which means that section alone
+could not be fetched. Extra top-level keys are ignored. Tower still filters both searches to the
+last 24 hours.
+
+- **A `null` section is a successful fetch.** It is cached with the rest and tried again on the
+  next refresh. A `null` list shows `overview-bundle returned no PRs` (or `issues`). A `null`
+  search leaves the recently-closed list empty, or drops the links from merged PRs to their
+  issues. Any `null` section makes the overview report `forgeStatus: unavailable`. The github
+  script returns `null` only for a 24 h search that failed on its own.
+- **A non-zero exit fails the whole bundle.** The reason goes on stderr, where the rate limiter
+  reads it. Malformed output is a whole-bundle failure too: not JSON, not an object, a key
+  missing, or a section that is neither an array nor `null`. All four sections are then blank
+  until the failure window passes or, after a rate limit, until the suspension lifts. A failed
+  bundle is never retried as four calls.
+- **Limits.** The call runs with a 60 s time limit and a 40 MiB output limit, twice and four
+  times a single concept's 30 s and 10 MiB.
+- **Cadence.** The bundle is one cache entry per workspace. Like the open lists, it refreshes
+  every 180 s and on invalidation, at most once a minute. The two 24 h lists therefore refresh
+  every 180 s, not every 600 s.
+
+**When the bundle is used.** Configuration decides, never a runtime fallback. The overview uses
+the bundle when both hold:
+
+1. `overview-bundle` resolves to a command, that is, it is not disabled;
+2. the project overrides `overview-bundle` itself, **or** none of `pr-list`, `issue-list`,
+   `recently-closed` and `recently-merged` is overridden or disabled.
+
+Otherwise the overview makes the four calls, each cached on its own as before. A project that
+overrides `issue-list` therefore keeps its own `issue-list`. An `overview-bundle` override is the
+exception: it supplies all four sections and **bypasses** every constituent override or disable,
+and `codev doctor` says so. It also counts as an overridden issue concept, so Tower no longer
+reports the provider's issue-id shape (`issueIdKind`).
+
+**Providers.** gitlab, gitea, linear and jira disable `overview-bundle`, so their overview keeps
+making the four calls. For linear and jira this is required for correctness: their issues come
+from the tracker, and the github bundle would show GitHub's issues instead.
+
+**Repositories with issues disabled.** On a GitHub repository with issues disabled, `gh issue
+list` fails, so the four calls show "could not fetch issues" and `forgeStatus: unavailable`.
+GraphQL answers with no issues instead. The bundle therefore shows an empty backlog and an empty
+recently-closed list, with PRs intact, and `forgeStatus: ok`.
+
+**`codev doctor`** lists `overview-bundle` with the other concepts and adds an `overview` line:
+how this workspace's overview fetches, why, and the projected forge calls per hour per watched
+workspace, idle and under constant invalidation. The reasons it gives are:
+
+- `bundled`: 20 calls an hour idle, 60 under churn;
+- `bundled (overview-bundle override; bypasses the issue-list override)`;
+- `four calls: issue-list overridden` (or `disabled`): 52 and 132 when all four constituents run;
+- `four calls: overview-bundle disabled`;
+- `four calls: disabled by the gitlab preset`.
+
+**Overriding it on another forge.** An override pays off when your forge can answer all four
+sections in fewer requests than four calls, typically with one GraphQL query. The sketch below
+shows the contract using the commands the gitlab preset's four concepts already run. It is one
+invocation but still four `glab` processes, and its searches refresh every 180 s instead of
+600 s, so replace those commands with a single request where your forge allows one.
+
+```json
+{
+  "forge": {
+    "provider": "gitlab",
+    "overview-bundle": "./scripts/forge/overview-bundle.sh"
+  }
+}
+```
+
+```sh
+#!/bin/sh
+# forge-executable: glab
+# Exit non-zero only when the whole overview failed. A 24 h search that fails on its own
+# becomes null. Output is staged to files: POSIX sh has no pipefail, so `glab … | jq` would
+# turn a failed call into an empty success.
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+
+glab mr list --output json > "$tmp/prs" || exit $?
+glab issue list --per-page 200 --output json > "$tmp/issues" || exit $?
+glab issue list --state closed --per-page 1000 --output json > "$tmp/closed" || echo null > "$tmp/closed"
+glab mr list --state merged --per-page 1000 --output json > "$tmp/merged" || echo null > "$tmp/merged"
+
+jq -n --slurpfile prs "$tmp/prs" --slurpfile issues "$tmp/issues" \
+  --slurpfile closed "$tmp/closed" --slurpfile merged "$tmp/merged" '{
+    prs: ($prs[0] | map(. + {reviewRequests: [.reviewers[]?.username], isDraft: (.draft // false)})),
+    issues: $issues[0],
+    recentlyClosed: $closed[0],
+    recentlyMerged: $merged[0]
+  }'
+```
+
+`codev doctor` then reports `bundled — 20 forge calls/h idle, 60 under constant invalidation`.
+
 ### System
 
 | Concept | Env Vars | Output | Description |
@@ -148,7 +266,7 @@ call. Supply an override to enable them, e.g. `"commit-checks": "./scripts/my-ci
 }
 ```
 
-This maps all concepts to `glab` equivalents. Concepts without a GitLab equivalent (`team-activity`, `on-it-timestamps`) are automatically disabled, as are `commit-checks` and `workflow-runs`, which could not be verified against GitLab.
+This maps all concepts to `glab` equivalents. Concepts without a GitLab equivalent (`team-activity`, `on-it-timestamps`) are automatically disabled, as are `commit-checks` and `workflow-runs`, which could not be verified against GitLab, and `overview-bundle`, so Tower's overview makes its four calls.
 
 To customize specific concepts:
 
@@ -171,7 +289,7 @@ To customize specific concepts:
 }
 ```
 
-Some Gitea concepts (`pr-search`, `pr-diff`) are disabled by default since `tea` doesn't support them directly; `commit-checks` and `workflow-runs` are disabled because they could not be verified against a Gitea server. You can provide custom scripts:
+Some Gitea concepts (`pr-search`, `pr-diff`) are disabled by default since `tea` doesn't support them directly; `commit-checks` and `workflow-runs` are disabled because they could not be verified against a Gitea server, and `overview-bundle` is disabled as on every non-GitHub preset. You can provide custom scripts:
 
 ```json
 {
@@ -253,12 +371,22 @@ Run `codev doctor` to check forge configuration:
 ```
 $ codev doctor
 
-Forge Concepts (custom command overrides)
-  ✓ Provider: gitlab
-  ✓ Concept 'pr-merge' overridden: glab mr merge "$CODEV_PR_NUMBER" --squash --yes
-  ○ Concept 'team-activity' is explicitly disabled
-  ✓ All forge concepts valid
+Forge Concepts (provider: gitlab)
+
+  ✓ issue-view           preset  glab
+  …
+  ○ team-activity        disabled
+  ○ on-it-timestamps     disabled
+  ✓ pr-create            preset  glab
+  ✓ pr-merge             override  glab
+  …
+  ○ overview-bundle      disabled
+  - overview             four calls: disabled by the gitlab preset — 52 forge calls/h idle, 132 under constant invalidation
 ```
+
+Each concept shows where its command comes from (`default`, `preset` or `override`) and the
+executable it needs; a missing executable is a warning. The `overview` line is described under
+[Tower Overview](#tower-overview-overview-bundle).
 
 ## Writing Custom Concept Commands
 
