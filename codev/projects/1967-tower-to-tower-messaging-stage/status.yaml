@@ -23,10 +23,10 @@ plan_phases:
     status: complete
   - id: phase_7
     title: Peer listing and the cloud client
-    status: in_progress
+    status: complete
   - id: phase_8
     title: The outbox, the sender's checks and the per-peer queue
-    status: pending
+    status: in_progress
   - id: phase_9
     title: afx send across Towers, end to end
     status: pending
@@ -42,7 +42,7 @@ plan_phases:
   - id: phase_13
     title: Docs in both trees, the walkthrough end to end, and Windows
     status: pending
-current_plan_phase: phase_7
+current_plan_phase: phase_8
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -192,7 +192,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_7-iter3-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-27T06:35:48.203Z'
+updated_at: '2026-11-27T06:35:50.992Z'
 force_advanced:
   phase: phase_7
   iteration: 3
@@ -221,3 +221,5 @@ context_refreshes:
   - boundary: plan-phase:phase_7
     at: '2026-11-27T04:51:15.288Z'
     acknowledged_at: '2026-11-27T04:53:59.901Z'
+  - boundary: plan-phase:phase_8
+    at: '2026-11-27T06:35:50.992Z'
