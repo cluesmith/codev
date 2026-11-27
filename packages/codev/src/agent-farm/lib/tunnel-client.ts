@@ -431,30 +431,43 @@ function unreadableAuthResponse(text: string): string {
 
 /**
  * Whether a field of `auth_ok` that Tower keeps or logs (`towerId`, `slug`, `name`) repeats
- * the session secret the same response carries: as sent, or decoded and written as
- * base64url, base64 or hex. Such an `auth_ok` is not used at all (Spec 1967: the secret lives
- * only in the tunnel session and never reaches a file or a log), whether or not the secret
- * itself would have been kept.
+ * the session secret the same response carries. Such an `auth_ok` is not used at all (Spec
+ * 1967: the secret lives only in the tunnel session and never reaches a file or a log).
+ *
+ * The spellings compared come from what was sent, whatever becomes of the offer (taken,
+ * refused as insecure, unsupported or malformed): the sent text itself, and the bytes it
+ * decodes to, tolerantly, as base64 of either alphabet and, when it is hex, as hex, each
+ * written as base64url, base64 with and without padding, and hex in either case.
  */
-function authOkRepeatsSecret(authOk: Readonly<Record<string, unknown>>, offer: RelayOffer): boolean {
+function authOkRepeatsSecret(authOk: Readonly<Record<string, unknown>>): boolean {
   const relay = authOk.relay;
   const sent = typeof relay === 'object' && relay !== null ? (relay as Record<string, unknown>).sessionSecret : undefined;
-  const forms: string[] = [];
-  // A sent value too short to be a secret could match ordinary text; the decoded forms cover a real one.
-  if (typeof sent === 'string' && sent.length >= 16) forms.push(sent);
-  let hex: string | null = null;
-  if (offer.relay === 'offered') {
-    const bytes = Buffer.from(offer.secret);
-    forms.push(bytes.toString('base64url'), bytes.toString('base64'), bytes.toString('base64').replace(/=+$/, ''));
-    hex = bytes.toString('hex');
+  // Shorter than any secret could be written: it could match ordinary text.
+  if (typeof sent !== 'string' || sent.length < 16) return false;
+  const forms = [sent];
+  const hexForms: string[] = [];
+  const decoded = [Buffer.from(sent, 'base64')];
+  if (/^[0-9a-fA-F]+$/.test(sent) && sent.length % 2 === 0) decoded.push(Buffer.from(sent, 'hex'));
+  for (const bytes of decoded) {
+    if (bytes.length < 16) continue;
+    const base64 = bytes.toString('base64');
+    forms.push(bytes.toString('base64url'), base64, base64.replace(/=+$/, ''));
+    hexForms.push(bytes.toString('hex'));
   }
   return ['towerId', 'slug', 'name'].some((field) => {
     const value = authOk[field];
     if (typeof value !== 'string') return false;
     if (forms.some((form) => value.includes(form))) return true;
-    return hex !== null && value.toLowerCase().includes(hex);
+    const lower = value.toLowerCase();
+    return hexForms.some((hex) => lower.includes(hex));
   });
 }
+
+/** State-change reasons that are not a failed attempt, so they leave the last failure in place. */
+const REASON_DISCONNECT_CALLED = 'disconnect() called';
+const REASON_BREAKER_RESET = 'circuit breaker reset';
+const REASON_BREAKER_HALF_OPEN = 'auth circuit breaker half-open, retrying';
+const NOT_A_FAILURE: ReadonlySet<string> = new Set([REASON_DISCONNECT_CALLED, REASON_BREAKER_RESET, REASON_BREAKER_HALF_OPEN]);
 
 /** An auth response type, shown only when it has the shape of one. */
 function shownAuthType(type: unknown): string {
@@ -719,9 +732,12 @@ export class TunnelClient {
   }
 
   private setState(newState: TunnelState, reason?: string): void {
-    // The last failure stays until the tunnel is up again (or disconnected on purpose).
+    // The last failure stays until the tunnel is up again (or disconnected on purpose); a
+    // state change that is not a failed attempt leaves it in place.
     if (newState === 'connected') this.lastFailure = null;
-    else if ((newState === 'disconnected' || newState === 'auth_failed') && reason) this.lastFailure = reason;
+    else if ((newState === 'disconnected' || newState === 'auth_failed') && reason && !NOT_A_FAILURE.has(reason)) {
+      this.lastFailure = reason;
+    }
     if (this.state === newState) return;
     const prev = this.state;
     this.state = newState;
@@ -763,7 +779,7 @@ export class TunnelClient {
     this.clearReconnectTimer();
     this.stopHeartbeat();
     this.cleanup();
-    this.setState('disconnected', 'disconnect() called');
+    this.setState('disconnected', REASON_DISCONNECT_CALLED);
     this.lastFailure = null;
   }
 
@@ -790,7 +806,7 @@ export class TunnelClient {
       // attempt would leave a standalone caller worse off than before, so
       // reconnect here rather than relying on the caller to build a new client.
       this.clearReconnectTimer();
-      this.setState('disconnected', 'circuit breaker reset');
+      this.setState('disconnected', REASON_BREAKER_RESET);
       this.scheduleReconnect();
     }
   }
@@ -1055,13 +1071,12 @@ export class TunnelClient {
       // An `auth_ok` carries the session secret, so nothing below echoes the response.
       try {
         if (msg.type === 'auth_ok') {
-          const offer = readRelayOffer(msg);
-          if (authOkRepeatsSecret(msg, offer)) {
+          if (authOkRepeatsSecret(msg)) {
             this.handleConnectionError(new Error('auth_ok not used: a field repeats its session secret (not shown)'));
             return;
           }
           this.options.towerId = msg.towerId as string;
-          const session = this.openSession(msg, offer);
+          const session = this.openSession(msg, readRelayOffer(msg));
           this.session = session;
           this.emitAuthOk({
             towerId: msg.towerId as string,
@@ -1175,7 +1190,7 @@ export class TunnelClient {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.destroyed || this.state !== 'auth_failed') return;
-      this.setState('disconnected', 'auth circuit breaker half-open, retrying');
+      this.setState('disconnected', REASON_BREAKER_HALF_OPEN);
       this.doConnect();
     }, AUTH_RETRY_INTERVAL_MS);
   }

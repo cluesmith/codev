@@ -558,3 +558,12 @@ above is struck through. A test breaks both invariants by hand and finds neither
   Tests for both. The architect tells the owner, since a database fault now takes remote
   access down too; if overruled, it is a one-line change in `readSwitchForAuth`.
 
+- **Phase 5 review (iter 3, the last porch allows): codex REQUEST_CHANGES, claude APPROVE**,
+  both HIGH. Response: `1967-phase_5-iter3-rebuttals.md`; nothing disputed.
+  - Taken (codex, and claude's point 1): the repeated-secret check now builds every spelling
+    from `relay.sessionSecret` as sent, whatever becomes of the offer, so unsupported and
+    malformed offers are covered too. The table has unrepeated controls for both.
+  - Taken (claude): `lastFailure` is no longer overwritten by `circuit breaker reset`, the
+    half-open retry or `disconnect()`.
+  - Both new tests fail with their fix removed. Layer B rerun after a rebuild: 6/6, no test
+    Tower left running.

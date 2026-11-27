@@ -308,6 +308,27 @@ describe('the handshake', () => {
     expect(second.statementIds.size).toBe(0);
   });
 
+  it('keeps the last failure through a circuit-breaker reset, which is not a failed attempt', async () => {
+    const cloud = new WebSocketServer({ host: '127.0.0.1', port: 0, path: '/tunnel' });
+    await once(cloud, 'listening');
+    cloud.on('connection', (socket) => socket.once('message', () => socket.send(JSON.stringify({ type: 'auth_error', reason: 'invalid_api_key' }))));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const tunnel = newClient({ serverUrl: `http://127.0.0.1:${(cloud.address() as { port: number }).port}` });
+    try {
+      tunnel.connect();
+      expect(await waitFor(async () => tunnel.getState() === 'auth_failed', 10_000, 5)).toBe(true);
+      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
+      tunnel.resetCircuitBreaker();
+      expect(tunnel.getState()).toBe('disconnected');
+      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
+    } finally {
+      tunnel.disconnect();
+      for (const socket of cloud.clients) socket.terminate();
+      await new Promise<void>((resolve) => cloud.close(() => resolve()));
+    }
+    expect(tunnel.getLastFailure()).toBeNull();
+  });
+
   it('a client given no peer options states nothing, takes no relay, and verifies nothing', async () => {
     const tunnel = newClient({ peer: null });
     await connected(tunnel);
@@ -872,16 +893,26 @@ describe('the secret never reaches a log', () => {
     const authOk = (fields: Record<string, unknown>) =>
       JSON.stringify({ type: 'auth_ok', towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: { protocols: [1], sessionSecret: b64url }, ...fields });
     try {
-      for (const [fields, used] of [
-        // The control: the same response without the repeat is used.
-        [{}, true],
-        [{ name: `devvm ${b64url}` }, false],
-        [{ name: hex.toUpperCase() }, false],
-        [{ slug: hex }, false],
-        [{ slug: b64.replace(/=+$/, '') }, false],
-        [{ towerId: `${r.towerId}${b64}` }, false],
-        // A secret the client would not take (padded, so malformed) is still never kept.
-        [{ relay: { protocols: [1], sessionSecret: `${b64url}=` }, name: `${b64url}=` }, false],
+      const unsupported = { protocols: [2], sessionSecret: b64url };
+      for (const [fields, usedWithRelay] of [
+        // The controls: the same responses without the repeat are used.
+        [{}, 'available'],
+        [{ relay: unsupported }, 'unsupported'],
+        [{ relay: { protocols: [1], sessionSecret: b64 } }, 'malformed'],
+        [{ name: `devvm ${b64url}` }, null],
+        [{ name: hex.toUpperCase() }, null],
+        [{ slug: hex }, null],
+        [{ slug: b64.replace(/=+$/, '') }, null],
+        [{ towerId: `${r.towerId}${b64}` }, null],
+        // A secret the client would not take is still never kept, in any spelling:
+        // an offer for a version it does not speak,
+        [{ relay: unsupported, name: hex }, null],
+        [{ relay: unsupported, slug: b64 }, null],
+        // and offers it cannot read (padded base64, standard alphabet; hex).
+        [{ relay: { protocols: [1], sessionSecret: `${b64url}=` }, name: `${b64url}=` }, null],
+        [{ relay: { protocols: [1], sessionSecret: b64 }, name: hex }, null],
+        [{ relay: { protocols: [1], sessionSecret: b64 }, slug: b64url }, null],
+        [{ relay: { protocols: [1], sessionSecret: hex }, towerId: `${r.towerId}${b64url}` }, null],
       ] as const) {
         reply = authOk(fields);
         const reasons: string[] = [];
@@ -899,8 +930,8 @@ describe('the secret never reaches a log', () => {
           expect(settled, JSON.stringify(fields)).toBe(true);
           tunnel.disconnect();
         });
-        if (used) {
-          expect(identities).toEqual([{ towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: 'available' }]);
+        if (usedWithRelay !== null) {
+          expect(identities, JSON.stringify(fields)).toEqual([{ towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: usedWithRelay }]);
         } else {
           expect(identities, JSON.stringify(fields)).toEqual([]);
           expect(reasons).toContain('connection error: auth_ok not used: a field repeats its session secret (not shown)');
