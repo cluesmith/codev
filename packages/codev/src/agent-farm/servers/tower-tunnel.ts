@@ -17,8 +17,13 @@ import {
   AUTH_RETRY_FAILED_MARKER,
   type TunnelState,
   type TunnelIdentity,
+  type TunnelPeerOptions,
+  type TunnelPeerSession,
   type TowerMetadata,
 } from '../lib/tunnel-client.js';
+import { getGlobalDb } from '../db/index.js';
+import { encodeReceiverAnswer, type EncodedAnswer } from '../peer/contract.js';
+import { readSwitch } from '../peer/switch.js';
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -133,6 +138,47 @@ function stopMetadataRefresh(): void {
 }
 
 /**
+ * What a verified peer request is handed to until the receiver exists (Spec 1967, plan
+ * phase 6): every one is refused as `remote-off`, so no remote message is accepted.
+ */
+async function refuseVerifiedPeerRequest(): Promise<EncodedAnswer> {
+  return encodeReceiverAnswer({ outcome: 'refused', reason: 'remote-off' });
+}
+
+/**
+ * The tunnel's peer entry point, as this Tower supplies it (Spec 1967). The switch is read
+ * from the database for every `auth`, so a reconnect states it as it stands. The audit hook
+ * is a no-op until plan phase 6 wires it to the record and the clock-skew surface.
+ */
+const PEER_OPTIONS: TunnelPeerOptions = {
+  remoteMessaging: () => readSwitch(getGlobalDb()).state,
+  onVerifiedRequest: refuseVerifiedPeerRequest,
+  onEntryEvent: () => {},
+};
+
+/** What each `auth_ok` let this Tower take of the cloud's relay, for the log. Never the secret. */
+function logRelay(config: CloudConfig, identity: TunnelIdentity): void {
+  switch (identity.relay) {
+    case 'available':
+      _deps?.log('INFO', 'Codev Cloud relay available: remote messaging can reach this Tower');
+      return;
+    case 'absent':
+    case 'null':
+      _deps?.log('INFO', 'This Codev Cloud has no relay: remote messaging is unavailable');
+      return;
+    case 'insecure':
+      _deps?.log('WARN', `Codev Cloud offered a relay over a tunnel without TLS (${logSafe(config.server_url)}); its session secret was refused and remote messaging is unavailable. Use an https: server URL.`);
+      return;
+    case 'malformed':
+    case 'unsupported':
+      _deps?.log('WARN', `Codev Cloud's relay was ${identity.relay === 'malformed' ? 'not in the expected form' : 'for no protocol version this Tower speaks'}; remote messaging is unavailable`);
+      return;
+    case 'not-stated':
+      return;
+  }
+}
+
+/**
  * Create or reconnect the tunnel client using the given config.
  * Sets up state change listeners and sends initial metadata.
  */
@@ -149,6 +195,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     apiKey: config.api_key,
     towerId: config.tower_id,
     localPort: _deps.port,
+    peer: PEER_OPTIONS,
   });
 
   client.onStateChange((state: TunnelState, prev: TunnelState, reason?: string) => {
@@ -170,7 +217,10 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     }
   });
 
-  client.onAuthOk((identity) => adoptCloudIdentity(config, identity));
+  client.onAuthOk((identity) => {
+    adoptCloudIdentity(config, identity);
+    logRelay(config, identity);
+  });
 
   // Gather and set initial metadata before connecting
   const metadata = await gatherMetadata();
@@ -334,6 +384,15 @@ export async function initTunnel(
 
   // Start watching cloud-config.json for changes
   startConfigWatcher();
+}
+
+/**
+ * The connected tunnel session's identity and relay (Spec 1967): this Tower's own name
+ * while connected, and whether the cloud's relay can reach it. `null` while not connected.
+ * Never the session secret, which stays inside the tunnel client.
+ */
+export function getTunnelPeerSession(): TunnelPeerSession | null {
+  return tunnelClient?.getPeerSession() ?? null;
 }
 
 /**

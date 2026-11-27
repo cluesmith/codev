@@ -2,9 +2,10 @@
  * The two-Tower harness, smoke test (Spec 1967, plan phase 2, layer B).
  *
  * Two built Towers, each with its own port, database, agent-farm directory, socket
- * directory and `HOME`, both connected over loopback to the stand-in relay with today's
- * handshake. A Tower before plan phase 5 sends no `peer` field and ignores `auth_ok`'s
- * `relay`; that it still connects is part of what this checks. One Tower is restarted with
+ * directory and `HOME`, both connected over loopback to the stand-in relay. Since plan
+ * phase 5 a Tower states the protocol and its switch in `auth` and takes `auth_ok`'s
+ * `relay`; the handshake itself is `peer-entry-point.e2e.test.ts`'s subject, and this
+ * file only checks that both Towers connect with it. One Tower is restarted with
  * its state intact (its database, cloud identity and directories), and both are stopped
  * leaving nothing behind.
  *
@@ -89,7 +90,7 @@ describe('Spec 1967 phase 2: two Towers against the stand-in relay', () => {
     await towers?.stop();
   }, 120_000);
 
-  it("starts two Towers on their own ports, databases and directories, both connected to the stand-in with today's handshake", async () => {
+  it('starts two Towers on their own ports, databases and directories, both connected to the stand-in', async () => {
     const { relay, a, b } = towers;
     expect(a.port).not.toBe(b.port);
     expect(new Set([a.dbPath, a.agentFarmDir, a.socketDir, a.home, b.dbPath, b.agentFarmDir, b.socketDir, b.home]).size).toBe(8);
@@ -101,8 +102,10 @@ describe('Spec 1967 phase 2: two Towers against the stand-in relay', () => {
         towerId: tower.towerId,
         towerName: tower.slug,
       });
-      // Today's Tower states nothing of the protocol, and connects anyway.
-      expect(relay.handshakes.filter((h) => h.towerId === tower.towerId).map((h) => h.peer)).toEqual(['absent']);
+      // A fresh install states protocol 1 with its switch off (plan phase 5).
+      expect(relay.handshakes.filter((h) => h.towerId === tower.towerId).map((h) => h.peer)).toEqual([
+        { protocols: [1], remoteMessaging: 'off' },
+      ]);
       expect(relay.session(tower.towerId)?.secret).toHaveLength(32);
       // It took its name from auth_ok's slug, which is the one it was registered with.
       const config = JSON.parse(readFileSync(join(tower.agentFarmDir, 'cloud-config.json'), 'utf8'));
@@ -112,10 +115,10 @@ describe('Spec 1967 phase 2: two Towers against the stand-in relay', () => {
       expect(pidsNamingSocketDir(tower.socketDir).length).toBeGreaterThan(0);
     }
 
-    // Each sees the other in the listing: online, stating no version yet.
+    // Each sees the other in the listing: online, stating version 1 and its switch off.
     const listing = await fetch(`${relay.url}/api/peer/towers`, { headers: { authorization: `Bearer ${a.record.apiKey}` } });
     expect(((await listing.json()) as { towers: unknown[] }).towers).toEqual([
-      { towerId: b.towerId, slug: b.slug, online: true, protocols: [], remoteMessaging: 'unknown' },
+      { towerId: b.towerId, slug: b.slug, online: true, protocols: [1], remoteMessaging: 'off' },
     ]);
   });
 

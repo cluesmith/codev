@@ -817,40 +817,24 @@ describe('tunnel-client integration', () => {
       expect(body.workspaces[0].name).toBe('updated');
     });
 
-    it('pushes metadata via outbound HTTP POST on connect', async () => {
+    it('makes no HTTP call to the cloud for metadata, on connect or on an update (issue #1986)', async () => {
       await setupTunnel();
 
       integrationClient.sendMetadata({
         workspaces: [{ path: '/pushed', name: 'pushed-project' }],
         terminals: [],
       });
-
       integrationClient.connect();
       await waitFor(() => integrationClient.getState() === 'connected');
-
-      await waitFor(() => mockServer.lastPushedMetadata !== null);
-
-      expect(mockServer.lastPushedMetadata!.workspaces).toHaveLength(1);
-      expect(mockServer.lastPushedMetadata!.workspaces[0].name).toBe('pushed-project');
-    });
-
-    it('pushes metadata via HTTP POST when sendMetadata called while connected', async () => {
-      await setupTunnel();
-
-      integrationClient.connect();
-      await waitFor(() => integrationClient.getState() === 'connected');
-
-      mockServer.lastPushedMetadata = null;
-
       integrationClient.sendMetadata({
         workspaces: [{ path: '/live-update', name: 'live' }],
         terminals: [{ id: 't1', workspacePath: '/live-update' }],
       });
 
-      await waitFor(() => mockServer.lastPushedMetadata !== null);
-
-      expect(mockServer.lastPushedMetadata!.workspaces[0].name).toBe('live');
-      expect(mockServer.lastPushedMetadata!.terminals).toHaveLength(1);
+      // The metadata is still served through the tunnel, where the cloud can poll it.
+      const res = await mockServer.sendRequest({ path: '/__tower/metadata' });
+      expect(JSON.parse(res.body).workspaces[0].name).toBe('live');
+      expect(mockServer.httpRequests).toEqual([]);
     });
   });
 
@@ -1492,9 +1476,10 @@ describe('#1871 cloud identity and deregistration', () => {
       ws.emit('message', Buffer.from(JSON.stringify(msg)));
     }
 
+    // A client given no peer options states no protocol and takes no relay (Spec 1967).
     expect(seen).toEqual([
-      { towerId: 'tw-1', slug: 'mac-2', name: 'mac' },
-      { towerId: 'tw-1', slug: undefined, name: undefined },
+      { towerId: 'tw-1', slug: 'mac-2', name: 'mac', relay: 'not-stated' },
+      { towerId: 'tw-1', slug: undefined, name: undefined, relay: 'not-stated' },
     ]);
     c.disconnect();
   });

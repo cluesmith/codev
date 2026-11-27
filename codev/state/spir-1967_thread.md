@@ -436,3 +436,61 @@ above is struck through. A test breaks both invariants by hand and finds neither
   switch-off and revoke is EAGER (matches the approved scenarios' "waits for release"); an
   off-then-on must not release mail by itself. **Phase 5** dispatches the Windows workflow
   with the three-shell probe.
+
+## 2026-11-27 — phase 5: tunnel handshake, session secret and the verified entry point
+
+- Delivered: `auth` carries `peer: {protocols: [1], remoteMessaging}`, with the switch read
+  afresh on every connect and reconnect. `auth_ok`'s `slug` and `relay` are read. The secret is
+  kept only in per-session state, only over `wss:` or to a loopback cloud host. Everything at
+  or under `/__tower/peer` that comes down the tunnel is answered by the entry point and never
+  proxied. Steps 1 to 8 run through contract.ts, with a session-scoped 10-minute statement-id
+  memory. A verified request goes to the injected handler (Tower's phase 5 stub refuses
+  `remote-off`). The audit hook gets one event per request (Tower supplies a no-op). The dead
+  `POST /api/tower/metadata` push is gone (#1986, closed by the PR), along with the mock's
+  handler and `lastMetadata`. tower-tunnel.ts exposes `getTunnelPeerSession()` (slug and relay
+  state, never the secret) and logs the relay state per connect.
+- Design choices, for review:
+  1. The handshake and TLS helpers (`buildPeerHandshake`, `readRelayOffer`,
+     `isSecureCloudTransport`) live in contract.ts, the wire format's one home. tunnel-client
+     only decides what to keep (`takeRelay`). Loopback means `localhost`, `[::1]` or a
+     dotted-quad `127.x`. `[::ffff:127.0.0.1]` is not loopback here (conservative).
+  2. A `TunnelClient` built without `peer` options states nothing (`peer` absent), keeps no
+     secret (relay `not-stated`), and answers every entry request not-verified. Tower always
+     passes them.
+  3. Interception is generous on purpose. `isUnderPeerEntryPath` checks the raw and
+     once-decoded path, reads backslashes as `/`, collapses repeated slashes, resolves dot
+     segments, ignores case, and matches as a prefix (so `/__tower/peers` is caught too;
+     nothing of ours lives there). Anything matched is answered by the entry point: step 1
+     unless the request is exactly `POST /__tower/peer`.
+  4. An auth response that does not parse is not echoed if it names `sessionSecret`, and a
+     failure while handling `auth_ok` never echoes the message (the old catch-all echoed the
+     raw frame).
+  5. A switch that cannot be read fails the connect attempt rather than stating a guess.
+  6. A handler that throws resets the stream (INTERNAL_ERROR) without an answer. The request
+     still had its one `handed-on` event. The stub never throws.
+  7. Step 1 also covers a stream that ends before its body does: one event, no answer. Past
+     the 102 400-byte cap, the answer is written and the rest of the request is refused with
+     RST_STREAM NO_ERROR.
+  8. On cleanup the session's secret reference is dropped and the id memory cleared.
+- **Harness incident (layer B), architect ruling 2026-11-27T02:26Z, option 2.** The two
+  two-Tower files run in one vitest call both took ports 14100 and 14101. Each file then
+  talked to the other's Towers (another fork, another key), so every call got 401. Fixed in
+  its own commit to the phase 2 helper (cd54ced1c):
+  - ports now come from the OS;
+  - a HarnessTower fails, naming the port, unless its own process prints its listening line,
+    and refuses calls once that process has exited;
+  - tests cover four distinct ports for two pairs started at once, and the loud failure.
+  Reruns (load 1.7 to 2.1):
+  - peer-entry-point.e2e alone: 6/6, 1.5 s;
+  - two-towers-harness.e2e alone: 6/6, 17.1 s;
+  - both in one call: 12/12, 17.0 s.
+  Every teardown report was empty, with no worktree Tower left running. **For later phases:**
+  two-Tower files can now run together; `HarnessTower.output` holds each Tower's output.
+- Layer A, `peer-entry-point.test.ts`: 70 tests. Most of its wall time is the in-process
+  client's reconnect back-off (1 to 3 s per reconnect), so the file sets a 20 s test timeout.
+  The TLS case connects for real over `ws:` to a non-loopback name, which a `dns.lookup` spy
+  sends to the loopback stand-in.
+- Wall time, layer A files of this phase (`peer-entry-point.test.ts` 70 tests and
+  `tunnel-client.test.ts` 83 tests, together): 15.7 s, 16.3 s and 17.3 s over three runs.
+  Porch's full tests command: 468 files passed, 14 skipped; 10 508 tests passed, 116 skipped;
+  235.4 s; exit 0. The build check passed.

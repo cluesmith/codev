@@ -11,6 +11,7 @@
  *   node scripts/windows-probe.mjs [--out report.json] [--deps] [--tower] [--tower-published latest]
  *   node scripts/windows-probe.mjs --survival start   # then close this terminal window
  *   node scripts/windows-probe.mjs --survival check   # from a new terminal
+ *   node scripts/windows-probe.mjs [--out report.json] --argv afx://devvm/codev:architect:local afx://devvm/codev:builder-spir-7
  *
  * Sections:
  *   host        OS, build, arch, Node version
@@ -26,6 +27,10 @@
  *   towerPublished (--tower-published <version|latest>, repeatable) the same, from a global
  *               install of the published @cluesmith/codev into a throwaway prefix (the path users
  *               take). 3.3.3 is the release that was current on 2026-09-09, the field test date.
+ *   argv        (--argv <args…>, alone, last on the line) the arguments this process received, as the
+ *               shell that started it passed them (Spec 1967). The workflow types the two `afx://`
+ *               addresses above unquoted under Git Bash, PowerShell and cmd; the section fails
+ *               unless both arrive byte for byte.
  *
  * Every section catches its own errors, so one failure never hides the rest; the script still
  * exits non-zero when any section failed, so a dispatch never shows a misleading green.
@@ -617,10 +622,51 @@ function survival(mode) {
   console.log(JSON.stringify({ ...state, survivedLauncherClose: survived }, null, 2));
 }
 
+/** What the workflow types after `--argv`, unquoted, in each shell it probes. */
+const ARGV_EXPECTED = ['afx://devvm/codev:architect:local', 'afx://devvm/codev:builder-spir-7'];
+
+/**
+ * The arguments after `--argv`, as this process received them. The shell that ran this
+ * command line is the only thing between the typed text and these strings, so a shell that
+ * rewrites the form (a path conversion, a drive or provider prefix, a split on `:`) shows
+ * here. Each argument's code points are reported too, so a mangled one can be read exactly.
+ */
+function probeArgv() {
+  const received = args.slice(args.indexOf('--argv') + 1);
+  const unchanged = received.length === ARGV_EXPECTED.length && received.every((arg, i) => arg === ARGV_EXPECTED[i]);
+  let failure = null;
+  if (!unchanged) failure = 'the afx:// addresses did not arrive as typed';
+  return {
+    shell: process.env.PROBE_SHELL ?? null,
+    expected: ARGV_EXPECTED,
+    received,
+    codePoints: received.map((arg) => Array.from(arg, (c) => c.codePointAt(0).toString(16).padStart(4, '0')).join(' ')),
+    failure,
+  };
+}
+
+function writeReport(sections) {
+  const report = { generatedAt: new Date().toISOString(), sections };
+  const json = JSON.stringify(report, null, 2);
+  const out = option('--out');
+  if (out) writeFileSync(out, json);
+  console.log(json);
+  const failed = sections.filter((x) => !x.ok).map((x) => x.name);
+  if (failed.length > 0) {
+    console.error(`Probe sections failed: ${failed.join(', ')}`);
+    process.exitCode = 1;
+  }
+}
+
 async function main() {
   const survivalMode = option('--survival');
   if (survivalMode) {
     survival(survivalMode);
+    return;
+  }
+  // Alone: everything after `--argv` is the text under test, not options.
+  if (flag('--argv')) {
+    writeReport([await section('argv', probeArgv)]);
     return;
   }
   const sections = [
@@ -640,16 +686,7 @@ async function main() {
   for (const spec of publishedSpecs) {
     sections.push(await section(`towerPublished:${spec}`, () => probeTowerPublished(spec)));
   }
-  const report = { generatedAt: new Date().toISOString(), sections };
-  const json = JSON.stringify(report, null, 2);
-  const out = option('--out');
-  if (out) writeFileSync(out, json);
-  console.log(json);
-  const failed = sections.filter((x) => !x.ok).map((x) => x.name);
-  if (failed.length > 0) {
-    console.error(`Probe sections failed: ${failed.join(', ')}`);
-    process.exitCode = 1;
-  }
+  writeReport(sections);
 }
 
 main().catch((err) => {

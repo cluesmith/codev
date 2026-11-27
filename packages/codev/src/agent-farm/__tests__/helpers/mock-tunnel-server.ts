@@ -14,7 +14,6 @@ import http from 'node:http';
 import http2 from 'node:http2';
 import { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket, createWebSocketStream } from 'ws';
-import type { TowerMetadata } from '../../lib/tunnel-client.js';
 
 export interface MockTunnelServerOptions {
   /** API key to accept. If not set, accepts any key. */
@@ -70,8 +69,9 @@ export class MockTunnelServer {
       towerId: 'test-tower-id',
       ...options,
     };
-    // Create an HTTP server for WebSocket upgrade + metadata POST handler
+    // Create an HTTP server for the WebSocket upgrade and the registration redeem route
     this.httpServer = http.createServer((req, res) => {
+      this.httpRequests.push(`${req.method} ${req.url}`);
       if (req.method === 'POST' && req.url === '/api/towers/register/redeem' && this.options.redeemResponse) {
         const chunks: Buffer[] = [];
         req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -79,21 +79,6 @@ export class MockTunnelServer {
           this.redeemBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(this.options.redeemResponse));
-        });
-        return;
-      }
-      if (req.method === 'POST' && req.url === '/api/tower/metadata') {
-        const chunks: Buffer[] = [];
-        req.on('data', (chunk: Buffer) => chunks.push(chunk));
-        req.on('end', () => {
-          try {
-            this.lastPushedMetadata = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-          } catch {
-            res.writeHead(400);
-            res.end();
-          }
         });
         return;
       }
@@ -243,6 +228,8 @@ export class MockTunnelServer {
 
   /** Bodies received by the redeem endpoint, oldest first */
   redeemBodies: Array<Record<string, unknown>> = [];
+  /** Every plain HTTP request (not the tunnel's upgrade), as `METHOD url`, oldest first. */
+  httpRequests: string[] = [];
   /** API keys presented in auth messages, oldest first, successful or not */
   authKeys: string[] = [];
 
@@ -261,11 +248,6 @@ export class MockTunnelServer {
     const ws = this.wsConnections[this.wsConnections.length - 1];
     return ws ? ws.extensions : '';
   }
-
-  /** Last received metadata from the tower (fetched via H2 GET /__tower/metadata) */
-  lastMetadata: TowerMetadata | null = null;
-  /** Last received metadata via outbound HTTP POST /api/tower/metadata */
-  lastPushedMetadata: TowerMetadata | null = null;
 
   private handleConnection(ws: WebSocket): void {
     this.wsConnections.push(ws);

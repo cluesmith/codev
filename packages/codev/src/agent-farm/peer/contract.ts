@@ -3,6 +3,7 @@
  * revision 4). This is the ONE production module that speaks it:
  *
  * - the header names, and building and reading the relay headers;
+ * - the tunnel handshake's fields, and the TLS rule for the cloud's transport;
  * - the statement: base64url, the MAC in constant time, R's steps 1 to 7, and the field
  *   rules of section 5 as one table, with the excluded code points written out as data;
  * - the payload: Decision 7's line endings and removals, literal UTF-8 serialisation, the
@@ -21,6 +22,7 @@
  */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { isIPv4 } from 'node:net';
 import {
   PEER_FRESHNESS_MS,
   PEER_MAX_ANSWER_BYTES,
@@ -35,6 +37,7 @@ import {
   type PeerAnswerReason,
   type PeerCloudRefusalReason,
   type PeerDiscoveredAddress,
+  type PeerHandshake,
   type PeerHeldReason,
   type PeerMessagePayload,
   type PeerOutcome,
@@ -42,6 +45,7 @@ import {
   type PeerReceiverRefusalReason,
   type PeerRequestKind,
   type PeerStatement,
+  type PeerSwitchState,
   type PeerUnavailableReason,
   type PeerWireAddress,
   type PeerWireSenderAddress,
@@ -239,6 +243,66 @@ function macVerifies(secret: Uint8Array, statementBytes: Uint8Array, mac: Uint8A
   if (mac.length !== MAC_BYTES) return false;
   const expected = createHmac('sha256', secret).update(statementBytes).digest();
   return timingSafeEqual(expected, mac);
+}
+
+// ===========================================================================
+// Section 1: the tunnel handshake, and the TLS rule
+// ===========================================================================
+
+/** The `peer` field of this Tower's `auth`: the versions it speaks, and its switch as it stands. */
+export function buildPeerHandshake(remoteMessaging: PeerSwitchState): PeerHandshake {
+  return { protocols: [...PEER_PROTOCOLS_SPOKEN], remoteMessaging };
+}
+
+/**
+ * What an `auth_ok` says of a relay, read strictly. Whether the secret may be kept is the
+ * TLS rule's ({@link isSecureCloudTransport}), applied by the tunnel client, which knows
+ * the transport.
+ *
+ * - `absent`: no `relay` field, a cloud that predates the contract;
+ * - `null`: `relay: null`, a cloud that explicitly has none;
+ * - `malformed`: a `relay` that is not an object whose `protocols` is an array of positive
+ *   integers and whose `sessionSecret` is 32 bytes in strict base64url;
+ * - `unsupported`: a relay for no version this Tower speaks;
+ * - `offered`: a relay this Tower can use, with the session's secret.
+ */
+export type RelayOffer =
+  | { relay: 'absent' | 'null' | 'malformed' }
+  | { relay: 'unsupported'; protocols: number[] }
+  | { relay: 'offered'; protocols: number[]; secret: Uint8Array };
+
+/** The `relay` field of an `auth_ok` message (section 1). A Tower infers a relay from nothing else. */
+export function readRelayOffer(authOk: Readonly<Record<string, unknown>>): RelayOffer {
+  if (!Object.hasOwn(authOk, 'relay')) return { relay: 'absent' };
+  const relay = authOk.relay;
+  if (relay === null) return { relay: 'null' };
+  if (!isPlainObject(relay) || !Array.isArray(relay.protocols) || !relay.protocols.every((v) => isJsonInteger(v, 1))) {
+    return { relay: 'malformed' };
+  }
+  const secret = decodeSessionSecret(relay.sessionSecret);
+  if (secret === null) return { relay: 'malformed' };
+  const protocols = [...(relay.protocols as number[])];
+  if (!protocols.some((v) => PEER_PROTOCOLS_SPOKEN.includes(v))) return { relay: 'unsupported', protocols };
+  return { relay: 'offered', protocols, secret };
+}
+
+/**
+ * The contract's TLS rule: a Tower accepts a session secret only on a `wss:` tunnel, and
+ * makes the calls of sections 2 to 4 only over `https:`, unless the cloud's host is a
+ * loopback address (tests). A cloud reached any other way is treated as having no relay.
+ */
+export function isSecureCloudTransport(url: URL): boolean {
+  return url.protocol === 'wss:' || url.protocol === 'https:' || isLoopbackHostname(url.hostname);
+}
+
+/**
+ * `localhost`, an address in 127.0.0.0/8, or `::1`, as a parsed URL spells its host (the
+ * parser has already turned `127.1` or `0x7f.0.0.1` into dotted-quad form). Anything else,
+ * an IPv4-mapped IPv6 address included, is not loopback here: the rule fails closed.
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '[::1]') return true;
+  return isIPv4(hostname) && hostname.startsWith('127.');
 }
 
 // ===========================================================================
