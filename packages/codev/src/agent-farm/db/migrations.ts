@@ -24,9 +24,10 @@ import type Database from 'better-sqlite3';
 import { existsSync, readdirSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { PEER_SCHEMA } from './schema.js';
 
 /** Current migration version — bump when adding new migrations. */
-export const GLOBAL_CURRENT_VERSION = 20;
+export const GLOBAL_CURRENT_VERSION = 21;
 
 export interface GlobalMigrationOptions {
   /**
@@ -618,4 +619,41 @@ export function runGlobalMigrations(
     db.prepare('INSERT INTO _migrations (version) VALUES (20)').run();
     log('[info] Added address_name column to known_workspaces (Spec 1940 explicit workspace names)');
   }
+
+  // Migration v21: Tower-to-Tower messaging storage (Spec 1967).
+  // Additive only, so held mail is never copied or rebuilt. `mailbox` gains the nullable
+  // remote-provenance columns and `release_hold` (1 = held for release), none with a CHECK
+  // for v18's reason; the new tables come from PEER_SCHEMA, the same text GLOBAL_SCHEMA
+  // embeds, so a fresh install and an upgraded one cannot diverge. Each ADD COLUMN is gated
+  // on PRAGMA table_info, as v16 to v20 are; the whole step is one transaction, so a failure
+  // leaves neither columns nor tables nor the marker. The switch has no row afterwards, which
+  // reads as off, and no grant exists: an upgraded Tower accepts no remote message.
+  const v21 = db.prepare('SELECT version FROM _migrations WHERE version = 21').get();
+  if (!v21) {
+    db.transaction(() => {
+      const columns = (db.prepare(`PRAGMA table_info(mailbox)`).all() as Array<{ name: string }>)
+        .map((c) => c.name);
+      // An empty column list means there is no mailbox table to extend (a partial
+      // database, such as the per-migration test harness builds).
+      if (columns.length > 0) {
+        for (const [name, ddl] of V21_MAILBOX_COLUMNS) {
+          if (!columns.includes(name)) {
+            db.exec(`ALTER TABLE mailbox ADD COLUMN ${name} ${ddl}`);
+          }
+        }
+      }
+      db.exec(PEER_SCHEMA);
+      db.prepare('INSERT INTO _migrations (version) VALUES (21)').run();
+    })();
+    log('[info] Added Tower-to-Tower messaging storage (Spec 1967)');
+  }
 }
+
+/** The columns migration v21 adds to `mailbox`, in order. GLOBAL_SCHEMA declares the same. */
+const V21_MAILBOX_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
+  ['remote_tower_id', 'TEXT'],
+  ['remote_message_id', 'TEXT'],
+  ['remote_sender', 'TEXT'],
+  ['remote_owner_email', 'TEXT'],
+  ['release_hold', 'INTEGER NOT NULL DEFAULT 0'],
+];

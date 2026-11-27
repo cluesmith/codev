@@ -266,3 +266,61 @@
   taken), and `resetInFlight()` restarts the per-pair maximum. **For phases 8/9:** call
   `resetInFlight()` before the part of a test whose concurrency you assert.
 - Layer A: 58 tests, about 1.8 s, three runs green.
+
+## 2026-11-26 — phase 3: peer storage and the mailbox migration
+
+- Re-entered after a context refresh at the phase boundary; merged `origin/main` first
+  (`da3ca92ca`, nothing under `db/`), so v21 is the next free migration number.
+- **Migration v21**, additive, one transaction (a failure inside it leaves no column, no table,
+  no marker; a test injects one with a view where `peer_tower_names` belongs). `mailbox` gains
+  `remote_tower_id`, `remote_message_id`, `remote_sender` (JSON, validated through a new
+  `readWireSenderAddress` in `contract.ts`), `remote_owner_email`, `release_hold`. New tables come
+  from one text, `PEER_SCHEMA`, which `GLOBAL_SCHEMA` embeds and v21 executes.
+- **Choices the plan left open**, recorded for later phases:
+  - No CHECK on any enumerated value in the new tables either (v18's reason: stage 3 would
+    need a rebuild to add one); `peer/store.ts` enforces each set and throws on an unknown stored
+    value. Reasons in the record and the outbox are held to their shape (lower-case words and
+    hyphens), since phase 8's own refusal reasons are not listed yet.
+  - Grant scopes are `front-door`, `architect`, `architects` (every architect of a workspace),
+    `all`; modes `deliver`, `hold`. Key is (peer, workspace, scope, architect) with `''` for
+    "none" in the two key columns; the store maps it to `null`.
+  - `peer_settings` is one row; no row reads as off. It also carries the cached listing's own
+    fields (refreshed-at, the relay it stated, the cloud's limits), so **phase 7** has the "has
+    this cloud stated a relay" memory across a restart if it wants it.
+  - `peer_outbox.seq` is acceptance order; `to_address` is stored for `afx inbox` and the
+    record without parsing the payload.
+  - Remote rows need a non-null initial reason (`RemoteEnqueueInput.reason: MailboxReason`):
+    a `held` answer must carry one. **Phase 6** passes the one it would answer if its gate
+    attempt could not start (`busy`).
+  - The mirror is derived from the row's post-image (`UPDATE … RETURNING`), so the mapping lives
+    in one place (`acceptedStateOf` via `reportedReason`), and the mirror statement is guarded
+    (`state IS NOT ? OR reason IS NOT ?`), so a detail-only move or a no-op rewrites nothing.
+  - A mailbox row can outlive its accepted-once row (held past the 30-day expiry); the mirror
+    then skips it, and a retry is refused `expired` at step 12.
+  - `markDelivered` clears `release_hold` rather than refusing: a row moved to held for release
+    while its write was already under way reached the terminal, and must not deliver twice.
+  - `holdForRelease` acts on remote rows only.
+  - `enqueueRemote` (accepted-once insert first, then the mailbox row, one transaction; a PK
+    conflict writes nothing and returns the existing row) and `duplicateAnswer` (state to
+    answer) are in place now so the writers can be tested on real remote rows; **phase 6**
+    adds the failure-injection and concurrency tests around them.
+  - The inbox list and show routes now report `reportedReason`, so a held-for-release row reads
+    `held-for-release` there; phase 11 adds the groups.
+  - Not touched: `db/canonicalize-workspace-paths.ts` (Windows boot re-keying). The new tables'
+    writers store canonical keys from the start; no peer row predates this.
+- **For phase 11:** a released row's escalation and starvation clocks start at `created_at`, so a
+  row held for release for days escalates (visibility only) as soon as it is released and still
+  stuck. Worth deciding when release lands.
+- **Copy check (on demand)**, my `~/.agent-farm/global.db` copied with the backup API into the
+  scratch directory, migrated, compared, deleted: v20 to v21; 26 163 mailbox rows before and
+  after; 8 held rows before and after, all `no-live-pty` without `detail` or `not_before` (the only
+  held kind present), unchanged and all 8 returned by the drainer's query; second run logged
+  nothing; switch off with no row, no grant. Every reason, detail and `not_before` combination
+  is covered by the automated test instead. The 10 tables the migrations own in that copy match
+  the v20 fixture exactly (columns, types, defaults, indexes, triggers); the copy also has two
+  tables no migration creates (`port_allocations` from pre-Spec-0098 installs, `_consolidation`
+  from the #1118 boot step), which v21 does not touch.
+- Fixture: `__tests__/fixtures/global-db/v20-upgraded-schema.sql`, generated once by running the
+  v20 runner on a v1 database and dumping `sqlite_master`.
+- Existing tests updated for the new version: `send-architect-identity.test.ts` (version pin
+  20 to 21) and `spec-1313-migration.test.ts` (the v15 column list now includes v21's columns).

@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { formatVerdict, isUnverifiableVerdict } from '../hold-verdict.js';
+import { formatVerdict, HELD_FOR_RELEASE, isUnverifiableVerdict } from '../hold-verdict.js';
 
 describe('formatVerdict (Issue #1482)', () => {
   it('joins reason and detail as a sub-code when a detail is present', () => {
@@ -77,5 +77,17 @@ describe('isUnverifiableVerdict (Issue #1482)', () => {
     // The reason is `busy` for every gate hold, so the detail is the whole signal.
     expect(isUnverifiableVerdict('busy', 'no-region-end')).toBe(true);
     expect(isUnverifiableVerdict('busy', 'user-text')).toBe(false);
+  });
+});
+
+describe('held for release (Spec 1967)', () => {
+  it('renders by its own name, never as a bare `held`', () => {
+    expect(HELD_FOR_RELEASE).toBe('held-for-release');
+    expect(formatVerdict(HELD_FOR_RELEASE, null)).toBe('held-for-release');
+    expect(formatVerdict(HELD_FOR_RELEASE, null, 'pending')).toBe('held-for-release');
+  });
+
+  it('is not an unverifiable verdict: a human holds it, the classifier did not fail', () => {
+    expect(isUnverifiableVerdict(HELD_FOR_RELEASE, null)).toBe(false);
   });
 });

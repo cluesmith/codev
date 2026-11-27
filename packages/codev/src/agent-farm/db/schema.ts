@@ -103,6 +103,134 @@ CREATE TRIGGER IF NOT EXISTS builders_updated_at
 `;
 
 /**
+ * Tower-to-Tower messaging tables (Spec 1967, migration v21). New tables, so a fresh
+ * install (GLOBAL_SCHEMA) and migration v21 create them from this one text and cannot
+ * diverge. Only `peer/store.ts` writes them. Timestamps are epoch-ms integers, as in
+ * `mailbox`. Enumerated values carry no CHECK, for v18's reason: SQLite cannot alter a
+ * CHECK, so a value added later (stage 3) would need a table rebuild. `peer/store.ts`
+ * enforces every value set (reasons by their shape) and refuses a row it does not recognise.
+ */
+export const PEER_SCHEMA = `
+-- The receiving Tower's switch, one row. No row means off: a fresh install and an
+-- upgraded one both read the switch as off. The listing_* columns are the cached
+-- peer listing's own fields (when it was fetched, the relay it stated, the cloud's limits).
+CREATE TABLE IF NOT EXISTS peer_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  remote_messaging INTEGER NOT NULL DEFAULT 0,   -- 1 = on
+  remote_messaging_changed_at INTEGER,
+  listing_refreshed_at INTEGER,                  -- NULL = never listed
+  listing_relay_protocols TEXT,                  -- JSON integer array; NULL when the listing stated no relay
+  listing_limits TEXT                            -- JSON PeerCloudLimits
+);
+
+-- Who may message whom here (default deny: no row, no mail). One row per peer and
+-- scope: 'front-door', 'architect' (one, by name), 'architects' (every architect of a
+-- workspace) or 'all' (everything on this Tower). workspace_path is '' only for 'all';
+-- architect is '' unless the scope is 'architect'. mode: 'deliver' or 'hold' (for release).
+CREATE TABLE IF NOT EXISTS peer_grants (
+  peer_tower_id TEXT NOT NULL,
+  workspace_path TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  architect TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (peer_tower_id, workspace_path, scope, architect)
+);
+
+-- The cached peer listing: the account's other Towers as the last listing gave them
+-- (when it was fetched is peer_settings.listing_refreshed_at).
+CREATE TABLE IF NOT EXISTS peer_towers (
+  tower_id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL,
+  online INTEGER NOT NULL,                       -- a hint, never a promise
+  protocols TEXT NOT NULL,                       -- JSON integer array
+  remote_messaging TEXT NOT NULL                 -- 'on' | 'off' | 'unknown'
+);
+
+-- Every slug each Tower has been listed under, current and former, so a former name
+-- can be refused naming the current one.
+CREATE TABLE IF NOT EXISTS peer_tower_names (
+  tower_id TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  first_seen_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  PRIMARY KEY (tower_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_peer_tower_names_slug ON peer_tower_names(slug);
+
+-- Mail waiting at the sending Tower for a peer. Never in mailbox, so the local drainer
+-- and the escalation cannot see it. seq is acceptance order (the per-peer queue's order);
+-- payload is the exact bytes every retry sends. state: 'held' (waiting), or resolved as
+-- 'accepted', 'refused', 'dismissed' or 'expired'.
+CREATE TABLE IF NOT EXISTS peer_outbox (
+  seq INTEGER PRIMARY KEY,
+  message_id TEXT NOT NULL UNIQUE,
+  peer_tower_id TEXT NOT NULL,
+  to_address TEXT NOT NULL,                      -- the recipient as the sender wrote it (afx://…)
+  payload BLOB NOT NULL,
+  sent_at INTEGER NOT NULL,                      -- the payload's sentAt; the lifetime runs from it
+  from_workspace_path TEXT NOT NULL,
+  from_agent TEXT,                               -- NULL when the sender has no agent identity
+  state TEXT NOT NULL,
+  last_outcome TEXT,                             -- the last answer's outcome, NULL before any attempt
+  last_reason TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  resolved_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_peer_outbox_peer_state ON peer_outbox(peer_tower_id, state, seq);
+
+-- Accepted once, at the receiving Tower: one row per message accepted from a peer,
+-- carrying the message's current state itself (delivered, held with its reason, or
+-- dismissed), written in the same transaction as every mailbox change that alters it.
+-- A duplicate is answered from this row alone; it outlives the mailbox row and is
+-- pruned only after expires_at (sentAt + 30 days).
+CREATE TABLE IF NOT EXISTS peer_accepted (
+  peer_tower_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL,
+  mailbox_id TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL,                           -- 'delivered' | 'held' | 'dismissed'
+  reason TEXT,                                   -- with 'held': busy | no-profile | no-live-pty | held-for-release
+  expires_at INTEGER NOT NULL,
+  accepted_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (peer_tower_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_peer_accepted_expires ON peer_accepted(expires_at);
+
+-- The record of every cross-Tower attempt, at both ends, without a body, statement, MAC
+-- or secret. One row per attempt, except floods (contract section 8, Departures C5):
+-- aggregate rows carry aggregate_key (one per direction, sender, outcome, reason and
+-- minute) with a count and the first and last time.
+CREATE TABLE IF NOT EXISTS peer_records (
+  id INTEGER PRIMARY KEY,
+  direction TEXT NOT NULL,                       -- 'outbound' | 'inbound'
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 1,
+  aggregate_key TEXT,                            -- NULL for an ordinary row
+  kind TEXT,                                     -- 'message' | 'query'; NULL when not known
+  peer_tower_id TEXT,                            -- the other Tower; NULL while the sender is unverified
+  peer_slug TEXT,
+  tunnel_session TEXT,                           -- inbound, sender unverified: the tunnel session
+  message_id TEXT,
+  from_address TEXT,
+  to_address TEXT,
+  payload_size INTEGER,
+  outcome TEXT NOT NULL,
+  reason TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_peer_records_aggregate
+  ON peer_records(aggregate_key) WHERE aggregate_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_peer_records_last_at ON peer_records(last_at);
+CREATE INDEX IF NOT EXISTS idx_peer_records_peer ON peer_records(peer_tower_id, first_at);
+`;
+
+/**
  * Global registry schema (global.db)
  * Stores terminal sessions and migrations across all workspaces
  */
@@ -281,10 +409,18 @@ CREATE TABLE IF NOT EXISTS mailbox (
   not_before INTEGER,                     -- epoch ms; delayed-send due time (Spec 1313 round 3, --delay). null = deliver ASAP; a row is deliverable only when not_before IS NULL OR not_before <= now
   created_at INTEGER NOT NULL,            -- epoch ms (enqueue order per agent)
   updated_at INTEGER NOT NULL,
-  resolved_at INTEGER                     -- delivered/superseded/dismissed timestamp
+  resolved_at INTEGER,                    -- delivered/superseded/dismissed timestamp
+  -- Spec 1967 (migration v21): mail that arrived from another Tower. All NULL for local mail.
+  -- No CHECK on any of them, for v18's reason; the values are enforced in TypeScript.
+  remote_tower_id TEXT,                   -- the sending Tower's id, from the verified statement
+  remote_message_id TEXT,                 -- the message id (the statement's requestId)
+  remote_sender TEXT,                     -- JSON MailboxRemoteSender: Tower id and slug, and the stated sending address
+  remote_owner_email TEXT,                -- the sending Tower's owner, from the statement
+  release_hold INTEGER NOT NULL DEFAULT 0 -- 1 = held for release: never drained, escalated or counted as waiting; only with status 'held'
 );
 
 CREATE INDEX IF NOT EXISTS idx_mailbox_workspace_status ON mailbox(workspace_path, status);
 CREATE INDEX IF NOT EXISTS idx_mailbox_agent_drain ON mailbox(workspace_path, to_agent, status);
 CREATE INDEX IF NOT EXISTS idx_mailbox_supersede ON mailbox(supersede_key);
-`;
+
+${PEER_SCHEMA}`;

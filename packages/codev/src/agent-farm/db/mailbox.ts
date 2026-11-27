@@ -19,11 +19,39 @@
  *   enforced here: every transition targets only `held` rows, so a terminal row
  *   can never revert (no `delivered → held`) and `supersede` only replaces a row
  *   that is still `held`.
+ *
+ * Remote mail (Spec 1967). A message that arrived from another Tower is a mailbox row like
+ * any other, carrying its provenance in the `remote_*` columns. Two rules make it safe:
+ * - **Accepted once, mirrored.** Every remote row has an accepted-once row in `peer_accepted`
+ *   (written by `peer/store.ts`), inserted with it by {@link enqueueRemote} in one transaction.
+ *   Every writer here that changes what a duplicate of that message would be told (its
+ *   status, its reported reason, `release_hold`) mirrors the change into that row in the same
+ *   transaction, through {@link mirrorChanged}, for exactly the rows the write changed.
+ * - **Held for release.** A row with `release_hold = 1` is held mail that no automatic path
+ *   delivers: the drainer's query, the escalation, the starved-agent notice and the held
+ *   counts all exclude it; `listHeld` (behind `afx inbox`) and `getById` do not. It is only
+ *   ever set on a held row, and release, delivery and every dismissal clear it.
+ * Every query that reads held mail is in this file; a structural test holds it to that.
  */
 
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import type { DbMailbox, MailboxGateDetail, MailboxReason } from './types.js';
+import type { PeerHeldReason } from '@cluesmith/codev-types';
+import { readWireSenderAddress } from '../peer/contract.js';
+import {
+  getAccepted,
+  insertAccepted,
+  mirrorAcceptedState,
+  type PeerAcceptedRow,
+  type PeerAcceptedState,
+} from '../peer/store.js';
+import type {
+  DbMailbox,
+  MailboxGateDetail,
+  MailboxReason,
+  MailboxRemoteSender,
+  MailboxReportedReason,
+} from './types.js';
 
 /**
  * Fields a caller supplies to persist a new held row. The repository fills in the
@@ -59,11 +87,13 @@ const INSERT_SQL = `
   INSERT INTO mailbox (
     id, workspace_path, to_agent, terminal_id, from_agent, from_workspace,
     body, formatted_message, no_enter, status, reason, detail, supersede_key,
-    escalated, not_before, created_at, updated_at, resolved_at
+    escalated, not_before, created_at, updated_at, resolved_at,
+    remote_tower_id, remote_message_id, remote_sender, remote_owner_email, release_hold
   ) VALUES (
     @id, @workspace_path, @to_agent, @terminal_id, @from_agent, @from_workspace,
     @body, @formatted_message, @no_enter, @status, @reason, @detail, @supersede_key,
-    @escalated, @not_before, @created_at, @updated_at, @resolved_at
+    @escalated, @not_before, @created_at, @updated_at, @resolved_at,
+    @remote_tower_id, @remote_message_id, @remote_sender, @remote_owner_email, @release_hold
   )
 `;
 
@@ -90,17 +120,256 @@ function buildRow(input: EnqueueInput, now: number): DbMailbox {
     created_at: now,
     updated_at: now,
     resolved_at: null,
+    // Local mail: no remote provenance, never held for release. Only enqueueRemote sets these.
+    remote_tower_id: null,
+    remote_message_id: null,
+    remote_sender: null,
+    remote_owner_email: null,
+    release_hold: 0,
   };
 }
 
 /**
  * Persist a new `held` row and return it. This is the persist-first step: the row
- * exists (and survives a crash) before any delivery is attempted.
+ * exists (and survives a crash) before any delivery is attempted. Local mail only: a
+ * message from another Tower goes through {@link enqueueRemote}, which also writes its
+ * accepted-once row.
  */
 export function enqueue(db: Database.Database, input: EnqueueInput, now: number = Date.now()): DbMailbox {
   const row = buildRow(input, now);
   db.prepare(INSERT_SQL).run(row);
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// Remote mail (Spec 1967)
+// ---------------------------------------------------------------------------
+
+/**
+ * The reason this module reports for a row: `held-for-release` while a held row carries
+ * `release_hold = 1`, else the row's own `reason`. The one mapping; every surface that shows
+ * a held row's reason, and the accepted-once mirror, go through it.
+ */
+export function reportedReason(
+  row: Pick<DbMailbox, 'status' | 'reason' | 'release_hold'>
+): MailboxReportedReason | null {
+  if (row.status === 'held' && row.release_hold === 1) return 'held-for-release';
+  return row.reason;
+}
+
+/**
+ * What a duplicate of a remote row's message is told, derived from the row alone.
+ * `superseded` cannot happen to a remote row (it never has a `supersede_key`, and only rows
+ * with one are superseded), so meeting it is an invariant broken and throws.
+ */
+function acceptedStateOf(
+  row: Pick<DbMailbox, 'id' | 'status' | 'reason' | 'release_hold'>
+): { state: PeerAcceptedState; reason: PeerHeldReason | null } {
+  switch (row.status) {
+    case 'held':
+      return { state: 'held', reason: reportedReason(row) };
+    case 'delivered':
+      return { state: 'delivered', reason: null };
+    case 'dismissed':
+      return { state: 'dismissed', reason: null };
+    case 'superseded':
+      throw new Error(`mailbox: remote row ${row.id} is superseded, which no remote row can be`);
+  }
+}
+
+/** The post-image a mirrored write returns for each row it changed. */
+const RETURNING_CHANGED = 'RETURNING id, status, reason, release_hold, remote_tower_id';
+type ChangedRow = Pick<DbMailbox, 'id' | 'status' | 'reason' | 'release_hold' | 'remote_tower_id'>;
+
+/**
+ * Mirror the rows a write actually changed into their accepted-once rows. Called inside the
+ * write's own transaction, so a failure after the mailbox write rolls both back. Local rows
+ * have no accepted-once row and are skipped; remote rows are grouped by the state they now
+ * report, one statement per group.
+ */
+function mirrorChanged(db: Database.Database, changed: readonly ChangedRow[], now: number): void {
+  const groups = new Map<string, { state: PeerAcceptedState; reason: PeerHeldReason | null; ids: string[] }>();
+  for (const row of changed) {
+    if (row.remote_tower_id === null) continue;
+    const { state, reason } = acceptedStateOf(row);
+    const key = JSON.stringify([state, reason]);
+    const group = groups.get(key) ?? { state, reason, ids: [] };
+    group.ids.push(row.id);
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    mirrorAcceptedState(db, group.ids, group.state, group.reason, now);
+  }
+}
+
+/** A remote sender as stored: validated, and rebuilt from its own fields only. */
+function checkRemoteSender(value: unknown): MailboxRemoteSender {
+  const v = value as Partial<Record<keyof MailboxRemoteSender, unknown>> | null;
+  if (typeof v !== 'object' || v === null) throw new Error('mailbox: a remote sender must be an object');
+  if (typeof v.towerId !== 'string' || v.towerId.length === 0) {
+    throw new Error('mailbox: a remote sender needs the sending Tower id');
+  }
+  if (typeof v.towerSlug !== 'string' || v.towerSlug.length === 0) {
+    throw new Error('mailbox: a remote sender needs the sending Tower slug');
+  }
+  let address: MailboxRemoteSender['address'] = null;
+  if (v.address !== null) {
+    address = readWireSenderAddress(v.address);
+    if (address === null) throw new Error('mailbox: a remote sender address does not fit the payload rules');
+  }
+  return { towerId: v.towerId, towerSlug: v.towerSlug, address };
+}
+
+/**
+ * The sender of a remote row, read back and validated; `null` for a local row. Throws if a
+ * stored value does not fit, rather than passing on a value nothing checked.
+ */
+export function readRemoteSender(row: Pick<DbMailbox, 'remote_sender'>): MailboxRemoteSender | null {
+  if (row.remote_sender === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.remote_sender);
+  } catch {
+    throw new Error('mailbox: a stored remote sender is not valid JSON');
+  }
+  return checkRemoteSender(parsed);
+}
+
+/** A message from another Tower, verified and ready to persist (phase 6's receiver builds it). */
+export interface RemoteEnqueueInput {
+  workspacePath: string;
+  toAgent: string;
+  /** Raw message body (never logged), normalised for a remote sender. */
+  body: string;
+  /** Exact bytes written to the PTY on delivery. */
+  formattedMessage: string;
+  terminalId?: string | null;
+  /**
+   * The row's own why-held reason at insert, which a duplicate is told until the first gate
+   * attempt replaces it. Required: a `held` answer always carries a reason, and no later
+   * writer clears it while the row is held.
+   */
+  reason: MailboxReason;
+  /** Admitted by a hold-for-release grant: stored with `release_hold = 1`, never drained. */
+  releaseHold: boolean;
+  remote: {
+    sender: MailboxRemoteSender;
+    /** The message id: the statement's requestId. */
+    messageId: string;
+    ownerEmail: string | null;
+    /** The statement's `payloadSha256`, which a duplicate is compared against. */
+    payloadSha256: string;
+    /** The payload's `sentAt`: the accepted-once row expires 30 days after it. */
+    sentAt: number;
+  };
+}
+
+export type RemoteEnqueueResult =
+  | { accepted: true; row: DbMailbox }
+  /** This peer's message id was accepted before; nothing was written. */
+  | { accepted: false; existing: PeerAcceptedRow };
+
+/**
+ * Persist a message from another Tower: its accepted-once row FIRST, then its mailbox row, in
+ * one transaction. The accepted-once row's primary key (peer Tower id, message id) decides a
+ * race between two arrivals of one message: if it already exists, nothing is written and the
+ * existing row is returned for the caller to answer from. So no remote mailbox row exists
+ * without its accepted-once row, and no accepted-once row without its mailbox row.
+ *
+ * A remote row never has a `supersede_key` (so it can never be superseded), a `not_before`,
+ * or `no_enter`: the options that would set them are refused for a remote recipient.
+ */
+export function enqueueRemote(
+  db: Database.Database,
+  input: RemoteEnqueueInput,
+  now: number = Date.now()
+): RemoteEnqueueResult {
+  const sender = checkRemoteSender(input.remote.sender);
+  if (typeof input.remote.messageId !== 'string' || input.remote.messageId.length === 0) {
+    throw new Error('mailbox: a remote row needs its message id');
+  }
+  if (input.remote.ownerEmail !== null && (typeof input.remote.ownerEmail !== 'string' || input.remote.ownerEmail.length === 0)) {
+    throw new Error('mailbox: a remote owner email must be a non-empty string or null');
+  }
+  const row: DbMailbox = {
+    ...buildRow(
+      {
+        workspacePath: input.workspacePath,
+        toAgent: input.toAgent,
+        body: input.body,
+        formattedMessage: input.formattedMessage,
+        terminalId: input.terminalId ?? null,
+        fromAgent: null,
+        fromWorkspace: null,
+        reason: input.reason,
+      },
+      now
+    ),
+    remote_tower_id: sender.towerId,
+    remote_message_id: input.remote.messageId,
+    remote_sender: JSON.stringify(sender),
+    remote_owner_email: input.remote.ownerEmail,
+    release_hold: input.releaseHold ? 1 : 0,
+  };
+  return db.transaction((): RemoteEnqueueResult => {
+    const { state, reason } = acceptedStateOf(row);
+    const inserted = insertAccepted(
+      db,
+      {
+        peerTowerId: sender.towerId,
+        messageId: input.remote.messageId,
+        payloadSha256: input.remote.payloadSha256,
+        mailboxId: row.id,
+        sentAt: input.remote.sentAt,
+        state,
+        reason,
+      },
+      now
+    );
+    if (!inserted) {
+      const existing = getAccepted(db, sender.towerId, input.remote.messageId);
+      if (!existing) throw new Error('mailbox: an accepted-once insert conflicted with no row to answer from');
+      return { accepted: false, existing };
+    }
+    db.prepare(INSERT_SQL).run(row);
+    return { accepted: true, row };
+  })();
+}
+
+/**
+ * Hold a remote row for release (Spec 1967): the drainer, the escalation, the starved-agent
+ * notice and the held counts stop seeing it until a human releases it. Phase 6's drain-time
+ * check calls this when the switch or the grant no longer allows the delivery. Held remote
+ * rows only; returns true if the row moved, mirroring `held-for-release` into its
+ * accepted-once row in the same transaction.
+ */
+export function holdForRelease(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        `UPDATE mailbox SET release_hold = 1, updated_at = ? WHERE id = ? AND status = 'held' AND release_hold = 0 AND remote_tower_id IS NOT NULL ${RETURNING_CHANGED}`
+      )
+      .all(now, id) as ChangedRow[];
+    mirrorChanged(db, changed, now);
+    return changed.length > 0;
+  })();
+}
+
+/**
+ * Release a row held for release (`afx inbox release`, phase 11): it becomes ordinary held
+ * mail, which the gate then drains, and reports its own reason again. Returns true if the
+ * row moved, mirroring the reason into its accepted-once row in the same transaction.
+ */
+export function release(db: Database.Database, id: string, now: number = Date.now()): boolean {
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        `UPDATE mailbox SET release_hold = 0, updated_at = ? WHERE id = ? AND status = 'held' AND release_hold = 1 ${RETURNING_CHANGED}`
+      )
+      .all(now, id) as ChangedRow[];
+    mirrorChanged(db, changed, now);
+    return changed.length > 0;
+  })();
 }
 
 /** Fetch a single row by id, or null if it does not exist. */
@@ -112,7 +381,9 @@ export function getById(db: Database.Database, id: string): DbMailbox | null {
 /**
  * List all currently-held rows, oldest first. Scoped to `workspacePath` when
  * provided, else workspace-wide (for `afx inbox`). `id` breaks created_at ties
- * for deterministic ordering.
+ * for deterministic ordering. Includes rows held for release (Spec 1967), which `afx inbox`
+ * shows in their own group; the backstop takes its agent set from here, where such a row
+ * costs one empty drain pass.
  */
 export function listHeld(db: Database.Database, workspacePath?: string): DbMailbox[] {
   if (workspacePath !== undefined) {
@@ -136,6 +407,9 @@ export function listHeld(db: Database.Database, workspacePath?: string): DbMailb
  * neither delivers early nor blocks a later normal message (the drainer picks `held[0]`, the
  * oldest ELIGIBLE row). It becomes eligible on the first pass at/after its due time. `now`
  * defaults to `Date.now()` and is injectable for deterministic tests.
+ *
+ * Spec 1967: a row held for release (`release_hold = 1`) is never returned, so the drainer
+ * never tries to deliver it; it becomes eligible only once a human releases it.
  */
 export function findHeldForAgent(
   db: Database.Database,
@@ -145,7 +419,7 @@ export function findHeldForAgent(
 ): DbMailbox[] {
   return db
     .prepare(
-      "SELECT * FROM mailbox WHERE workspace_path = ? AND to_agent = ? AND status = 'held' AND (not_before IS NULL OR not_before <= ?) ORDER BY created_at ASC, id ASC"
+      "SELECT * FROM mailbox WHERE workspace_path = ? AND to_agent = ? AND status = 'held' AND release_hold = 0 AND (not_before IS NULL OR not_before <= ?) ORDER BY created_at ASC, id ASC"
     )
     .all(workspacePath, toAgent, now) as DbMailbox[];
 }
@@ -171,6 +445,9 @@ const ESCALATION_START_SQL = 'MAX(created_at, COALESCE(not_before, created_at))'
  * future `not_before`, which cannot be `< cutoff` (cutoff = now − maxAgeMs ≤ now), so the
  * age filter excludes it by construction. A delayed row escalates only after it has been
  * deliverable-but-stuck (past its due time) for the window.
+ *
+ * Spec 1967: a row held for release never escalates. It is held by a human's decision, not
+ * stuck, and nothing but a human's release would move it.
  */
 export function findEscalatable(
   db: Database.Database,
@@ -180,7 +457,7 @@ export function findEscalatable(
   const cutoff = now - maxAgeMs;
   return db
     .prepare(
-      `SELECT * FROM mailbox WHERE status = 'held' AND escalated = 0 AND ${ESCALATION_START_SQL} < ? ORDER BY ${ESCALATION_START_SQL} ASC, id ASC`
+      `SELECT * FROM mailbox WHERE status = 'held' AND release_hold = 0 AND escalated = 0 AND ${ESCALATION_START_SQL} < ? ORDER BY ${ESCALATION_START_SQL} ASC, id ASC`
     )
     .all(cutoff) as DbMailbox[];
 }
@@ -215,6 +492,9 @@ export interface WorkspaceHeldSummary {
  * sends. (Pre-due rows are still visible in `afx inbox`, which lists ALL held rows and
  * labels these "scheduled" — only the count/alarm surfaces exclude them.) The `escalated`
  * flag was already pre-due-safe (a pre-due row never escalates); this aligns the raw count.
+ *
+ * Spec 1967: rows held for release are not waiting for a local agent, so they are not
+ * counted here either (phase 11 gives them a count of their own).
  */
 export function heldSummaryForWorkspace(
   db: Database.Database,
@@ -223,7 +503,7 @@ export function heldSummaryForWorkspace(
 ): WorkspaceHeldSummary {
   const rows = db
     .prepare(
-      "SELECT to_agent AS toAgent, COUNT(*) AS count, MAX(escalated) AS esc FROM mailbox WHERE workspace_path = ? AND status = 'held' AND (not_before IS NULL OR not_before <= ?) GROUP BY to_agent"
+      "SELECT to_agent AS toAgent, COUNT(*) AS count, MAX(escalated) AS esc FROM mailbox WHERE workspace_path = ? AND status = 'held' AND release_hold = 0 AND (not_before IS NULL OR not_before <= ?) GROUP BY to_agent"
     )
     .all(workspacePath, now) as Array<{ toAgent: string; count: number; esc: number }>;
   let total = 0;
@@ -242,14 +522,22 @@ export function heldSummaryForWorkspace(
  * `resolved_at`). Returns true if it transitioned; false if the row was already
  * terminal or does not exist — so a re-delivery attempt (backstop racing a submit
  * trigger) is a safe no-op and can never revert or double-deliver a row.
+ *
+ * Spec 1967: it clears `release_hold` too. The drainer never picks a row held for release,
+ * but one moved there while its write was already under way has reached the terminal, and is
+ * recorded as delivered rather than left to be delivered a second time on release. A remote
+ * row's accepted-once row is told `delivered` in the same transaction.
  */
 export function markDelivered(db: Database.Database, id: string, now: number = Date.now()): boolean {
-  const info = db
-    .prepare(
-      "UPDATE mailbox SET status = 'delivered', reason = NULL, detail = NULL, updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held'"
-    )
-    .run(now, now, id);
-  return info.changes > 0;
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        `UPDATE mailbox SET status = 'delivered', reason = NULL, detail = NULL, release_hold = 0, updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held' ${RETURNING_CHANGED}`
+      )
+      .all(now, now, id) as ChangedRow[];
+    mirrorChanged(db, changed, now);
+    return changed.length > 0;
+  })();
 }
 
 /**
@@ -277,6 +565,11 @@ export function markDelivered(db: Database.Database, id: string, now: number = D
  * Returns true only when a held row's verdict actually moved. A repeat of the same pair, a
  * terminal row, and an unknown id are all `false` — callers wanting "does this row exist"
  * should ask {@link getById}, not this.
+ *
+ * Spec 1967: on a remote row, a move of the reason is mirrored into its accepted-once row in
+ * the same transaction. A move of the detail alone, or of the reason underneath a row held for
+ * release (which still reports `held-for-release`), changes nothing a duplicate is told, and
+ * the mirror leaves the accepted-once row as it is.
  */
 export function setHeldVerdict(
   db: Database.Database,
@@ -285,13 +578,16 @@ export function setHeldVerdict(
   detail: MailboxGateDetail | null,
   now: number = Date.now()
 ): boolean {
-  const info = db
-    .prepare(
-      "UPDATE mailbox SET reason = ?, detail = ?, updated_at = ? " +
-        "WHERE id = ? AND status = 'held' AND (reason IS NOT ? OR detail IS NOT ?)"
-    )
-    .run(reason, detail, now, id, reason, detail);
-  return info.changes > 0;
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        "UPDATE mailbox SET reason = ?, detail = ?, updated_at = ? " +
+          `WHERE id = ? AND status = 'held' AND (reason IS NOT ? OR detail IS NOT ?) ${RETURNING_CHANGED}`
+      )
+      .all(reason, detail, now, id, reason, detail) as ChangedRow[];
+    mirrorChanged(db, changed, now);
+    return changed.length > 0;
+  })();
 }
 
 /**
@@ -368,7 +664,8 @@ export interface StarvingAgent {
  * `stuckSince` against the owner-notice threshold to decide whether to alarm, and uses the
  * membership of the returned set to decide when a prior notice can be cleared (agent no longer
  * has any eligible non-notice held row → drained). PRE-DUE delayed rows are excluded (not
- * stuck), so a scheduled send never trips the alarm nor keeps one alive.
+ * stuck), so a scheduled send never trips the alarm nor keeps one alive. So are rows held for
+ * release (Spec 1967): an agent is not starving for mail a human has chosen to hold.
  */
 export function findStarvingAgents(db: Database.Database, now: number = Date.now()): StarvingAgent[] {
   return db
@@ -380,6 +677,7 @@ export function findStarvingAgents(db: Database.Database, now: number = Date.now
               MAX(detail) AS detail
          FROM mailbox
         WHERE status = 'held'
+          AND release_hold = 0
           AND (not_before IS NULL OR not_before <= ?)
           AND (supersede_key IS NULL OR supersede_key NOT LIKE ?)
         GROUP BY workspace_path, to_agent`
@@ -391,7 +689,8 @@ export function findStarvingAgents(db: Database.Database, now: number = Date.now
  * Dismiss every still-`held` row matching `(workspacePath, supersedeKey)` (Spec 1313 round 3).
  * Used to clear a pending architect notice once its starving agent recovers (the notice is
  * moot). Audit-preserving (soft transition), and a no-op on an already-delivered notice.
- * Returns the number of rows dismissed.
+ * Returns the number of rows dismissed. Never reaches a remote row, which has no
+ * `supersede_key`, so nothing is mirrored.
  */
 export function dismissHeldWithKey(
   db: Database.Database,
@@ -401,7 +700,7 @@ export function dismissHeldWithKey(
 ): number {
   const info = db
     .prepare(
-      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
+      "UPDATE mailbox SET status = 'dismissed', release_hold = 0, updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND supersede_key = ? AND status = 'held'"
     )
     .run(now, now, workspacePath, supersedeKey);
   return info.changes;
@@ -412,6 +711,10 @@ export function dismissHeldWithKey(
  * when an agent is cleaned up (`afx cleanup`) so its orphaned held rows stop pinning
  * `heldCount`/escalated forever — the terminal-row prune only removes delivered/superseded/
  * dismissed rows, never held ones. Audit-preserving. Returns the number of rows dismissed.
+ *
+ * Spec 1967: remote rows among them, held for release or not, are dismissed too, and their
+ * accepted-once rows are told `dismissed` by one statement over exactly the rows this one
+ * changed, in the same transaction.
  */
 export function dismissHeldForAgent(
   db: Database.Database,
@@ -419,26 +722,33 @@ export function dismissHeldForAgent(
   toAgent: string,
   now: number = Date.now()
 ): number {
-  const info = db
-    .prepare(
-      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND to_agent = ? AND status = 'held'"
-    )
-    .run(now, now, workspacePath, toAgent);
-  return info.changes;
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        `UPDATE mailbox SET status = 'dismissed', release_hold = 0, updated_at = ?, resolved_at = ? WHERE workspace_path = ? AND to_agent = ? AND status = 'held' ${RETURNING_CHANGED}`
+      )
+      .all(now, now, workspacePath, toAgent) as ChangedRow[];
+    mirrorChanged(db, changed, now);
+    return changed.length;
+  })();
 }
 
 /**
  * Transition a held row to `dismissed` (operator-cleared via `afx inbox dismiss`).
  * The why-held reason is preserved for audit. Returns true if it transitioned;
- * a dismissed row is never delivered.
+ * a dismissed row is never delivered. Spec 1967: it clears `release_hold`, and a remote
+ * row's accepted-once row is told `dismissed` in the same transaction.
  */
 export function dismiss(db: Database.Database, id: string, now: number = Date.now()): boolean {
-  const info = db
-    .prepare(
-      "UPDATE mailbox SET status = 'dismissed', updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held'"
-    )
-    .run(now, now, id);
-  return info.changes > 0;
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        `UPDATE mailbox SET status = 'dismissed', release_hold = 0, updated_at = ?, resolved_at = ? WHERE id = ? AND status = 'held' ${RETURNING_CHANGED}`
+      )
+      .all(now, now, id) as ChangedRow[];
+    mirrorChanged(db, changed, now);
+    return changed.length > 0;
+  })();
 }
 
 /**
@@ -490,6 +800,10 @@ export function supersede(
  * older than `retentionDays`. Held rows are never removed — the `status != 'held'`
  * and `resolved_at IS NOT NULL` guards make that impossible even if a held row
  * somehow carried a stale timestamp. Returns the number of rows deleted.
+ *
+ * Spec 1967: a remote row's accepted-once row is not deleted with it. It outlives the
+ * mailbox row by design, until its own expiry, so a duplicate is still answered after this
+ * retention (which may be shorter than 30 days) has removed the row.
  */
 export function pruneTerminal(
   db: Database.Database,

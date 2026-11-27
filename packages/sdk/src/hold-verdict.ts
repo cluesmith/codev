@@ -24,11 +24,20 @@
  */
 
 /**
+ * The reason a row held for a human's release reports (Spec 1967): remote mail that a
+ * hold-for-release grant admitted, or whose grant or switch no longer allowed delivery. Not a
+ * gate verdict, and never paired with a detail.
+ */
+export const HELD_FOR_RELEASE = 'held-for-release';
+
+/**
  * `reason:detail` when a gate detail is present, else the bare reason.
  *
  * `busy:user-text`, `busy:recent-input`, `busy:composer-redraw`, `busy:no-region-end`,
  * `busy:no-composer-marker`,
- * `no-live-pty`. `fallback` (default `'held'`) covers a row with no reason recorded yet.
+ * `no-live-pty`, and {@link HELD_FOR_RELEASE} by its own name (Spec 1967). `fallback` (default
+ * `'held'`) covers a row with no reason recorded yet; a row held for release always reports
+ * its reason, so it never falls back to a bare `held`.
  */
 export function formatVerdict(
   reason: string | null | undefined,
@@ -59,5 +68,8 @@ export function isUnverifiableVerdict(
   reason: string | null | undefined,
   detail: string | null | undefined,
 ): boolean {
+  // `held-for-release` (Spec 1967) is false here: it is a human's hold, not a verdict the
+  // classifier failed to reach. It does not clear by itself either; its remedy is
+  // `afx inbox release`, not a profile fix.
   return reason === 'no-profile' || detail === 'no-region-end' || detail === 'no-composer-marker';
 }

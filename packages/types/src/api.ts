@@ -881,6 +881,15 @@ export interface ProtocolStats {
 }
 
 /**
+ * Why a mailbox row is held, as every surface reports it (Spec 1313):
+ * - `busy`, `no-profile`, `no-live-pty`: the render gate's verdict (see `HeldMessage.reason`);
+ * - `held-for-release` (Spec 1967): mail from another Tower that a hold-for-release grant
+ *   admitted, or whose grant or switch no longer allowed delivery. Nothing delivers it until a
+ *   human releases it with `afx inbox release`.
+ */
+export type HeldMailReason = 'busy' | 'no-profile' | 'no-live-pty' | 'held-for-release';
+
+/**
  * Issue 1450: one currently-*held* mailbox row as `GET /api/inbox` projects it —
  * the payload behind `afx inbox` and the dashboard's held-mail popover.
  *
@@ -906,8 +915,11 @@ export interface HeldMessage {
   toAgent: string;
   /** Sending agent; `null` for rows with no recorded sender (rendered as `?`). */
   fromAgent: string | null;
-  /** Why the render gate held it: `'busy' | 'no-profile' | 'no-live-pty'`; `null` if unset. */
-  reason: string | null;
+  /**
+   * Why it is held: the render gate's `'busy' | 'no-profile' | 'no-live-pty'`, or
+   * `'held-for-release'` for remote mail held for a human's release (Spec 1967); `null` if unset.
+   */
+  reason: HeldMailReason | null;
   /**
    * The gate's detail behind a `busy` reason (Issue #1482):
    * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold

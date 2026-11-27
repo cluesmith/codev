@@ -113,6 +113,7 @@ export {
   type OverviewData,
   type IssueIdKind,
   type HeldMessage,
+  type HeldMailReason,
   type IssueView,
   type PRView,
   type IssueSearchItem,

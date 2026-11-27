@@ -108,6 +108,7 @@ import {
   markDelivered as markMailboxDelivered,
   listHeld as listHeldMailbox,
   dismiss as dismissMailbox,
+  reportedReason as reportedMailboxReason,
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
@@ -3017,7 +3018,8 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
     workspacePath: r.workspace_path,
     toAgent: r.to_agent,
     fromAgent: r.from_agent,
-    reason: r.reason,
+    // Spec 1967: a row held for release reports `held-for-release`, not its own reason.
+    reason: reportedMailboxReason(r),
     // Issue #1482: the gate verdict behind a `busy` hold, so `afx inbox` and the dashboard
     // popover can distinguish an occupied composer from one the classifier could not read.
     detail: r.detail,
@@ -3096,7 +3098,7 @@ function handleInboxShow(
     fromAgent: row.from_agent,
     fromWorkspace: row.from_workspace,
     status: row.status,
-    reason: row.reason,
+    reason: reportedMailboxReason(row),  // Spec 1967: `held-for-release` while held for release
     detail: row.detail,  // Issue #1482: the gate verdict behind a `busy` hold
     escalated: row.escalated === 1,
     body: row.body,

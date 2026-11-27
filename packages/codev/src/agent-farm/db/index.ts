@@ -186,5 +186,7 @@ export type {
   DbMailbox,
   MailboxStatus,
   MailboxReason,
+  MailboxReportedReason,
+  MailboxRemoteSender,
   MailboxGateDetail,
 } from './types.js';

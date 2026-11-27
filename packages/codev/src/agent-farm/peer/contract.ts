@@ -497,6 +497,15 @@ export function isWireAddress(value: unknown): value is PeerWireAddress {
   return readWireAddress(value, true) !== null;
 }
 
+/**
+ * A sender address as a payload may carry it (`workspace` optional), read as a fresh object
+ * holding only its own fields, or `null` when it does not fit. The mailbox stores a remote
+ * row's sender through this, so it holds no value the payload reader would not.
+ */
+export function readWireSenderAddress(value: unknown): PeerWireSenderAddress | null {
+  return readWireAddress(value, false);
+}
+
 /** Why a message body cannot be sent. */
 export type RemoteBodyResult = { ok: true; body: string; bytes: number } | { ok: false; reason: 'malformed' | 'too-large' };
 

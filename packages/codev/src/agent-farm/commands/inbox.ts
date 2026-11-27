@@ -26,7 +26,7 @@ interface InboxRow {
   workspacePath: string;
   toAgent: string;
   fromAgent: string | null;
-  reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty'
+  reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty' | 'held-for-release' (Spec 1967)
   detail: string | null; // Issue #1482: 'user-text' | 'no-region-end' | 'no-composer-marker'; null for a non-gate hold
   escalated: boolean;
   createdAt: number; // epoch ms
@@ -65,7 +65,7 @@ interface InboxMessage {
   fromAgent: string | null;
   fromWorkspace: string | null;
   status: string; // 'held' | 'delivered' | 'superseded' | 'dismissed'
-  reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty'
+  reason: string | null; // 'busy' | 'no-profile' | 'no-live-pty' | 'held-for-release' (Spec 1967)
   detail: string | null; // Issue #1482: 'user-text' | 'no-region-end' | 'no-composer-marker'; null for a non-gate hold
   escalated: boolean;
   body: string;
