@@ -656,3 +656,18 @@ the review round below.)
     on. Phase 11's `afx inbox release` only calls `release()`.
   - Added: the 1,000-in-a-minute flood test, and a review residual for NBSP-led marker lines.
   - Each new test fails with its fix removed.
+- **Architect ruling (main, 2026-11-27T04:51Z) on a released row: permanent, as built.** A
+  human releasing one named message is a decision about that message. Criterion 15 is about
+  AUTOMATIC delivery, which a released message no longer is, and tracking which permission
+  changed after a release is machinery for a window of seconds. The owner stops one by
+  dismissing it. The architect tells the owner; if he overrules, it is the one line in
+  `remoteMailAllowed`. Two things with it:
+  - **For phase 11:** `afx peer off` and `afx peer revoke` say, when it applies, how many
+    released messages from the affected peers are still waiting to deliver, and that
+    `afx inbox dismiss` stops one. One count and one line, nothing more.
+  - Done now: the `withdrawRemoteMail` doc comment credited the eager rule to "the owner's
+    ruling"; it was the architect's (phase 4, 02:01Z), and now says so. The owner has ruled only
+    main-55 (spec) and main-58 (plan) inside this project. I found no other misattribution in
+    the thread, the plan or the code. The spec's "owner ruling, decision main-53" is correct:
+    pending-decisions.md shows main-53 ruled by the owner through the Decisions tab at 20:33
+    UTC, the decision that started this project.

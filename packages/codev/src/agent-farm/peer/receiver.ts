@@ -288,7 +288,7 @@ export function remoteMailAllowed(
 }
 
 /**
- * Withdrawal (eager, by the owner's ruling): move every held remote row that may no longer
+ * Withdrawal (eager, by the architect's ruling): move every held remote row that may no longer
  * be delivered to held for release, one peer's when `peerTowerId` is given. Called in the
  * transaction that turns the switch off or changes a grant. Turning the switch on again
  * releases nothing: a human releases mail held for release. A row the owner released is never
