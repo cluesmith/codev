@@ -32,17 +32,17 @@ plan_phases:
     status: complete
   - id: phase_10
     title: Discovery across Towers
-    status: in_progress
+    status: complete
   - id: phase_11
     title: Inbox, status and record surfaces
-    status: pending
+    status: in_progress
   - id: phase_12
     title: 'Dashboard: Peers panel and three-count indicator'
     status: pending
   - id: phase_13
     title: Docs in both trees, the walkthrough end to end, and Windows
     status: pending
-current_plan_phase: phase_10
+current_plan_phase: phase_11
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -240,7 +240,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_10-iter1-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-27T10:24:38.941Z'
+updated_at: '2026-11-27T10:27:16.676Z'
 force_advanced:
   phase: phase_9
   iteration: 3
@@ -278,3 +278,5 @@ context_refreshes:
   - boundary: plan-phase:phase_10
     at: '2026-11-27T09:31:01.054Z'
     acknowledged_at: '2026-11-27T09:34:02.873Z'
+  - boundary: plan-phase:phase_11
+    at: '2026-11-27T10:27:16.676Z'
