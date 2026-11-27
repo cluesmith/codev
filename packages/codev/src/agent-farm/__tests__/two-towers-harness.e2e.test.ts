@@ -19,11 +19,13 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  freeLoopbackPorts,
   makeWorkspace,
   runCli,
   startTwoTowers,
   writeInertAgent,
   type HarnessTower,
+  type TeardownReport,
   type TwoTowers,
 } from './helpers/two-towers.js';
 import { pidsNamingSocketDir, waitFor } from './helpers/tower-test-utils.js';
@@ -164,4 +166,42 @@ describe('Spec 1967 phase 2: two Towers against the stand-in relay', () => {
     const report = await towers.stop();
     expect(report).toEqual({ processes: [], shellpers: [], paths: [], relayListening: false });
   }, 120_000);
+});
+
+describe('Spec 1967: the harness keeps to its own Towers', () => {
+  const clean: TeardownReport = { processes: [], shellpers: [], paths: [], relayListening: false };
+
+  it('two harnesses started at once get four distinct ports, each answered by its own Tower', async () => {
+    const pairs = await Promise.allSettled([startTwoTowers(), startTwoTowers()]);
+    const reports: TeardownReport[] = [];
+    try {
+      expect(pairs.map((pair) => (pair.status === 'fulfilled' ? 'started' : String(pair.reason)))).toEqual(['started', 'started']);
+      const towers = pairs.flatMap((pair) => (pair.status === 'fulfilled' ? [pair.value.a, pair.value.b] : []));
+      expect(new Set(towers.map((tower) => tower.port)).size).toBe(4);
+      for (const tower of towers) {
+        // Each port answers as the Tower whose credentials that harness wrote.
+        expect(await tower.tunnelStatus()).toMatchObject({ state: 'connected', towerId: tower.towerId, towerName: tower.slug });
+      }
+    } finally {
+      for (const pair of pairs) if (pair.status === 'fulfilled') reports.push(await pair.value.stop());
+    }
+    expect(reports).toEqual([clean, clean]);
+  }, 180_000);
+
+  it('a Tower whose port another process holds fails the start, naming the port, instead of using what answers there', async () => {
+    const first = await startTwoTowers();
+    let report: TeardownReport | null = null;
+    try {
+      const [free] = await freeLoopbackPorts(1);
+      const taken = first.a.port;
+      await expect(startTwoTowers({ ports: [taken, free] })).rejects.toThrow(
+        new RegExp(`process started for port ${taken} exited \\(code 1\\) before it was listening`),
+      );
+      // The Tower that holds the port is untouched.
+      expect(await first.a.tunnelStatus()).toMatchObject({ state: 'connected', towerId: first.a.towerId });
+    } finally {
+      report = await first.stop();
+    }
+    expect(report).toEqual(clean);
+  }, 180_000);
 });

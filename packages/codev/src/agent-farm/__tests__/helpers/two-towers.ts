@@ -37,6 +37,7 @@
 import { vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import net, { type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import Database from 'better-sqlite3';
@@ -68,10 +69,16 @@ export const INERT_SCRIPT = 'trap "" INT; while true; do sleep 3600; done';
 export class HarnessTower {
   /** The running process, or `null` between a stop and a start. */
   handle: TowerHandle | null = null;
-  /** Fixed by the first start; every restart reuses it. */
+  /** Given by `startTwoTowers` before the first start; every restart reuses it. */
   port = 0;
   /** Every handle this Tower has had, so teardown can check what each left behind. */
   readonly handles: TowerHandle[] = [];
+  /**
+   * Everything this Tower's processes wrote to stdout, and to stderr once each start
+   * returned, over every start. Reading stdout also keeps a chatty Tower from blocking on
+   * a full pipe.
+   */
+  readonly output: string[] = [];
   /** Workspaces activated here, deactivated at teardown (which is what ends their shellpers). */
   readonly workspaces: string[] = [];
 
@@ -111,10 +118,63 @@ export class HarnessTower {
 
   async start(): Promise<void> {
     if (this.handle) throw new Error(`Tower ${this.label} is already running`);
-    const handle = await startTower(this.port === 0 ? undefined : this.port, this.extraEnv);
-    this.handle = handle;
-    this.port = handle.port;
+    if (this.port === 0) throw new Error(`Tower ${this.label} has no port: startTwoTowers gives each Tower one`);
+    const handle = await startTower(this.port, this.extraEnv);
     this.handles.push(handle);
+    const own: string[] = [];
+    for (const stream of [handle.process.stdout, handle.process.stderr]) {
+      stream?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf8');
+        own.push(text);
+        this.output.push(text);
+      });
+    }
+    try {
+      await this.boundByItsOwnProcess(handle, own);
+    } catch (err) {
+      await handle.stop();
+      throw err;
+    }
+    this.handle = handle;
+  }
+
+  /**
+   * `startTower` returns once anything answers on the port, and a Tower that loses the bind
+   * to another process exits (Tower has no handler for EADDRINUSE). So the harness waits
+   * for the line this process prints once it holds the port (`tower-server.ts`), and fails,
+   * naming the port, if the process exits first or never prints it: it never goes on to
+   * talk to whatever else answers there.
+   */
+  private async boundByItsOwnProcess(handle: TowerHandle, own: string[], timeoutMs = 20_000): Promise<void> {
+    const listening = new RegExp(`Tower server listening at http://\\S+:${handle.port}(?!\\d)`);
+    const deadline = Date.now() + timeoutMs;
+    while (!listening.test(own.join(''))) {
+      const exit = exitOf(handle);
+      if (exit !== null) {
+        throw new Error(
+          `Tower ${this.label}: the process started for port ${handle.port} exited (${exit}) before it was listening; ` +
+            `something else holds port ${handle.port}, and the harness will not talk to it. Output: ${own.join('').slice(-2_000)}`,
+        );
+      }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `Tower ${this.label}: the process started for port ${handle.port} never said it was listening there ` +
+            `in ${timeoutMs} ms, and the harness will not talk to whatever answers. Output: ${own.join('').slice(-2_000)}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  /** Throws, naming the port, unless the process this Tower started is still running. */
+  private assertItsOwnProcess(): void {
+    if (!this.handle) throw new Error(`Tower ${this.label} (port ${this.port}) is not running`);
+    const exit = exitOf(this.handle);
+    if (exit !== null) {
+      throw new Error(
+        `Tower ${this.label}: its process on port ${this.port} has exited (${exit}); the harness will not talk to whatever answers there now`,
+      );
+    }
   }
 
   async stop(): Promise<void> {
@@ -136,8 +196,9 @@ export class HarnessTower {
     await this.start();
   }
 
-  /** A call to this Tower's HTTP API (the e2e setup adds the local key). */
-  fetch(path: string, init?: RequestInit): Promise<Response> {
+  /** A call to this Tower's HTTP API (the e2e setup adds the local key), only while its own process runs. */
+  async fetch(path: string, init?: RequestInit): Promise<Response> {
+    this.assertItsOwnProcess();
     return fetch(`http://127.0.0.1:${this.port}${path}`, init);
   }
 
@@ -162,6 +223,8 @@ export class HarnessTower {
     let last = '';
     const connected = await waitFor(
       async () => {
+        // Out of the catch below: a Tower whose process has gone fails now, not after the wait.
+        this.assertItsOwnProcess();
         const status = await this.tunnelStatus().catch((err) => ({ state: `unreachable: ${err}` }));
         last = JSON.stringify(status);
         return status.state === 'connected' && this.relay.session(this.towerId) !== null;
@@ -281,6 +344,39 @@ export interface TwoTowersOptions {
   relay?: StandInRelayOptions;
   /** The two Towers' slugs on the one account. Default `mbp` and `devvm`. */
   slugs?: [string, string];
+  /** The two Towers' ports. Default: two the OS gives as free (`freeLoopbackPorts`). */
+  ports?: [number, number];
+}
+
+/** How a process ended, or `null` while it runs. */
+function exitOf(handle: TowerHandle): string | null {
+  const { exitCode, signalCode } = handle.process;
+  if (signalCode !== null) return `signal ${signalCode}`;
+  if (exitCode !== null) return `code ${exitCode}`;
+  return null;
+}
+
+/**
+ * `count` distinct loopback ports the OS reports free: each is bound to port 0 and all are
+ * held open together before any is released, so one call never returns a port twice, and
+ * two harnesses in two processes never both probe the same fixed range. A port can still be
+ * taken in the moment before its Tower binds it; `HarnessTower.start` then fails loudly.
+ */
+export async function freeLoopbackPorts(count: number): Promise<number[]> {
+  const servers: net.Server[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const server = net.createServer();
+      servers.push(server);
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => resolve());
+      });
+    }
+    return servers.map((server) => (server.address() as AddressInfo).port);
+  } finally {
+    await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  }
 }
 
 /** What teardown left behind: every list empty is a clean stop. */
@@ -327,8 +423,9 @@ function makeTower(label: string, record: StandInTower, relay: StandInRelay, cle
 
 /**
  * Start the stand-in, register two Towers on one account in it, and start both Towers
- * against it, one after the other (each `startTower` picks the next free port). Resolves
- * once both tunnels are up.
+ * against it, one after the other, on two ports the OS gives as free (never a fixed range:
+ * two harnesses at once, in two vitest forks, once both took 14100 and 14101, and each
+ * talked to the other's Towers). Resolves once both tunnels are up.
  */
 export async function startTwoTowers(options: TwoTowersOptions = {}): Promise<TwoTowers> {
   const [slugA, slugB] = options.slugs ?? ['mbp', 'devvm'];
@@ -347,6 +444,7 @@ export async function startTwoTowers(options: TwoTowersOptions = {}): Promise<Tw
   const stop = (): Promise<TeardownReport> => (stopped ??= teardown(relay, [a, b], dirs));
 
   try {
+    [a.port, b.port] = options.ports ?? ((await freeLoopbackPorts(2)) as [number, number]);
     await a.start();
     await b.start();
     await a.waitForTunnel();
