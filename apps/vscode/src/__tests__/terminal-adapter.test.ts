@@ -615,7 +615,7 @@ type WakeablePty = {
   onDidWrite(cb: (s: string) => void): void;
 };
 
-/** Build an adapter with an optional injected `/health` probe (#1681), exposing
+/** Build an adapter with an optional injected liveness probe (#1681), exposing
  *  the `onWake` re-arm entry point. */
 function makeAdapterWithProbe(probe?: () => Promise<boolean | null>) {
   const writes: string[] = [];
@@ -716,7 +716,7 @@ describe('#1681 — wake signal re-arms the reconnect budget', () => {
   });
 });
 
-describe('#1681 — exhausted-budget banner is worded honestly via /health', () => {
+describe('#1681 — exhausted-budget banner is worded honestly via the liveness probe', () => {
   it('says "Tower is up" when the probe reports Tower reachable', async () => {
     const { writes } = makeAdapterWithProbe(async () => true);
     burnBudget();
@@ -787,7 +787,7 @@ describe('#1681 — exhausted-budget banner is worded honestly via /health', () 
     const probe = () => new Promise<boolean>((r) => { resolveProbe = r; });
     const { pty, writes } = makeAdapterWithProbe(probe);
     burnBudget();
-    currentSocket().emit('close'); // transient give-up; /health probe now pending
+    currentSocket().emit('close'); // transient give-up; liveness probe now pending
 
     pty.onWake();                  // wake re-arms → fresh socket
     currentSocket().emit('error', new Error('Unexpected server response: 404'));

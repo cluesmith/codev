@@ -350,8 +350,10 @@ function namesAnArchitectInAWorkspace(to: string): boolean {
  * Such a Tower reads `<workspace>:architect:<name>` with its own parser, as a builder
  * called `architect:<name>`, and answers that it was not found: true of the address it
  * read, and no help to someone who has just upgraded and typed the new form. So when that
- * form comes back not found, the address book is asked. A Tower that has no address book
- * is the older one; a Tower that answers knows the form, and its not-found stands.
+ * form comes back not found, Tower is asked its version on the liveness route, which costs it
+ * nothing (#1977). That route shipped after the address form, in the same release, so a Tower
+ * that reports its version there knows the form and its not-found stands; a Tower that answers
+ * 404 has no such route and is the older one.
  *
  * Only on that failure, so a send that succeeds, or fails any other way, costs nothing more.
  *
@@ -363,15 +365,14 @@ async function explainNotFound(
   client: TowerClient,
   to: string,
   result: SendResult,
-  caller: { workspace?: string; from: string },
 ): Promise<string | null> {
   if (result.errorCode !== 'NOT_FOUND' || !namesAnArchitectInAWorkspace(to)) return null;
-  const book = await client.getAddressBook(caller);
-  if (book.ok) return null;
-  if (book.unknownRoute) return olderTowerError('does not know an address of the form <workspace>:architect:<name>');
-  if (book.unanswered) {
+  const live = await client.getLiveness();
+  if (live.ok) return null;
+  if (live.unknownRoute) return olderTowerError('does not know an address of the form <workspace>:architect:<name>');
+  if (live.unanswered) {
     return (
-      `Tower did not answer the address-book check (${book.error}) needed to tell whether ${to} is ` +
+      `Tower did not answer the version check (${live.error}) needed to tell whether ${to} is ` +
       `missing or this Tower predates that address form; it appears to be up, retry`
     );
   }
@@ -555,7 +556,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   const gate = (options.retry ?? 0) > 0 ? { retries: 0 } : {};
   let tower = await checkTower(client, gate);
   while (tower.state !== 'running') {
-    const why = tower.state === 'not-running' ? 'Tower is not running' : `Tower did not answer /health (${tower.error})`;
+    const why = tower.state === 'not-running' ? 'Tower is not running' : `Tower did not answer ${tower.route} (${tower.error})`;
     if (!(await retry(`${why}; nothing has been sent.`))) {
       fatal(tower.message);
     }
@@ -602,7 +603,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
       }, retry);
 
       if (!result.ok) {
-        const explained = await explainNotFound(client, target!, result, { workspace, from });
+        const explained = await explainNotFound(client, target!, result);
         throw new Error(explained ?? (result.error || 'Unknown error'));
       }
 

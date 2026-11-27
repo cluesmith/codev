@@ -658,17 +658,18 @@ export class TerminalManager {
   }
 
   /**
-   * One-shot Tower `/health` probe used to word a terminal's exhausted-budget
+   * One-shot Tower liveness probe used to word a terminal's exhausted-budget
    * give-up banner honestly (#1681). Returns true when Tower answers, false when
    * it is unreachable, and `null` when reachability is unknown (no client yet) —
    * so the adapter falls back to the neutral attempt-count wording rather than
    * asserting "Tower unreachable" for what is really an unconfigured client.
-   * `getHealth` already collapses network errors to `null`, so this never throws.
+   * `isRunning` asks the liveness route, not `/health` and its process census
+   * (#1977), and collapses network errors to `false`, so this never throws.
    */
   private async probeTowerHealth(): Promise<boolean | null> {
     const client = this.connectionManager.getClient();
     if (!client) { return null; }
-    return (await client.getHealth()) !== null;
+    return client.isRunning();
   }
 
   private buildWsUrl(terminalId: string): string | null {

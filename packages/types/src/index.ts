@@ -103,6 +103,8 @@ export {
   type AddressBookResponse,
   type TunnelStatus,
   type TowerVersionInfo,
+  TOWER_LIVENESS_ROUTE,
+  type TowerLiveness,
   type ProtocolStats,
   type AnalyticsResponse,
 } from './api.js';

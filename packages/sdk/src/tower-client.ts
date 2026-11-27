@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, TowerLiveness, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -45,6 +45,9 @@ export const COMMAND_ROUTE = '/api/command';
 export const CANVAS_COMMAND_ROUTE = '/api/canvas/command';
 /** Host-side view lifecycle: register, heartbeat, unregister. */
 export const CANVAS_VIEWS_ROUTE = '/api/canvas/views';
+
+/** The liveness route (#1977). Mirrored from `@cluesmith/codev-types` for the same reason as `COMMAND_ROUTE`. */
+export const TOWER_LIVENESS_ROUTE = '/health/live';
 
 /**
  * The failure codes Tower itself can answer with. Mirrored from `CanvasCommandErrorCode` (the
@@ -185,14 +188,15 @@ export interface TowerHealth {
 }
 
 /**
- * One `/health` probe, classified (#1901). `not-running`: the connection was refused, so
+ * One liveness probe, classified (#1901). `not-running`: the connection was refused, so
  * nothing is listening. `unresponsive`: something accepted the connection but did not answer
- * healthily; `error` carries the reason.
+ * healthily; `error` carries the reason and `route` the route that went unanswered.
+ * `liveness` is absent when a Tower from before the liveness route (#1977) answered `/health`.
  */
 export type TowerHealthProbe =
-  | { state: 'running'; health: TowerHealth }
+  | { state: 'running'; liveness?: TowerLiveness }
   | { state: 'not-running' }
-  | { state: 'unresponsive'; error: string };
+  | { state: 'unresponsive'; error: string; route: string };
 
 /** Issue #1227: a shellper the husk sweep would reap (or has reaped). */
 export interface HuskCandidate {
@@ -418,6 +422,46 @@ function isUnknownRoute(result: { status: number; errorCode?: string }): boolean
   return result.status === 404 && result.errorCode === undefined;
 }
 
+/**
+ * A Tower from before the liveness route (#1977) answers it 404, or 401 to a client without the
+ * key, since the route is not on its public list. Either way its `/health` is the one to ask.
+ */
+function lacksLivenessRoute(result: { status: number }): boolean {
+  return result.status === 404 || result.status === 401;
+}
+
+/**
+ * What is wrong with a liveness body, or null when it is a whole {@link TowerLiveness}. Every
+ * field is checked, so a `{ status: 'healthy' }` from something that is not this Tower's route
+ * is never handed on as a version.
+ */
+function livenessProblem(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return `body is ${JSON.stringify(data)}`;
+  const body = data as Record<string, unknown>;
+  if (body.status !== 'healthy') return `status is ${JSON.stringify(body.status)}`;
+  if (typeof body.version !== 'string' || body.version === '') return `version is ${JSON.stringify(body.version)}`;
+  if (typeof body.startedAt !== 'string' || Number.isNaN(Date.parse(body.startedAt))) {
+    return `startedAt is ${JSON.stringify(body.startedAt)}`;
+  }
+  if (!Number.isInteger(body.schemaVersion) || (body.schemaVersion as number) < 1) {
+    return `schemaVersion is ${JSON.stringify(body.schemaVersion)}`;
+  }
+  return null;
+}
+
+/** One answer to a liveness or `/health` request, classified as a {@link TowerHealthProbe}. */
+function classifyProbe(
+  result: { ok: boolean; status: number; data?: unknown; error?: string; connectionRefused?: boolean },
+  route: string,
+): TowerHealthProbe {
+  const status = typeof result.data === 'object' && result.data !== null ? (result.data as { status?: unknown }).status : undefined;
+  if (result.ok && status === 'healthy') return { state: 'running' };
+  if (result.connectionRefused) return { state: 'not-running' };
+  if (result.status === 0) return { state: 'unresponsive', route, error: result.error ?? 'no response' };
+  if (!result.ok) return { state: 'unresponsive', route, error: `HTTP ${result.status}: ${result.error}` };
+  return { state: 'unresponsive', route, error: `reported status ${JSON.stringify(status)}` };
+}
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -494,19 +538,49 @@ export class TowerClient {
   }
 
   /**
-   * Probe `/health` once and say why it failed, not just that it did (#1901). Only a refused
-   * connection means nothing is listening; a timeout, a reset, an error status or an unreadable
-   * body all come from something that accepted the connection, which under load is usually a
-   * live Tower whose event loop is starved. Retrying, and wording the result for a person, is
-   * the caller's policy.
+   * Probe Tower's liveness once and say why it failed, not just that it did (#1901). Only a
+   * refused connection means nothing is listening; a timeout, a reset, an error status or an
+   * unreadable body all come from something that accepted the connection, which under load is
+   * usually a live Tower whose event loop is starved. Retrying, and wording the result for a
+   * person, is the caller's policy.
+   *
+   * Asks the liveness route, which costs Tower nothing (#1977), and `/health` only when a Tower
+   * from before that route answers that it has none.
    */
   async probeHealth(): Promise<TowerHealthProbe> {
-    const result = await this.request<TowerHealth>('/health');
-    if (result.ok && result.data?.status === 'healthy') return { state: 'running', health: result.data };
-    if (result.connectionRefused) return { state: 'not-running' };
-    if (result.status === 0) return { state: 'unresponsive', error: result.error ?? 'no response' };
-    if (!result.ok) return { state: 'unresponsive', error: `HTTP ${result.status}: ${result.error}` };
-    return { state: 'unresponsive', error: `reported status ${JSON.stringify(result.data?.status)}` };
+    const live = await this.request<unknown>(TOWER_LIVENESS_ROUTE);
+    if (lacksLivenessRoute(live)) return classifyProbe(await this.request<TowerHealth>('/health'), '/health');
+    if (!live.ok) return classifyProbe(live, TOWER_LIVENESS_ROUTE);
+    const problem = livenessProblem(live.data);
+    if (problem !== null) return { state: 'unresponsive', route: TOWER_LIVENESS_ROUTE, error: `malformed liveness body: ${problem}` };
+    return { state: 'running', liveness: live.data as TowerLiveness };
+  }
+
+  /**
+   * Tower's version from the liveness route (#1977), at no cost to Tower. `unknownRoute` is set
+   * when the Tower is older than the route, with or without the key; `unanswered` when nothing
+   * answered at all (timeout, reset, refused), which says nothing about which Tower it is. A
+   * malformed body is a failure with neither flag.
+   */
+  async getLiveness(): Promise<
+    { ok: true; liveness: TowerLiveness } | { ok: false; error: string; unknownRoute?: true; unanswered?: true }
+  > {
+    const result = await this.request<unknown>(TOWER_LIVENESS_ROUTE);
+    if (result.ok) {
+      const problem = livenessProblem(result.data);
+      if (problem === null) return { ok: true, liveness: result.data as TowerLiveness };
+      return { ok: false, error: `malformed liveness body: ${problem}` };
+    }
+    const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
+    if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+    // An older Tower answers a keyless client 401, the route not being on its public list. Its
+    // `/health` is public, so a healthy answer there says which Tower it is; a refused Host
+    // header, the only 401 a current Tower gives this route, refuses `/health` too.
+    if (result.status === 401) {
+      const health = await this.request<TowerHealth>('/health');
+      if (health.ok && health.data?.status === 'healthy') return { ...failure, unknownRoute: true };
+    }
+    return result.status === 0 ? { ...failure, unanswered: true } : failure;
   }
 
   async isRunning(): Promise<boolean> {

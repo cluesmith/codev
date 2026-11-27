@@ -207,7 +207,7 @@ describe('#1681 — re-arm terminal reconnects on wake', () => {
   // this file's rationale): the wake path is thin glue. Its behavior is unit-
   // tested at the adapter (terminal-adapter.test.ts: onWake, the give-up split,
   // the honest banner) and confirmed by a physical sleep→wake round-trip. These
-  // guards pin the wiring so deleting the manager fan-out, the /health-probe
+  // guards pin the wiring so deleting the manager fan-out, the liveness-probe
   // injection, or the extension focus-handler call is caught (CMAP #1682).
   const rearmBody = TM_SRC.split('rearmAllOnWake(): void')[1]?.split('buildWsUrl')[0] ?? '';
   const EXT_SRC = readFileSync(resolve(__dirname, '../extension.ts'), 'utf8');
@@ -218,11 +218,12 @@ describe('#1681 — re-arm terminal reconnects on wake', () => {
     expect(rearmBody).toMatch(/entry\.pty\.onWake\(\)/);
   });
 
-  it('injects the /health probe into every adapter it constructs', () => {
+  it('injects the liveness probe into every adapter it constructs', () => {
     expect(TM_SRC).toMatch(/new CodevPseudoterminal\(/);
     expect(TM_SRC).toMatch(/\(\) => this\.probeTowerHealth\(\)/);
     expect(TM_SRC).toMatch(/private async probeTowerHealth\(\): Promise<boolean \| null>/);
-    expect(TM_SRC).toMatch(/getClient\(\)[\s\S]*getHealth\(\)\)\s*!==\s*null/);
+    // #1977: the cheap liveness route, not `/health` and its process census.
+    expect(TM_SRC).toMatch(/getClient\(\)[\s\S]*return client\.isRunning\(\);/);
   });
 
   it('extension calls rearmAllOnWake on the window-focus rising edge', () => {

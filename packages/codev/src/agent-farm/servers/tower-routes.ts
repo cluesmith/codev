@@ -28,7 +28,7 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, TowerLiveness, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
 import {
   getArchitectByName,
   getBuilders,
@@ -42,7 +42,7 @@ import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER, TOWER_LIVENESS_ROUTE } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
 import { workspaceKey } from '../utils/workspace-path.js';
 import { expandHomePath } from '../../lib/host-paths.js';
@@ -153,7 +153,7 @@ import {
 import type { IssueSearchItem, IssueSearchResponse } from '@cluesmith/codev-types';
 import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
-import { getGlobalDb } from '../db/index.js';
+import { getGlobalDb, GLOBAL_CURRENT_VERSION } from '../db/index.js';
 import { listProcessCensus } from './process-census.js';
 import { containsBuildersSegment } from '../utils/builder-worktree-identity.js';
 import {
@@ -238,6 +238,7 @@ type RouteEntry = (
 
 const ROUTES: Record<string, RouteEntry> = {
   'GET /health':          (_req, res, _url, ctx) => handleHealthCheck(res, ctx),
+  [`GET ${TOWER_LIVENESS_ROUTE}`]: (_req, res, _url, ctx) => handleLiveness(res, ctx),
   'GET /api/shellpers/husks': (_req, res, _url, ctx) => handleHuskPreview(res, ctx),
   'POST /api/shellpers/husks/sweep': (_req, res, _url, ctx) => handleHuskSweep(res, ctx),
   'GET /api/workspaces':  (_req, res) => handleListWorkspaces(res),
@@ -704,15 +705,6 @@ async function handleHuskSweep(res: http.ServerResponse, ctx: RouteContext): Pro
   }
 }
 
-/**
- * GET /api/version (#983) — report the version of the *running* Tower process.
- *
- * `ctx.version` is read from this process's in-memory `package.json` at boot,
- * so it reflects the code Tower is actually executing — not the on-disk binary
- * `codev --version` inspects. After an `npm install -g` upgrade without a Tower
- * restart, the two diverge; the VS Code preflight probes this to detect that.
- * Read-only, no auth beyond the existing Host/Origin gate (same as /health).
- */
 /** Loopback peers only: the IPv4, IPv6 and IPv4-mapped forms. */
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
@@ -797,8 +789,36 @@ function handleShutdown(req: http.IncomingMessage, res: http.ServerResponse, ctx
   });
 }
 
+/**
+ * GET /api/version (#983) — report the version of the *running* Tower process.
+ *
+ * `ctx.version` is read from this process's in-memory `package.json` at boot,
+ * so it reflects the code Tower is actually executing — not the on-disk binary
+ * `codev --version` inspects. After an `npm install -g` upgrade without a Tower
+ * restart, the two diverge; the VS Code preflight probes this to detect that.
+ * Read-only, no auth beyond the existing Host/Origin gate (same as /health).
+ */
 function handleVersion(res: http.ServerResponse, ctx: RouteContext): void {
   const body: TowerVersionInfo = { version: ctx.version, startedAt: ctx.startedAt };
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+/**
+ * GET /health/live (#1977) — the probe every CLI command makes before it talks to Tower.
+ *
+ * Answered from what this process already holds: no instance list, no process census, no
+ * database read. `/health` does all three, and it is probed most when the machine is busy,
+ * which is when the census is slowest and the event loop is already starved. Public, like
+ * `/health`.
+ */
+function handleLiveness(res: http.ServerResponse, ctx: RouteContext): void {
+  const body: TowerLiveness = {
+    status: 'healthy',
+    version: ctx.version,
+    startedAt: ctx.startedAt,
+    schemaVersion: GLOBAL_CURRENT_VERSION,
+  };
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 }
