@@ -13,14 +13,19 @@ import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
 import {
   fetchForOverview,
   overviewBackend,
+  overviewPath,
   parseLinkedIssue,
   parseLabelDefaults,
   parseArea,
 } from '../../lib/github.js';
 import type { ForgePR, ForgeIssueListItem, OverviewConcept } from '../../lib/github.js';
+import type { MergedPrItem, OverviewBundleResult } from '../../lib/forge-contracts.js';
 import { ForgeRateLimiter, budgetKeyFor, type RateLimitProbe } from '../../lib/forge-rate-limit.js';
 import { loadProtocol } from '../../commands/porch/protocol.js';
 import { ResolvedEnrichmentCache } from './resolved-enrichment-cache.js';
+import {
+  LIST_TTL_MS, SEARCH_TTL_MS, USER_TTL_MS, INVALIDATE_DEBOUNCE_MS, FAILURE_WINDOW_MIN_MS, FAILURE_WINDOW_MAX_MS,
+} from './overview-budget.js';
 import type {
   PlanPhase,
   OverviewBuilder,
@@ -1040,6 +1045,23 @@ interface FetchOutcome<T> {
   backend: string | null;
 }
 
+/** The four forge-backed list sections the payload is built from, on either overview path. */
+interface ListOutcomes {
+  prs: FetchOutcome<ForgePR[]>;
+  issues: FetchOutcome<ForgeIssueListItem[]>;
+  closed: FetchOutcome<ForgeIssueListItem[]>;
+  merged: FetchOutcome<MergedPrItem[]>;
+}
+
+/**
+ * One freshness group of the bundle path (Spec 1995). Only positive entries are
+ * stored: a failed call leaves the last one serving until its own expiry.
+ * `fetchedAt` is the dispatch time, `expiresAt` the completion time plus the TTL.
+ */
+interface GroupEntry<T> { data: T; fetchedAt: number; expiresAt: number }
+interface OpenGroup { prs: ForgePR[]; issues: ForgeIssueListItem[] }
+interface WindowsGroup { closed: ForgeIssueListItem[]; merged: MergedPrItem[] }
+
 export interface OverviewCacheOptions {
   /** Clock, injectable for tests. */
   now?: () => number;
@@ -1047,26 +1069,20 @@ export interface OverviewCacheOptions {
   probe?: RateLimitProbe;
 }
 
-/** Open lists: what porch/VS Code invalidation refreshes. */
-const LIST_TTL_MS = 180_000;
-/** The two 24 h searches: invalidation never touches these. */
-const SEARCH_TTL_MS = 600_000;
-/** GitHub identity is session-stable. */
-const USER_TTL_MS = 3_600_000;
-/** A list refetches at most once per minute per workspace because of invalidation. */
-const INVALIDATE_DEBOUNCE_MS = 60_000;
-/** Failure window: 60 s, doubling per window (not per failed command) to 15 min. */
-const FAILURE_WINDOW_MIN_MS = 60_000;
-const FAILURE_WINDOW_MAX_MS = 15 * 60_000;
-
 export class OverviewCache {
   private prCache = new Map<string, CacheEntry<ForgePR[]>>();
   private issueCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
   private closedCache = new Map<string, CacheEntry<ForgeIssueListItem[]>>();
-  private mergedPRCache = new Map<string, CacheEntry<ForgePR[]>>();
+  private mergedPRCache = new Map<string, CacheEntry<MergedPrItem[]>>();
   private currentUserCache = new Map<string, CacheEntry<string>>();
+  /** Bundle path (Spec 1995): the open lists, which honour invalidate(). */
+  private openGroups = new Map<string, GroupEntry<OpenGroup>>();
+  /** Bundle path: the 24 h windows, which ride along on open-list calls and are never invalidated. */
+  private windowGroups = new Map<string, GroupEntry<WindowsGroup>>();
   /** Single-flight per `<workspace>:<concept>` (#1645). */
   private inflight = new Map<string, Promise<FetchOutcome<unknown>>>();
+  /** Bundle path: single-flight per `<workspace>:overview-bundle`. */
+  private bundleInflight = new Map<string, Promise<void>>();
   /** Escalating failure window per `<workspace>:<budget>`. */
   private failureWindows = new Map<string, { level: number; startedAt: number; ttl: number }>();
   /** Epoch of the last invalidate(); open-list entries fetched before it are stale once debounced. */
@@ -1160,14 +1176,14 @@ export class OverviewCache {
     );
 
     // 2. Fetch PRs, issues, recently closed, merged PRs, and current user in
-    //    parallel (each is independently cached)
-    const [prsOutcome, issuesOutcome, closedOutcome, mergedOutcome, userOutcome] = await Promise.all([
-      this.cachedFetch<ForgePR[]>(this.prCache, workspaceRoot, 'pr-list', LIST_TTL_MS, true),
-      this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, workspaceRoot, 'issue-list', LIST_TTL_MS, true),
-      this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, workspaceRoot, 'recently-closed', SEARCH_TTL_MS, false),
-      this.cachedFetch<ForgePR[]>(this.mergedPRCache, workspaceRoot, 'recently-merged', SEARCH_TTL_MS, false),
+    //    parallel. The four lists come from one overview-bundle call, or from
+    //    four independently cached concepts (Spec 1995, Decision 1).
+    const listPath = overviewPath(workspaceRoot);
+    const [lists, userOutcome] = await Promise.all([
+      listPath.kind === 'bundle' ? this.bundleLists(workspaceRoot) : this.fourCallLists(workspaceRoot),
       this.cachedFetch<string>(this.currentUserCache, workspaceRoot, 'user-identity', USER_TTL_MS, false),
     ]);
+    const { prs: prsOutcome, issues: issuesOutcome, closed: closedOutcome, merged: mergedOutcome } = lists;
     const prs = prsOutcome.data;
     const issues = issuesOutcome.data;
     const closed = closedOutcome.data;
@@ -1251,7 +1267,7 @@ export class OverviewCache {
     let recentlyClosed: OverviewRecentlyClosed[] = [];
     if (closed !== null) {
       // Build issue→prUrl map from merged PRs
-      const issueToPrUrl = new Map<string, string>();
+      const issueToPrUrl = new Map<string, string | undefined>();
       if (mergedPRs) {
         for (const pr of mergedPRs) {
           const linkedIssue = parseLinkedIssue(pr.body || '', pr.title);
@@ -1349,6 +1365,17 @@ export class OverviewCache {
   // Private cache helpers (#1645)
   // ===========================================================================
 
+  /** The four list sections from four independently cached concepts. */
+  private async fourCallLists(cwd: string): Promise<ListOutcomes> {
+    const [prs, issues, closed, merged] = await Promise.all([
+      this.cachedFetch<ForgePR[]>(this.prCache, cwd, 'pr-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.issueCache, cwd, 'issue-list', LIST_TTL_MS, true),
+      this.cachedFetch<ForgeIssueListItem[]>(this.closedCache, cwd, 'recently-closed', SEARCH_TTL_MS, false),
+      this.cachedFetch<MergedPrItem[]>(this.mergedPRCache, cwd, 'recently-merged', SEARCH_TTL_MS, false),
+    ]);
+    return { prs, issues, closed, merged };
+  }
+
   /**
    * Serve `concept` for `cwd` from cache, or dispatch exactly one fetch.
    * `listCache` entries additionally honour invalidate() (debounced).
@@ -1433,6 +1460,124 @@ export class OverviewCache {
     const ttl = Math.min(FAILURE_WINDOW_MIN_MS * 2 ** level, FAILURE_WINDOW_MAX_MS);
     this.failureWindows.set(key, { level, startedAt: now, ttl });
     return ttl;
+  }
+
+  /**
+   * Read-only: is a failure window running for `key`? Safe on every poll,
+   * unlike `failureWindow()`, which opens a new, longer window once the last
+   * one has elapsed and so may only run when a call has actually failed.
+   */
+  private isFailureWindowOpen(key: string, now: number): boolean {
+    const w = this.failureWindows.get(key);
+    return w !== undefined && now < w.startedAt + w.ttl;
+  }
+
+  // ===========================================================================
+  // Bundle path (Spec 1995): one overview-bundle call per open-list refresh
+  // ===========================================================================
+
+  /**
+   * The four list sections from one `overview-bundle` call. Only the open
+   * lists make a call due; the 24 h windows ride along when they are due. A
+   * failed call is never followed by the four concepts.
+   */
+  private async bundleLists(cwd: string): Promise<ListOutcomes> {
+    const backend = overviewBackend('overview-bundle', cwd);
+    const budget = backend === null ? null : budgetKeyFor(backend, 'overview-bundle');
+    if (backend !== null && budget !== null && this.bundleDue(cwd, budget, this.now())) {
+      await this.bundleFlight(cwd, backend, budget);
+    }
+    // Every waiter reads the groups after the flight settles.
+    return this.readBundleGroups(cwd, backend, budget);
+  }
+
+  /**
+   * The open lists are missing, expired, or invalidated (positive, fetched
+   * before the last invalidate(), and at least a debounce old), and no gate
+   * holds: the budget is not suspended and no whole-call failure window runs.
+   */
+  private bundleDue(cwd: string, budget: string, now: number): boolean {
+    const open = this.openGroups.get(cwd);
+    const due = open === undefined || now >= open.expiresAt
+      || (open.fetchedAt < this.invalidatedAt && now - open.fetchedAt >= INVALIDATE_DEBOUNCE_MS);
+    return due && !this.limiter.isSuspended(budget, now) && !this.isFailureWindowOpen(`${cwd}:${budget}`, now);
+  }
+
+  private bundleFlight(cwd: string, backend: string, budget: string): Promise<void> {
+    const key = `${cwd}:overview-bundle`;
+    const existing = this.bundleInflight.get(key);
+    if (existing) return existing;
+    const flight = this.dispatchBundle(cwd, backend, budget).finally(() => {
+      // Identity check: a settling flight must never unregister a newer one.
+      if (this.bundleInflight.get(key) === flight) this.bundleInflight.delete(key);
+    });
+    this.bundleInflight.set(key, flight);
+    return flight;
+  }
+
+  /** Run the bundle once and record the outcome per freshness group. Never rejects. */
+  private async dispatchBundle(cwd: string, backend: string, budget: string): Promise<void> {
+    const dispatchedAt = this.now();
+    const windowsFailureKey = `${cwd}:${budget}:windows`;
+    // The windows ride along once they are old enough that the next open-list
+    // refresh (at most LIST_TTL away) could find them past SEARCH_TTL.
+    const windows = this.windowGroups.get(cwd);
+    const includeWindows = (windows === undefined || dispatchedAt - windows.fetchedAt >= SEARCH_TTL_MS - LIST_TTL_MS)
+      && !this.isFailureWindowOpen(windowsFailureKey, dispatchedAt);
+
+    let bundle: OverviewBundleResult | null = null;
+    let errorText = '';
+    try {
+      const result = await fetchForOverview('overview-bundle', cwd, { includeWindows });
+      // fetchForOverview validates the output against its contract.
+      if (result.error) errorText = `${result.error.stderr}\n${result.error.message}`;
+      else bundle = result.data as OverviewBundleResult | null;
+    } catch (err) {
+      errorText = err instanceof Error ? err.message : String(err);
+    }
+    const now = this.now();
+
+    if (bundle === null) {
+      // Whole-call failure: both groups keep serving their positive entries
+      // until their own expiry.
+      this.limiter.noteFailure(budget, backend, cwd, errorText, now);
+      this.failureWindow(`${cwd}:${budget}`, now);
+      return;
+    }
+    this.limiter.noteSuccess(budget, dispatchedAt);
+    this.failureWindows.delete(`${cwd}:${budget}`);
+    this.openGroups.set(cwd, { data: { prs: bundle.prs, issues: bundle.issues }, fetchedAt: dispatchedAt, expiresAt: now + LIST_TTL_MS });
+    if (!includeWindows) return;
+
+    if (bundle.windowsError !== undefined) {
+      // Only the windows failed. A rate-limit message still suspends the budget.
+      this.failureWindow(windowsFailureKey, now);
+      this.limiter.noteFailure(budget, backend, cwd, bundle.windowsError, now);
+      return;
+    }
+    this.failureWindows.delete(windowsFailureKey);
+    // Requested and no windowsError: the contract guarantees both arrays.
+    this.windowGroups.set(cwd, {
+      data: { closed: bundle.recentlyClosed!, merged: bundle.recentlyMerged! },
+      fetchedAt: dispatchedAt,
+      expiresAt: now + SEARCH_TTL_MS,
+    });
+  }
+
+  /** Serve each group's entry while it is unexpired; otherwise the section is missing. */
+  private readBundleGroups(cwd: string, backend: string | null, budget: string | null): ListOutcomes {
+    const now = this.now();
+    const rateLimitedUntil = budget === null ? null : this.limiter.resetAt(budget, now);
+    const open = this.openGroups.get(cwd);
+    const windows = this.windowGroups.get(cwd);
+    const openData = open !== undefined && now < open.expiresAt ? open.data : null;
+    const windowsData = windows !== undefined && now < windows.expiresAt ? windows.data : null;
+    return {
+      prs: { data: openData?.prs ?? null, rateLimitedUntil, backend },
+      issues: { data: openData?.issues ?? null, rateLimitedUntil, backend },
+      closed: { data: windowsData?.closed ?? null, rateLimitedUntil, backend },
+      merged: { data: windowsData?.merged ?? null, rateLimitedUntil, backend },
+    };
   }
 }
 

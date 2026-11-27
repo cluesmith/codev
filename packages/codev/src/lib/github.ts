@@ -11,10 +11,13 @@
 
 import { execFile } from 'node:child_process';
 import { UNCATEGORIZED_AREA } from '@cluesmith/codev-sdk/constants';
-import { executeForgeCommand, executeForgeCommandDetailed, resolveForgeBackend, type ForgeConfig, type ForgeCommandResult } from './forge.js';
+import {
+  executeForgeCommand, executeForgeCommandDetailed, loadForgeConfig, resolveForgeBackend, resolveOverviewPath,
+  type ForgeConfig, type ForgeCommandResult, type OverviewPath,
+} from './forge.js';
 import type { RateLimitProbeResult } from './forge-rate-limit.js';
 import { getRepoInfo } from './team-github.js';
-import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem } from './forge-contracts.js';
+import type { IssueViewResult, PrListItem, PrViewResult, IssueListItem, MergedPrItem, OverviewBundleResult } from './forge-contracts.js';
 import { ISSUE_KEY_SOURCE, canonicalIssueId } from './issue-id.js';
 
 // =============================================================================
@@ -254,16 +257,77 @@ export async function fetchRecentMergedPRs(
 // limit from a missing CLI, and know which backend each concept spends on.
 // =============================================================================
 
-export type OverviewConcept = 'pr-list' | 'issue-list' | 'recently-closed' | 'recently-merged' | 'user-identity';
+export type OverviewConcept =
+  | 'pr-list' | 'issue-list' | 'recently-closed' | 'recently-merged' | 'user-identity' | 'overview-bundle';
+
+/**
+ * Time budget for one `overview-bundle` call (Spec 1995). The four list concepts
+ * had 30 s each and ran in parallel; the bundle runs every page of every section
+ * in series in one process, so its budget is set where only a stuck forge hits it.
+ */
+export const OVERVIEW_BUNDLE_TIMEOUT_MS = 60_000;
+/** Output budget for one `overview-bundle` call: today's four 10 MB budgets in one stdout. */
+export const OVERVIEW_BUNDLE_MAX_BUFFER = 40 * 1024 * 1024;
+
+export interface OverviewFetchOptions {
+  /** `overview-bundle` only: also fetch the two 24 h windows. */
+  includeWindows?: boolean;
+}
 
 /** Resolved backend key for an overview concept in `cwd` (see `resolveForgeBackend`). */
 export function overviewBackend(concept: OverviewConcept, cwd: string): string | null {
   return resolveForgeBackend(concept, { cwd });
 }
 
-/** Run one overview concept, post-processed exactly like its `fetch*` counterpart. */
-export async function fetchForOverview(concept: OverviewConcept, cwd: string): Promise<ForgeCommandResult> {
+/**
+ * The overview path for `cwd` (Spec 1995): one config load, no script reads.
+ * A config that fails to load selects the bundle, whose call then fails with
+ * that config error, as each of the four calls would.
+ */
+export function overviewPath(cwd: string): OverviewPath {
+  let forgeConfig: ForgeConfig | null;
+  try {
+    forgeConfig = loadForgeConfig(cwd);
+  } catch {
+    return { kind: 'bundle' };
+  }
+  return resolveOverviewPath(forgeConfig);
+}
+
+/**
+ * Run one overview concept, post-processed exactly like its `fetch*` counterpart.
+ * `overview-bundle` output is validated against its contract: non-conforming
+ * output is returned as a failed call, never as data.
+ */
+export async function fetchForOverview(
+  concept: OverviewConcept,
+  cwd: string,
+  options: OverviewFetchOptions = {},
+): Promise<ForgeCommandResult> {
   switch (concept) {
+    case 'overview-bundle': {
+      const includeWindows = options.includeWindows === true;
+      // The switch is always set: an unset one would be inherited from Tower's
+      // own environment, and a stray "1" there would fetch, and pay for,
+      // windows that are then thrown away.
+      const env: Record<string, string> = includeWindows
+        ? { CODEV_INCLUDE_WINDOWS: '1', CODEV_SINCE_DATE: sinceTimestamp24h() }
+        : { CODEV_INCLUDE_WINDOWS: '' };
+      const r = await executeForgeCommandDetailed(concept, env, {
+        cwd,
+        timeoutMs: OVERVIEW_BUNDLE_TIMEOUT_MS,
+        maxBuffer: OVERVIEW_BUNDLE_MAX_BUFFER,
+      });
+      if (r.error) return r;
+      const parsed = parseOverviewBundle(r.data, includeWindows);
+      if (typeof parsed === 'string') {
+        return {
+          data: null,
+          error: { message: `overview-bundle output does not conform to its contract: ${parsed}`, stderr: '', exitCode: null, timedOut: false },
+        };
+      }
+      return { data: parsed, error: null };
+    }
     case 'user-identity': {
       const r = await executeForgeCommandDetailed(concept, {}, { cwd, raw: true });
       return { ...r, data: typeof r.data === 'string' && r.data.trim() ? r.data.trim() : null };
@@ -276,6 +340,113 @@ export async function fetchForOverview(concept: OverviewConcept, cwd: string): P
     default:
       return executeForgeCommandDetailed(concept, {}, { cwd });
   }
+}
+
+// =============================================================================
+// overview-bundle conformance (Spec 1995) — one rule set per item contract in
+// forge-contracts.ts, field for field.
+// =============================================================================
+
+type FieldCheck = (value: unknown) => boolean;
+interface FieldRule { check: FieldCheck; required: boolean }
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isString: FieldCheck = (v) => typeof v === 'string';
+const isNumber: FieldCheck = (v) => typeof v === 'number';
+const isBoolean: FieldCheck = (v) => typeof v === 'boolean';
+const isDate: FieldCheck = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+const isLogin: FieldCheck = (v) => isObject(v) && typeof v.login === 'string';
+const arrayOf = (check: FieldCheck): FieldCheck => (v) => Array.isArray(v) && v.every(check);
+const required = (check: FieldCheck): FieldRule => ({ check, required: true });
+const optional = (check: FieldCheck): FieldRule => ({ check, required: false });
+
+/** `PrListItem`. */
+const PR_LIST_ITEM_RULES: Record<string, FieldRule> = {
+  number: required(isNumber),
+  title: required(isString),
+  url: required(isString),
+  reviewDecision: required(isString),
+  body: required(isString),
+  createdAt: required(isString),
+  mergedAt: optional(isString),
+  author: optional(isLogin),
+  reviewRequests: required(arrayOf(isString)),
+  isDraft: required(isBoolean),
+};
+
+/** `IssueListItem`. */
+const ISSUE_LIST_ITEM_RULES: Record<string, FieldRule> = {
+  number: required((v) => typeof v === 'number' || typeof v === 'string'),
+  title: required(isString),
+  url: required(isString),
+  labels: required(arrayOf((l) => isObject(l) && typeof l.name === 'string')),
+  createdAt: optional(isString),
+  closedAt: optional(isString),
+  author: optional(isLogin),
+  assignees: optional(arrayOf(isLogin)),
+  body: optional(isString),
+};
+
+/** `IssueListItem` in the closed window: the 24 h filter and the sort read `closedAt`. */
+const CLOSED_ITEM_RULES: Record<string, FieldRule> = { ...ISSUE_LIST_ITEM_RULES, closedAt: required(isDate) };
+
+/** `MergedPrItem`; the 24 h filter reads `mergedAt`. */
+const MERGED_PR_ITEM_RULES: Record<string, FieldRule> = {
+  number: required(isNumber),
+  title: required(isString),
+  url: optional(isString),
+  body: required(isString),
+  createdAt: required(isString),
+  mergedAt: required(isDate),
+  headRefName: required(isString),
+};
+
+/** The first contract violation in a section, as `section[index].field …`, or null. */
+function sectionViolation(section: string, value: unknown, rules: Record<string, FieldRule>): string | null {
+  if (!Array.isArray(value)) return `${section} is ${value === undefined ? 'missing' : 'not an array'}`;
+  for (let i = 0; i < value.length; i++) {
+    const item: unknown = value[i];
+    if (!isObject(item)) return `${section}[${i}] is not an object`;
+    for (const [field, rule] of Object.entries(rules)) {
+      const v = item[field];
+      if (v === undefined) {
+        if (rule.required) return `${section}[${i}].${field} is missing`;
+      } else if (!rule.check(v)) {
+        return `${section}[${i}].${field} has the wrong type`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate `overview-bundle` output against `OverviewBundleResult`. Returns the
+ * result (window sections only when requested, filtered to the last 24 h), or
+ * a description of the first violation.
+ */
+export function parseOverviewBundle(raw: unknown, includeWindows: boolean): OverviewBundleResult | string {
+  if (!isObject(raw)) return 'output is not a JSON object';
+  const violation = sectionViolation('prs', raw.prs, PR_LIST_ITEM_RULES)
+    ?? sectionViolation('issues', raw.issues, ISSUE_LIST_ITEM_RULES);
+  if (violation) return violation;
+  const result: OverviewBundleResult = { prs: raw.prs as PrListItem[], issues: raw.issues as IssueListItem[] };
+  if (!includeWindows) return result;
+
+  const hasClosed = raw.recentlyClosed !== undefined;
+  const hasMerged = raw.recentlyMerged !== undefined;
+  if (raw.windowsError !== undefined) {
+    if (typeof raw.windowsError !== 'string' || raw.windowsError.trim() === '') return 'windowsError is not a non-empty string';
+    if (hasClosed || hasMerged) return 'windowsError is present together with window arrays';
+    return { ...result, windowsError: raw.windowsError };
+  }
+  const windowViolation = sectionViolation('recentlyClosed', raw.recentlyClosed, CLOSED_ITEM_RULES)
+    ?? sectionViolation('recentlyMerged', raw.recentlyMerged, MERGED_PR_ITEM_RULES);
+  if (windowViolation) return windowViolation;
+  return {
+    ...result,
+    recentlyClosed: withinLast24h(raw.recentlyClosed, 'closedAt') as IssueListItem[],
+    recentlyMerged: withinLast24h(raw.recentlyMerged, 'mergedAt') as MergedPrItem[],
+  };
 }
 
 /**

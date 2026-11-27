@@ -9,7 +9,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
-import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, isHybridProvider, type ConceptResolution } from '../lib/forge.js';
+import { executeForgeCommandSync, loadForgeConfig, validateForgeConfig, resolveAllConcepts, isHybridProvider, resolveOverviewPath, type ConceptResolution, type OverviewPath } from '../lib/forge.js';
+import { projectHourlyForgeCalls } from '../agent-farm/servers/overview-budget.js';
 import { detectHarnessFromCommand, getRetirement } from '../agent-farm/utils/harness.js';
 import { auditPrGates, formatPrGateWarning } from '../lib/pr-gate-audit.js';
 import { auditStateFileIgnore } from '../lib/gitignore.js';
@@ -1253,6 +1254,17 @@ interface WarningInfo {
 }
 
 /**
+ * The overview-path line (Spec 1995): how Tower fetches this workspace's
+ * overview lists, and the forge calls/h that path projects. The projection is
+ * the idle steady state; invalidation only adds refreshes.
+ */
+function formatOverviewPath(path: OverviewPath): string {
+  const route = path.kind === 'bundle' ? 'bundled' : `four calls (${path.reason})`;
+  const calls = Math.round(projectHourlyForgeCalls(path.kind));
+  return `${route}: ~${calls} forge calls/h per watched workspace (idle steady state, a floor that invalidation can raise)`;
+}
+
+/**
  * Main doctor function
  */
 export async function doctor(): Promise<number> {
@@ -1692,7 +1704,7 @@ export async function doctor(): Promise<number> {
       console.log('');
     }
 
-    // Full forge concept reporting: all 18 concepts with resolution source and executable check
+    // Full forge concept reporting: every known concept with resolution source and executable check
     const forgeConfig = loadForgeConfig(workspaceRoot);
     const provider = forgeConfig?.provider ?? 'github';
     console.log(chalk.bold('Forge Concepts') + ` (provider: ${provider})`);
@@ -1710,7 +1722,7 @@ export async function doctor(): Promise<number> {
       }
     }
 
-    // Report all 18 concepts with source and executable availability
+    // Report every known concept with source and executable availability
     const resolutions = resolveAllConcepts(forgeConfig);
     const missingExecs = new Set<string>();
 
@@ -1731,6 +1743,9 @@ export async function doctor(): Promise<number> {
         missingExecs.add(r.executable!);
       }
     }
+
+    // Informational only, never a warning: no rate_limit probe, no cross-workspace total.
+    console.log(`  ${chalk.dim('○')} ${'overview path'.padEnd(20)} ${formatOverviewPath(resolveOverviewPath(forgeConfig))}`);
 
     if (missingExecs.size > 0) {
       warnings++;

@@ -68,7 +68,7 @@ const KNOWN_CONCEPTS = [
   'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
   'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
   'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
+  'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs', 'overview-bundle',
 ] as const;
 
 // =============================================================================
@@ -132,17 +132,21 @@ function getProviderPresets(): Record<string, Record<string, string | null>> {
     // concept falls through to the github default and would run `gh` on a GitLab or
     // Gitea workspace. Neither could be verified against a real glab or Gitea server, so
     // `codev check` reports them as "not run" by name until a project supplies an override.
-    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs']),
-    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs']),
+    // overview-bundle (Spec 1995) is disabled on every non-GitHub preset for the same
+    // reason: falling through would run the GitHub GraphQL bundle there. Tower then
+    // builds the overview from the four list concepts, as before.
+    gitlab: buildPresetFromScripts('gitlab', ['team-activity', 'on-it-timestamps', 'commit-checks', 'workflow-runs', 'overview-bundle']),
+    gitea: buildPresetFromScripts('gitea', ['team-activity', 'on-it-timestamps', 'pr-search', 'pr-diff', 'commit-checks', 'workflow-runs', 'overview-bundle']),
     // Linear is a hybrid forge (spec 719): it owns *issues*, while every PR
     // concept — pr-create included — deliberately falls through to the github
     // default. Disabling pr-create here would leave Linear the one provider
-    // that can merge a PR but not open one.
-    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps']),
+    // that can merge a PR but not open one. overview-bundle is disabled: the
+    // GitHub bundle would read the backlog from GitHub, not from Linear.
+    linear: buildPresetFromScripts('linear', ['team-activity', 'on-it-timestamps', 'overview-bundle']),
     // Jira Cloud via Atlassian's `acli` (#1740) is hybrid on the Linear model:
     // issue concepts only, every PR concept (pr-create included) on the github
-    // default.
-    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps']),
+    // default. overview-bundle is disabled, as on Linear.
+    jira: buildPresetFromScripts('jira', ['team-activity', 'on-it-timestamps', 'overview-bundle']),
   };
   return _providerPresets;
 }
@@ -170,7 +174,11 @@ const ISSUE_ID_KIND_BY_PROVIDER: Record<string, IssueIdKind> = {
   jira: 'key',
 };
 
-const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed'];
+// `overview-bundle` counts (Spec 1995): an override of it replaces the overview's
+// issue source. So a project's own bundle on linear or jira reports no id kind,
+// although the tracker's ids are keys, as any hand-written issue-concept override
+// does. A preset's disable (null) is not an override and changes nothing.
+const ISSUE_CONCEPTS = ['issue-view', 'issue-list', 'issue-search', 'issue-comment', 'recently-closed', 'overview-bundle'];
 
 /**
  * The shape of the workspace's issue ids, from its provider (#1740). Undefined
@@ -339,6 +347,42 @@ export function getForgeCommand(
 
   // Fall back to default (github)
   return getDefaultCommands()[concept] ?? null;
+}
+
+// =============================================================================
+// Overview path (Spec 1995)
+// =============================================================================
+
+/** The four concepts one `overview-bundle` call replaces. */
+export const OVERVIEW_BUNDLE_CONSTITUENTS = ['pr-list', 'issue-list', 'recently-closed', 'recently-merged'] as const;
+
+/** How Tower fetches a workspace's overview lists: one bundle call, or the four concepts. */
+export type OverviewPath = { kind: 'bundle' } | { kind: 'four-call'; reason: string };
+
+/**
+ * The overview path a forge config selects (Spec 1995, Decision 1). The bundle
+ * is used only when it resolves to a command and the config neither overrides
+ * nor disables any of the four concepts it replaces, so an adopter's override
+ * is never bypassed. A preset's own concept scripts are not overrides: a
+ * project's `overview-bundle` on linear or jira selects the bundle.
+ *
+ * Tower runs this on every poll, so it reads only the config object and the
+ * cached presets: no script reads, and no resolution of every concept.
+ */
+export function resolveOverviewPath(forgeConfig: ForgeConfig | null | undefined): OverviewPath {
+  if (getForgeCommand('overview-bundle', forgeConfig) === null) {
+    const reason = forgeConfig && 'overview-bundle' in forgeConfig
+      ? 'forge config disables overview-bundle'
+      : `provider ${forgeConfig?.provider} disables overview-bundle`;
+    return { kind: 'four-call', reason };
+  }
+  for (const concept of OVERVIEW_BUNDLE_CONSTITUENTS) {
+    if (forgeConfig && concept in forgeConfig) {
+      const verb = forgeConfig[concept] === null ? 'disables' : 'overrides';
+      return { kind: 'four-call', reason: `forge config ${verb} ${concept}` };
+    }
+  }
+  return { kind: 'bundle' };
 }
 
 /**

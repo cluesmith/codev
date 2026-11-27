@@ -11,6 +11,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { deepMerge, loadConfig, resolveProjectConfigPath, resolveLocalConfigPath } from '../lib/config.js';
 import { getActivityHooks } from '../agent-farm/utils/config.js';
+import { getDefaultCommand, getForgeCommand, loadForgeConfig, validateForgeConfig } from '../lib/forge.js';
+import { setFrameworkCacheDir } from '../lib/skeleton.js';
 import { forceHostPlatform } from './helpers/host-platform.js';
 
 // Helpers
@@ -304,6 +306,98 @@ describe('loadConfig', () => {
     // no writeLocalConfig — file absent
     const config = loadConfig(tmpDir);
     expect(config.shell?.architect).toBe('project-architect');
+  });
+});
+
+// =============================================================================
+// forge section layering: a concept's null is "disabled", in every layer (Spec 1995)
+// =============================================================================
+
+describe('loadConfig forge section layering', () => {
+  afterEach(() => {
+    setFrameworkCacheDir(null);
+  });
+
+  it('a project null survives a global forge object', () => {
+    writeGlobalConfig({ forge: { 'pr-list': 'global-pr-list' } });
+    writeProjectConfig(tmpDir, { forge: { 'overview-bundle': null } });
+    const forge = loadConfig(tmpDir).forge!;
+    expect(forge['overview-bundle']).toBeNull();
+    expect('overview-bundle' in forge).toBe(true);
+    expect(forge['pr-list']).toBe('global-pr-list');
+  });
+
+  it('a project null survives a framework-cache forge object', () => {
+    const cacheDir = path.join(tmpDir, 'framework-cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, 'config.json'), JSON.stringify({ forge: { 'issue-list': 'cache-issue-list' } }));
+    setFrameworkCacheDir(cacheDir);
+    writeProjectConfig(tmpDir, { forge: { 'recently-merged': null } });
+    const forge = loadConfig(tmpDir).forge!;
+    expect(forge['recently-merged']).toBeNull();
+    expect(forge['issue-list']).toBe('cache-issue-list');
+  });
+
+  it('a config.local.json null over a project string disables the concept', () => {
+    writeProjectConfig(tmpDir, { forge: { 'overview-bundle': 'project-bundle' } });
+    writeLocalConfig(tmpDir, { forge: { 'overview-bundle': null } });
+    expect(loadConfig(tmpDir).forge?.['overview-bundle']).toBeNull();
+  });
+
+  it('a project string over a global null is that string', () => {
+    writeGlobalConfig({ forge: { 'overview-bundle': null } });
+    writeProjectConfig(tmpDir, { forge: { 'overview-bundle': 'project-bundle' } });
+    expect(loadConfig(tmpDir).forge?.['overview-bundle']).toBe('project-bundle');
+  });
+
+  it('keeps a key present in only one layer, across all four file layers', () => {
+    const cacheDir = path.join(tmpDir, 'framework-cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, 'config.json'), JSON.stringify({ forge: { 'issue-view': 'cache-view' } }));
+    setFrameworkCacheDir(cacheDir);
+    writeGlobalConfig({ forge: { provider: 'gitlab', 'team-activity': null } });
+    writeProjectConfig(tmpDir, { forge: { 'pr-list': 'project-pr-list' } });
+    writeLocalConfig(tmpDir, { forge: { 'on-it-timestamps': null } });
+    expect(loadConfig(tmpDir).forge).toEqual({
+      'issue-view': 'cache-view',
+      provider: 'gitlab',
+      'team-activity': null,
+      'pr-list': 'project-pr-list',
+      'on-it-timestamps': null,
+    });
+  });
+
+  it('a whole-section "forge": null still deletes the section', () => {
+    writeGlobalConfig({ forge: { provider: 'gitlab' } });
+    writeProjectConfig(tmpDir, { forge: null });
+    expect(loadConfig(tmpDir).forge).toBeUndefined();
+  });
+
+  it('a null outside the forge section still deletes the key across layers', () => {
+    writeGlobalConfig({ shell: { shell: 'zsh' } });
+    writeProjectConfig(tmpDir, { shell: { shell: null } });
+    const shell = loadConfig(tmpDir).shell!;
+    expect('shell' in shell).toBe(false);
+    expect(shell.architect).toBe('claude');
+  });
+
+  it('a project "provider": null over a global provider is kept, and reads as unset (github)', () => {
+    writeGlobalConfig({ forge: { provider: 'gitlab' } });
+    writeProjectConfig(tmpDir, { forge: { provider: null } });
+    const forge = loadForgeConfig(tmpDir)!;
+    expect(forge.provider).toBeNull();
+    expect(getForgeCommand('pr-list', forge)).toBe(getDefaultCommand('pr-list'));
+    expect(validateForgeConfig(forge)).toEqual([]);
+  });
+
+  it('a disabled concept resolves to no command through getForgeCommand', () => {
+    writeGlobalConfig({ forge: { 'pr-list': 'global-pr-list' } });
+    writeProjectConfig(tmpDir, { forge: {} });
+    expect(getForgeCommand('overview-bundle', loadForgeConfig(tmpDir))).not.toBeNull();
+
+    writeProjectConfig(tmpDir, { forge: { 'overview-bundle': null } });
+    expect(getForgeCommand('overview-bundle', loadForgeConfig(tmpDir))).toBeNull();
+    expect(getForgeCommand('pr-list', loadForgeConfig(tmpDir))).toBe('global-pr-list');
   });
 });
 

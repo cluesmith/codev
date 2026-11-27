@@ -253,6 +253,10 @@ const DEFAULT_CONFIG: CodevConfig = {
  *  - Objects: recursively merged.
  *  - Arrays: replaced, not concatenated.
  *  - null value: deletes the key from the result.
+ *
+ * So a section that gives `null` a meaning of its own cannot be layered with
+ * this alone: see `mergeConfigLayer`, which keeps a forge concept's `null`
+ * ("disabled") across config layers.
  */
 export function deepMerge<T extends Record<string, unknown>>(base: T, override: Record<string, unknown>): T {
   const result = { ...base };
@@ -285,6 +289,29 @@ export function deepMerge<T extends Record<string, unknown>>(base: T, override: 
   }
 
   return result;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge one config file over the layers below it.
+ *
+ * `deepMerge`, except inside the `forge` section, where `null` is a value — "this concept is
+ * disabled" — rather than a deletion. Plain `deepMerge` would recurse into `forge` whenever a lower
+ * layer has one and delete the null, so the concept would fall through to its default and run.
+ * `ForgeConfig` is flat, so a spread is the whole key-wise merge: the higher layer's string or null
+ * wins, and a key in only one layer is kept. A whole-section `"forge": null` still deletes the
+ * section. When no lower layer has a `forge` object, `deepMerge` assigns the section wholesale and
+ * its nulls already survive.
+ */
+function mergeConfigLayer(base: CodevConfig, layer: Record<string, unknown>): CodevConfig {
+  const merged = deepMerge(base as unknown as Record<string, unknown>, layer) as CodevConfig;
+  if (isPlainObject(base.forge) && isPlainObject(layer.forge)) {
+    merged.forge = { ...base.forge, ...layer.forge } as CodevConfig['forge'];
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +398,9 @@ export function resolveLocalConfigPath(workspaceRoot: string): string | null {
  * web vs mobile roles) — Layer 3 spans every project so can't express
  * "in *this* repo I want X." Add the file to your project's
  * `.gitignore` so it's never accidentally committed.
+ *
+ * Each layer merges by `deepMerge`, except that a `null` inside `forge` is kept as "concept
+ * disabled" (see `mergeConfigLayer`).
  */
 export function loadConfig(workspaceRoot: string): CodevConfig {
   let merged: CodevConfig = defaultConfigForHost();
@@ -381,7 +411,7 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
     const cacheConfigPath = resolve(cacheDir, 'config.json');
     const cacheConfig = readJsonFile(cacheConfigPath);
     if (cacheConfig) {
-      merged = deepMerge(merged as unknown as Record<string, unknown>, cacheConfig) as CodevConfig;
+      merged = mergeConfigLayer(merged, cacheConfig);
     }
   }
 
@@ -389,7 +419,7 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   const globalPath = resolve(homedir(), '.codev', 'config.json');
   const globalConfig = readJsonFile(globalPath);
   if (globalConfig) {
-    merged = deepMerge(merged as unknown as Record<string, unknown>, globalConfig) as CodevConfig;
+    merged = mergeConfigLayer(merged, globalConfig);
   }
 
   // Layer 4: project config (also checks for legacy af-config.json)
@@ -397,7 +427,7 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   if (projectPath) {
     const projectConfig = readJsonFile(projectPath);
     if (projectConfig) {
-      merged = deepMerge(merged as unknown as Record<string, unknown>, projectConfig) as CodevConfig;
+      merged = mergeConfigLayer(merged, projectConfig);
     }
   }
 
@@ -406,7 +436,7 @@ export function loadConfig(workspaceRoot: string): CodevConfig {
   if (localPath) {
     const localConfig = readJsonFile(localPath);
     if (localConfig) {
-      merged = deepMerge(merged as unknown as Record<string, unknown>, localConfig) as CodevConfig;
+      merged = mergeConfigLayer(merged, localConfig);
     }
   }
 

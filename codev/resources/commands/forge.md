@@ -61,6 +61,10 @@ Set a concept to `null` to disable it. The feature that uses it will gracefully 
 }
 ```
 
+A `null` holds in whichever config layer sets it (`~/.codev/config.json`, `.codev/config.json`
+or `.codev/config.local.json`). A `forge` section in another layer below it does not bring the
+concept back. A higher layer can re-enable it with a command string.
+
 ## Concepts Reference
 
 ### Core Issue/PR Operations
@@ -129,6 +133,53 @@ call. Supply an override to enable them, e.g. `"commit-checks": "./scripts/my-ci
 | `on-it-timestamps` | `CODEV_ISSUE_NUMBERS`, `CODEV_GRAPHQL_QUERY`, `CODEV_REPO_OWNER`, `CODEV_REPO_NAME` | JSON | "On it" comment timestamps |
 | `team-activity` | `CODEV_GRAPHQL_QUERY` | JSON | Batched team activity query |
 | `user-identity` | — | plain text | Current user's handle |
+
+### Tower Overview
+
+| Concept | Env Vars | Output | Description |
+|---------|----------|--------|-------------|
+| `overview-bundle` | `CODEV_INCLUDE_WINDOWS`, `CODEV_SINCE_DATE` | JSON object `{prs, issues, recentlyClosed?, recentlyMerged?, windowsError?}` | Everything Tower's overview lists need, in one call |
+
+`overview-bundle` replaces four concepts in Tower's overview (the dashboard and the VS Code Work
+view): `pr-list`, `issue-list`, `recently-closed` and `recently-merged`. On GitHub one
+`gh api graphql` query answers all four.
+
+**Inputs.** Without `CODEV_INCLUDE_WINDOWS` the call returns the open lists only: `prs` holds the
+same items as `pr-list` (the 30 newest open PRs) and `issues` the same items as `issue-list` (the
+200 newest open issues). With `CODEV_INCLUDE_WINDOWS=1` it also returns the two 24 h windows,
+`recentlyClosed` and `recentlyMerged`, as `recently-closed` and `recently-merged` would (up to
+1000 each, cut off at `CODEV_SINCE_DATE`).
+
+**Conformance.** Any other output is a failed call:
+
+- `prs` and `issues` are always arrays.
+- When the windows were requested, exactly one of these is present: both `recentlyClosed` and
+  `recentlyMerged`, or a non-empty `windowsError` string.
+- Every item conforms to its section's contract (`pr-list`, `issue-list`, `recently-closed`,
+  `recently-merged`), and the window items carry a parseable `closedAt` / `mergedAt`.
+
+`windowsError` reports an error confined to the window searches, such as a search timeout. The open
+lists are still used, and only the windows count as failed. One call has a 60 s budget.
+
+**When Tower uses it.** Only when `overview-bundle` resolves to a command and the forge config
+neither overrides nor disables any of the four concepts it replaces. Otherwise Tower makes the four
+calls, as before, so an override of any of them is never bypassed. Every non-GitHub preset
+(`gitlab`, `gitea`, `linear`, `jira`) disables it.
+
+On the bundle path each refresh is one call. The open lists refresh every 180 s, and invalidation
+makes that sooner, at most once a minute. The two windows ride along on that same call once they
+are 420 s old, so they never pass their 600 s TTL. `codev doctor` prints the path a workspace takes
+and its projected forge calls per hour: 20 on the bundle, 52 on the four calls.
+
+**Overriding or disabling it.** `"overview-bundle": null` keeps a GitHub workspace on the four
+calls. A command string replaces the bundle. It must honour the inputs and the conformance rule,
+because one bad response fails all four sections together. On `linear` or `jira` a project's
+own `overview-bundle` is used: the preset's issue scripts are not overrides. That command is then
+responsible for every section, the PRs included, since nothing in it falls through to `gh`.
+
+**Requirements.** The GitHub script needs `gh` 2.0.0 or later and `jq`. As with `gh pr list`,
+`reviewRequests` lists user reviewers only. Team and bot reviewers (Copilot among them) are left
+out.
 
 ### System
 
@@ -248,17 +299,29 @@ Each script receives `CODEV_*` environment variables and should output JSON to s
 
 ## Validation
 
-Run `codev doctor` to check forge configuration:
+Run `codev doctor` to check forge configuration. It lists every concept with its source and the
+executable it needs, then the overview path. For a gitlab project that overrides `pr-merge`:
 
 ```
 $ codev doctor
 
-Forge Concepts (custom command overrides)
-  ✓ Provider: gitlab
-  ✓ Concept 'pr-merge' overridden: glab mr merge "$CODEV_PR_NUMBER" --squash --yes
-  ○ Concept 'team-activity' is explicitly disabled
-  ✓ All forge concepts valid
+Forge Concepts (provider: gitlab)
+
+  ✓ issue-view           preset  glab
+  ...
+  ○ team-activity        disabled
+  ○ on-it-timestamps     disabled
+  ✓ pr-create            preset  glab
+  ✓ pr-merge             override  glab
+  ...
+  ○ commit-checks        disabled
+  ○ workflow-runs        disabled
+  ○ overview-bundle      disabled
+  ○ overview path        four calls (provider gitlab disables overview-bundle): ~52 forge calls/h per watched workspace (idle steady state, a floor that invalidation can raise)
 ```
+
+A missing executable is a warning (`⚠ … glab not found`). So is an unknown concept name, an
+unknown provider or an empty command in the `forge` section. The `overview path` line is information only.
 
 ## Writing Custom Concept Commands
 

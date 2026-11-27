@@ -36,23 +36,28 @@ const executeForgeCommandSyncMock = vi.hoisted(() => vi.fn((concept: string) => 
 const loadForgeConfigMock = vi.hoisted(() => vi.fn(() => null));
 const validateForgeConfigMock = vi.hoisted(() => vi.fn(() => []));
 const resolveAllConceptsMock = vi.hoisted(() => vi.fn(() => {
-  // All 20 concepts (KNOWN_CONCEPTS in lib/forge.ts) as default/gh-based, so the
+  // All 21 concepts (KNOWN_CONCEPTS in lib/forge.ts) as default/gh-based, so the
   // doctor report's rendering is exercised for every row it actually prints.
   const concepts = [
     'issue-view', 'pr-list', 'issue-list', 'issue-search', 'issue-comment', 'pr-exists',
     'recently-closed', 'recently-merged', 'user-identity', 'team-activity',
     'on-it-timestamps', 'pr-create', 'pr-merge', 'pr-search', 'pr-view', 'pr-diff',
-    'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs',
+    'auth-status', 'repo-archive', 'commit-checks', 'workflow-runs', 'overview-bundle',
   ];
   return concepts.map(c => ({ concept: c, command: `gh ${c}`, source: 'default', executable: 'gh' }));
 }));
-vi.mock('../lib/forge.js', () => ({
-  executeForgeCommandSync: executeForgeCommandSyncMock,
-  loadForgeConfig: loadForgeConfigMock,
-  validateForgeConfig: validateForgeConfigMock,
-  resolveAllConcepts: resolveAllConceptsMock,
-  isHybridProvider: (provider?: string) => provider === 'linear' || provider === 'jira',
-}));
+vi.mock('../lib/forge.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/forge.js')>();
+  return {
+    executeForgeCommandSync: executeForgeCommandSyncMock,
+    loadForgeConfig: loadForgeConfigMock,
+    validateForgeConfig: validateForgeConfigMock,
+    resolveAllConcepts: resolveAllConceptsMock,
+    isHybridProvider: (provider?: string) => provider === 'linear' || provider === 'jira',
+    // Real path selection (Spec 1995): it reads only the config loadForgeConfigMock returns.
+    resolveOverviewPath: actual.resolveOverviewPath,
+  };
+});
 
 // A minimal fake child process for the async `spawn`-based agy auth probe.
 // verifyAgy streams stdout/stderr and kills on the OAuth marker.
@@ -104,6 +109,8 @@ vi.mock('chalk', () => {
       yellow: createChainableColor(),
       red: createChainableColor(),
       blue: identity,
+      // Spec 1995: an override row in the concept table renders its source with chalk.cyan.
+      cyan: identity,
       dim: identity,
       // #1338: the codex-architect "supported" branch calls chalk.gray (doctor.ts).
       // Without this, chalk.gray throws into the shell-section catch {}, aborting
@@ -128,6 +135,30 @@ vi.mock('chalk', () => {
 function restoreEnv(key: string, prior: string | undefined): void {
   if (prior === undefined) delete process.env[key];
   else process.env[key] = prior;
+}
+
+/** Run doctor with every executable present except `missing`, capturing console.log lines. */
+async function runDoctor(missing: string[] = []): Promise<string[]> {
+  vi.mocked(execSync).mockImplementation((cmd: string) => {
+    if (cmd.includes('which')) {
+      if (missing.some(m => cmd.includes(m))) throw new Error('not found');
+      return Buffer.from('/usr/bin/command');
+    }
+    return Buffer.from('');
+  });
+  vi.mocked(spawnSync).mockImplementation((cmd: string) => {
+    const responses: Record<string, string> = { node: 'v22.0.0', git: 'git version 2.40.0' };
+    return {
+      status: 0, stdout: responses[cmd] || 'working', stderr: '', signal: null,
+      output: [null, responses[cmd] || 'working', ''], pid: 0,
+    } as never;
+  });
+  vi.resetModules();
+  const logOutput: string[] = [];
+  vi.spyOn(console, 'log').mockImplementation((...args) => { logOutput.push(args.join(' ')); });
+  const { doctor } = await import('../commands/doctor.js');
+  await doctor();
+  return logOutput;
 }
 
 describe('doctor command', () => {
@@ -456,29 +487,6 @@ describe('doctor command', () => {
     type ForgeOpts = { forgeConfig?: { provider?: string } | null } | undefined;
     const isGhCall = (opts: ForgeOpts) => opts?.forgeConfig?.provider === 'github' || opts?.forgeConfig == null;
 
-    async function runDoctor(missing: string[] = []): Promise<string[]> {
-      vi.mocked(execSync).mockImplementation((cmd: string) => {
-        if (cmd.includes('which')) {
-          if (missing.some(m => cmd.includes(m))) throw new Error('not found');
-          return Buffer.from('/usr/bin/command');
-        }
-        return Buffer.from('');
-      });
-      vi.mocked(spawnSync).mockImplementation((cmd: string) => {
-        const responses: Record<string, string> = { node: 'v22.0.0', git: 'git version 2.40.0' };
-        return {
-          status: 0, stdout: responses[cmd] || 'working', stderr: '', signal: null,
-          output: [null, responses[cmd] || 'working', ''], pid: 0,
-        };
-      });
-      vi.resetModules();
-      const logOutput: string[] = [];
-      vi.spyOn(console, 'log').mockImplementation((...args) => { logOutput.push(args.join(' ')); });
-      const { doctor } = await import('../commands/doctor.js');
-      await doctor();
-      return logOutput;
-    }
-
     afterEach(() => {
       loadForgeConfigMock.mockImplementation(() => null);
       resolveAllConceptsMock.mockReset();
@@ -546,6 +554,52 @@ describe('doctor command', () => {
         expect(out.some(l => / auth\s/.test(l) && /authenticated/.test(l)), provider).toBe(false);
         expect(executeForgeCommandSyncMock.mock.calls.some(c => c[0] === 'auth-status'), provider).toBe(false);
       }
+    });
+  });
+
+  describe('overview path line (Spec 1995)', () => {
+    // The real concept table and path selection, from the config loadForgeConfigMock returns.
+    async function runWithConfig(config: Record<string, unknown> | null): Promise<string[]> {
+      const actual = await vi.importActual<typeof import('../lib/forge.js')>('../lib/forge.js');
+      loadForgeConfigMock.mockImplementation(() => config as never);
+      resolveAllConceptsMock.mockImplementation(actual.resolveAllConcepts as never);
+      return runDoctor();
+    }
+    const row = (out: string[], name: string) => out.filter(l => l.trimStart().slice(2).startsWith(name.padEnd(20)));
+    const noOverviewWarning = (out: string[]) =>
+      expect(out.filter(l => l.includes('⚠') && /overview/i.test(l))).toEqual([]);
+
+    afterEach(() => {
+      loadForgeConfigMock.mockImplementation(() => null);
+      resolveAllConceptsMock.mockReset();
+    });
+
+    it('default GitHub: overview-bundle is default and the line is bundled at 20 calls/h', async () => {
+      const out = await runWithConfig(null);
+      expect(row(out, 'overview-bundle')).toEqual([expect.stringMatching(/✓ overview-bundle\s+default\s+gh$/)]);
+      expect(row(out, 'overview path')).toEqual([
+        '  ○ overview path        bundled: ~20 forge calls/h per watched workspace (idle steady state, a floor that invalidation can raise)',
+      ]);
+      noOverviewWarning(out);
+    });
+
+    it('gitlab: overview-bundle is disabled and the line is four calls with the provider reason at 52 calls/h', async () => {
+      const out = await runWithConfig({ provider: 'gitlab' });
+      expect(row(out, 'overview-bundle')).toEqual(['  ○ overview-bundle      disabled']);
+      expect(row(out, 'overview path')).toEqual([
+        '  ○ overview path        four calls (provider gitlab disables overview-bundle): ~52 forge calls/h per watched workspace (idle steady state, a floor that invalidation can raise)',
+      ]);
+      noOverviewWarning(out);
+    });
+
+    it('an issue-list override: four calls with that reason', async () => {
+      const out = await runWithConfig({ 'issue-list': 'my-issues --json' });
+      expect(row(out, 'issue-list')).toEqual([expect.stringMatching(/✓ issue-list\s+override\s+my-issues$/)]);
+      expect(row(out, 'overview-bundle')).toEqual([expect.stringMatching(/✓ overview-bundle\s+default\s+gh$/)]);
+      expect(row(out, 'overview path')).toEqual([
+        '  ○ overview path        four calls (forge config overrides issue-list): ~52 forge calls/h per watched workspace (idle steady state, a floor that invalidation can raise)',
+      ]);
+      noOverviewWarning(out);
     });
   });
 

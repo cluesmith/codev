@@ -1,0 +1,59 @@
+id: '1995'
+title: tower-collapse-the-four-per-wo
+protocol: spir
+phase: review
+plan_phases:
+  - id: overview_bundle_concept
+    title: overview-bundle forge concept, behind a cost gate
+    status: complete
+  - id: forge_config_null_disables
+    title: Forge concept disables survive config layering
+    status: complete
+  - id: bundle_cache_path
+    title: OverviewCache bundle path with ride-along windows
+    status: complete
+  - id: projection_doctor_docs
+    title: Overview spend projection, doctor line and docs
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-11-26T01:46:47.703Z'
+    approved_at: '2026-11-26T22:13:24.727Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-11-26T22:36:06.790Z'
+    approved_at: '2026-11-27T04:41:50.958Z'
+  pr:
+    status: pending
+    requested_at: '2026-11-27T06:46:59.687Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-26T01:28:07.091Z'
+updated_at: '2026-11-27T06:46:59.687Z'
+context_refreshes:
+  - boundary: enter:plan
+    at: '2026-11-26T22:13:27.161Z'
+    acknowledged_at: '2026-11-26T22:14:13.555Z'
+  - boundary: plan-phase:forge_config_null_disables
+    at: '2026-11-27T05:14:23.886Z'
+    acknowledged_at: '2026-11-27T05:15:23.956Z'
+  - boundary: plan-phase:bundle_cache_path
+    at: '2026-11-27T05:31:19.700Z'
+    acknowledged_at: '2026-11-27T05:32:18.513Z'
+  - boundary: plan-phase:projection_doctor_docs
+    at: '2026-11-27T06:05:44.624Z'
+    acknowledged_at: '2026-11-27T06:05:54.495Z'
+  - boundary: enter:review
+    at: '2026-11-27T06:29:35.364Z'
+    acknowledged_at: '2026-11-27T06:30:35.607Z'
+pr_history:
+  - phase: review
+    pr_number: 2005
+    branch: builder/spir-1995
+    created_at: '2026-11-27T06:38:12.504Z'
+pr_ready_for_human: true
