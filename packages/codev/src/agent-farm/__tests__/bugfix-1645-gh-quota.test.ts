@@ -90,7 +90,7 @@ describe('Tower gh spawns under a rate-limited gh (#1645)', () => {
 
   it('fallback workspace: 40 dashboard polls spawn one batch, then nothing until the suspension lifts', async () => {
     const workspace = makeWorkspace('fallback', { 'overview-bundle': null });
-    expect(overviewPath(workspace)).toEqual({ kind: 'four-call', reason: 'project config disables overview-bundle' });
+    expect(overviewPath(workspace)).toEqual({ kind: 'four-call', reason: 'forge config disables overview-bundle' });
     let clock = Date.now();
     const cache = new OverviewCache({ now: () => clock });
 

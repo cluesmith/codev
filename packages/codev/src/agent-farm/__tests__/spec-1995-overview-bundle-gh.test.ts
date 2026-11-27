@@ -294,7 +294,7 @@ describe.skipIf(process.platform === 'win32' || !hasJq())('Spec 1995 — overvie
 
     clearCalls();
     setForge(workspace, { 'overview-bundle': null });
-    expect(overviewPath(workspace)).toEqual({ kind: 'four-call', reason: 'project config disables overview-bundle' });
+    expect(overviewPath(workspace)).toEqual({ kind: 'four-call', reason: 'forge config disables overview-bundle' });
     const fourCall = await new OverviewCache().getOverview(workspace);
     expect(ghCalls().sort()).toEqual(['api user', 'issue-list', 'issue-list-closed', 'pr-list', 'pr-list-merged']);
 
@@ -315,7 +315,7 @@ describe.skipIf(process.platform === 'win32' || !hasJq())('Spec 1995 — overvie
     const override = path.join(tmpDir, 'my-issues.json');
     fs.writeFileSync(override, JSON.stringify([{ number: 7, title: 'From the override', url: issueUrl(7), labels: [] }]));
     const workspace = makeWorkspace('override', { 'issue-list': `cat '${override}'` });
-    expect(overviewPath(workspace)).toEqual({ kind: 'four-call', reason: 'project config overrides issue-list' });
+    expect(overviewPath(workspace)).toEqual({ kind: 'four-call', reason: 'forge config overrides issue-list' });
     const data = await new OverviewCache().getOverview(workspace);
     expect(data.backlog.map(b => b.id)).toEqual(['7']);
     expect(ghCalls().sort()).toEqual(['api user', 'issue-list-closed', 'pr-list', 'pr-list-merged']);

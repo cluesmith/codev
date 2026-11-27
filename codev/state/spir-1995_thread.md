@@ -227,8 +227,8 @@ Claude's non-blocking notes:
 
 ## 2026-11-27 — Phase 3 bundle_cache_path: built
 - `resolveOverviewPath(forgeConfig)` (forge.ts, pure): bundle, or four-call with a reason —
-  `provider <p> disables overview-bundle`, `project config disables overview-bundle`,
-  `project config overrides|disables <concept>`. It reads the config object and the cached presets
+  `provider <p> disables overview-bundle`, `forge config disables overview-bundle`,
+  `forge config overrides|disables <concept>` (worded "project config" until the consult below). It reads the config object and the cached presets
   only. `overviewPath(cwd)` (github.ts) loads the config once; a config that fails to load selects
   the bundle, whose call then fails with that error.
 - `OverviewCache`: `getOverview` picks the path per poll. The four-call path is the same four
@@ -256,3 +256,14 @@ Claude's non-blocking notes:
   null reviewDecision, team and bot reviewers.
 - **Real data, by hand, not committed:** `getOverview` on cluesmith/codev, bundle vs
   `"overview-bundle": null` → payloads deep-equal (7 PRs, 198 backlog, 2 recently closed, ok).
+
+## 2026-11-27 — Phase 3 consultation (iter 1): codex APPROVE, claude APPROVE
+Claude's non-blocking notes:
+- Taken: the four-call reasons said "project config", but after Phase 2's key-wise forge merge
+  an override can come from `~/.codev/config.json` (or the framework cache / local layer), and
+  `resolveOverviewPath` sees only the merged config. Reworded to "forge config …"; it reaches
+  users through Phase 4's doctor line.
+- Not changed: `"overview-bundle": ""` selects the bundle and every call then fails. That is
+  `getForgeCommand`'s existing treatment of an empty override for every concept, not new here.
+- Noted for the PR body: a failed invalidation-driven refresh keeps serving still-fresh open lists
+  with `forgeStatus: 'ok'` is the owner ruling, pinned by its own test.

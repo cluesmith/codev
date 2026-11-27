@@ -161,7 +161,7 @@ function useFallbackWorkspace(): void {
   fs.mkdirSync(path.join(tmpDir, '.codev'), { recursive: true });
   fs.writeFileSync(path.join(tmpDir, '.codev', 'config.json'), JSON.stringify({ forge: { 'overview-bundle': null } }));
   pathState.real = true;
-  expect(overviewPath(tmpDir)).toEqual({ kind: 'four-call', reason: 'project config disables overview-bundle' });
+  expect(overviewPath(tmpDir)).toEqual({ kind: 'four-call', reason: 'forge config disables overview-bundle' });
 }
 
 function issueItem(number: number, title: string, labels: Array<{ name: string }> = []): { number: number; title: string; url: string; labels: Array<{ name: string }>; createdAt: string } {

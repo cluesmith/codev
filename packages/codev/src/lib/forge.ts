@@ -372,14 +372,14 @@ export type OverviewPath = { kind: 'bundle' } | { kind: 'four-call'; reason: str
 export function resolveOverviewPath(forgeConfig: ForgeConfig | null | undefined): OverviewPath {
   if (getForgeCommand('overview-bundle', forgeConfig) === null) {
     const reason = forgeConfig && 'overview-bundle' in forgeConfig
-      ? 'project config disables overview-bundle'
+      ? 'forge config disables overview-bundle'
       : `provider ${forgeConfig?.provider} disables overview-bundle`;
     return { kind: 'four-call', reason };
   }
   for (const concept of OVERVIEW_BUNDLE_CONSTITUENTS) {
     if (forgeConfig && concept in forgeConfig) {
       const verb = forgeConfig[concept] === null ? 'disables' : 'overrides';
-      return { kind: 'four-call', reason: `project config ${verb} ${concept}` };
+      return { kind: 'four-call', reason: `forge config ${verb} ${concept}` };
     }
   }
   return { kind: 'bundle' };

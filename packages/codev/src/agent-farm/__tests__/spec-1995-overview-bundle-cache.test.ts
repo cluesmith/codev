@@ -542,9 +542,9 @@ describe('Spec 1995 — overview path selection (Decision 1)', () => {
 
   it('a constituent overridden or disabled in the project config takes the four calls (14)', () => {
     expect(resolveOverviewPath({ 'issue-list': 'my-issue-list --label team-a' }))
-      .toEqual({ kind: 'four-call', reason: 'project config overrides issue-list' });
+      .toEqual({ kind: 'four-call', reason: 'forge config overrides issue-list' });
     expect(resolveOverviewPath({ 'recently-merged': null }))
-      .toEqual({ kind: 'four-call', reason: 'project config disables recently-merged' });
+      .toEqual({ kind: 'four-call', reason: 'forge config disables recently-merged' });
     for (const concept of OVERVIEW_BUNDLE_CONSTITUENTS) {
       expect(resolveOverviewPath({ provider: 'github', [concept]: 'x' } as ForgeConfig).kind).toBe('four-call');
     }
@@ -554,7 +554,7 @@ describe('Spec 1995 — overview path selection (Decision 1)', () => {
 
   it('a project disabling overview-bundle takes the four calls (15)', () => {
     expect(resolveOverviewPath({ 'overview-bundle': null }))
-      .toEqual({ kind: 'four-call', reason: 'project config disables overview-bundle' });
+      .toEqual({ kind: 'four-call', reason: 'forge config disables overview-bundle' });
   });
 
   it("a project's own overview-bundle takes the bundle, on linear and jira too: their preset scripts are not overrides (16)", () => {
@@ -562,7 +562,7 @@ describe('Spec 1995 — overview path selection (Decision 1)', () => {
     expect(resolveOverviewPath({ provider: 'linear', 'overview-bundle': 'my-bundle' })).toEqual(BUNDLE);
     expect(resolveOverviewPath({ provider: 'jira', 'overview-bundle': 'my-bundle' })).toEqual(BUNDLE);
     expect(resolveOverviewPath({ provider: 'gitlab', 'overview-bundle': 'my-bundle', 'pr-list': 'x' }))
-      .toEqual({ kind: 'four-call', reason: 'project config overrides pr-list' });
+      .toEqual({ kind: 'four-call', reason: 'forge config overrides pr-list' });
   });
 
   it('a config that fails to load selects the bundle, whose call then reports the config error', () => {
