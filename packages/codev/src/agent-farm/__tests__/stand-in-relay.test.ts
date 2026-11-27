@@ -1078,6 +1078,11 @@ describe('section 2: the switch-state report', () => {
     expect(on.body).toHaveLength(0);
     expect((await mbpAsListed()).remoteMessaging).toBe('on');
     expect(relay.session(mbp.towerId)?.remoteMessaging).toBe('on');
+    // The contract gives this body no size limit, so a long one is still a report.
+    const long = `{"remoteMessaging":"off","later":"${'x'.repeat(20_000)}"}`;
+    expect(long.length).toBeGreaterThan(4_096);
+    expect((await call(relay, 'PUT', '/api/peer/state', { key: mbp.apiKey, body: long })).status).toBe(204);
+    expect((await mbpAsListed()).remoteMessaging).toBe('off');
   });
 
   it('answers a body that is not the report 400 malformed, a caller without a key 401, and past 30 a minute 429', async () => {

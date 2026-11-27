@@ -32,9 +32,14 @@
  *
  * Readings this stand-in takes where the contract leaves the order open (each is noted at
  * its code): within step 2, a malformed header is answered before an unsupported version;
- * a missing `x-codev-peer-version` is an unsupported version, a missing `x-codev-peer-to`
- * is malformed; on the switch-state report a bad body (400) is answered before the limits,
- * as the relay answers its header checks before its limits.
+ * a missing `x-codev-peer-version` is an unsupported version, a missing or empty
+ * `x-codev-peer-to` is malformed (not `404 unknown-tower` at step 5: a call that names no
+ * recipient has a bad header); on the switch-state report a bad body (400) is answered
+ * before the limits, as the relay answers its header checks before its limits.
+ *
+ * The switch-state report's body has no size limit here: the contract sets none (its sizes
+ * are protocol constants, and none is given for that body), and a cap the stand-in invented
+ * would refuse a report the real cloud may accept.
  */
 
 import http from 'node:http';
@@ -389,7 +394,9 @@ export interface StandInCall {
  * - `replay-statement`: C forwards the last statement and MAC it issued to that Tower
  *   again, unchanged, instead of a new one.
  * - `answer-delay`: C holds R's answer this long before passing it on, so concurrent
- *   calls are seen in flight together.
+ *   calls are seen in flight together. The delay starts after R's answer is in, so it
+ *   never counts against the relay timeout: for a forward held past it, use `answer-late`
+ *   or a short `relayTimeoutMs`.
  *
  * The forward faults take an optional recipient (`to`), and apply only at step 10.
  */
@@ -800,7 +807,12 @@ export class StandInRelay {
     return pairs;
   }
 
-  /** Message relay calls from S to R in flight now, and at most so far. */
+  /**
+   * Message relay calls from S to R in flight now, and at most so far: counted from the
+   * moment C has the call authenticated, whatever C then answers (a bad header included),
+   * since what a test checks with it is how many calls S has open to R at once. A call
+   * that names no recipient, or is not of kind `message`, is not counted.
+   */
   inFlight(fromTowerId: string, toTowerId: string): { now: number; max: number } {
     const key = `${fromTowerId}>${toTowerId}`;
     return { now: this.inFlightNow.get(key) ?? 0, max: this.inFlightMax.get(key) ?? 0 };
@@ -1143,6 +1155,12 @@ export class StandInRelay {
     let statementHeader = issued.header;
     let mac = issued.mac;
     let statement: Record<string, unknown> = issued.fields;
+    // A session gone before anything is sent is `tower-offline` [r8]. Checked before any
+    // fault is taken, so a one-time fault is spent only on a call that is forwarded.
+    if (session.h2.destroyed || session.h2.closed || this.sessions.get(to) !== session) {
+      this.cloudAnswer(res, call, 503, { outcome: 'unavailable', reason: 'tower-offline' });
+    }
+
     const pair = `${String(issued.fields.fromTowerId)}>${to}`;
     const replay = this.takeFault('replay-statement', forTo);
     const previous = this.lastIssued.get(pair);
@@ -1152,11 +1170,6 @@ export class StandInRelay {
       mac = createHmac('sha256', randomBytes(32)).update(issued.bytes).digest('base64url');
     }
     this.lastIssued.set(pair, { header: statementHeader, mac, statement });
-
-    // A session gone before anything is sent is `tower-offline` [r8].
-    if (session.h2.destroyed || session.h2.closed || this.sessions.get(to) !== session) {
-      this.cloudAnswer(res, call, 503, { outcome: 'unavailable', reason: 'tower-offline' });
-    }
 
     const forward: StandInForward = {
       toTowerId: to,
@@ -1324,11 +1337,11 @@ export class StandInRelay {
     const reports = this.count(`state:${caller.towerId}`);
 
     // A bad body before the limits: the stand-in's reading, as the relay checks its headers
-    // before its limits.
-    const body = await this.readBody(req, 4_096);
+    // before its limits. Read whole: the contract gives this body no size limit.
+    const body = (await this.readBody(req, Number.POSITIVE_INFINITY))!;
     let state: unknown;
     try {
-      state = body === null ? undefined : (JSON.parse(body.toString('utf8')) as { remoteMessaging?: unknown }).remoteMessaging;
+      state = (JSON.parse(body.toString('utf8')) as { remoteMessaging?: unknown }).remoteMessaging;
     } catch {
       state = undefined;
     }

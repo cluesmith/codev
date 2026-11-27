@@ -239,3 +239,20 @@
      verify-approval. Harness workspaces stay in the temp directory.
   3. `seeded-generator.test.ts` outside the plan's file list is fine.
 - Layer B rerun after these changes (load 1.7): 4/4 in 12.9 s, teardown report empty.
+
+## 2026-11-26 — phase 2 review, iteration 2
+
+- Codex REQUEST_CHANGES (1, new; the unknown-field point was not raised again). Claude APPROVE,
+  agreeing with the iteration 1 rebuttal from the spec text. Response:
+  `1967-phase_2-iter2-rebuttals.md`; nothing disputed.
+- Accepted (codex): the stand-in read `PUT /api/peer/state` with a 4 096-byte cap of its own
+  invention; the contract sets no size for that body. Now read whole; a test sends a 20 000-char
+  unknown field and gets 204.
+- Claude's minor points: empty `to` added to the stand-in's listed readings; `answer-delay`
+  documented as not counting against the relay timeout (**phases 8/9:** a forward held past the
+  timeout uses `answer-late` or a short `relayTimeoutMs`); `inFlight` documented as counting from
+  authentication, bad headers included (**phases 8/9:** scope "never two in flight" to the calls
+  that matter); the tower-offline re-check moved before forward faults are taken, so a one-time
+  fault is never spent on a 503. Left as is: the state route's count-before-400 order, no
+  CONNECT protocol on the stand-in's H2 client, per-account slugs.
+- Layer B rerun after these changes: 4/4 in 12.8 s.
