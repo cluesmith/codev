@@ -11,10 +11,10 @@ plan_phases:
     status: complete
   - id: phase_3
     title: Peer storage and the mailbox migration
-    status: in_progress
+    status: complete
   - id: phase_4
     title: The remote-messaging switch and grants
-    status: pending
+    status: in_progress
   - id: phase_5
     title: Tunnel handshake, session secret and the verified entry point
     status: pending
@@ -42,7 +42,7 @@ plan_phases:
   - id: phase_13
     title: Docs in both trees, the walkthrough end to end, and Windows
     status: pending
-current_plan_phase: phase_3
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 2
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -108,7 +108,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_3-iter1-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-27T01:09:22.193Z'
+updated_at: '2026-11-27T01:18:08.180Z'
 force_advanced:
   phase: plan
   iteration: 3
@@ -125,3 +125,5 @@ context_refreshes:
   - boundary: plan-phase:phase_3
     at: '2026-11-27T00:22:02.885Z'
     acknowledged_at: '2026-11-27T00:23:34.190Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-11-27T01:18:08.180Z'
