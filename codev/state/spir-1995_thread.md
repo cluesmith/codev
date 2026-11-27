@@ -125,3 +125,11 @@ the config.ts forge-null fix is split out as Phase 2 (`deepMerge` itself unchang
 used at commands/update.ts:131). Also: a read-only `isFailureWindowOpen` gate (the existing
 `failureWindow()` escalates on read), search strings always sent (`String!` coerced before
 `@include`), explicit 40 MB maxBuffer beside the 60 s timeout.
+
+## 2026-11-27 — plan-approval
+The architect's 22:37 reply ("follows the approved spec closely") was their own review, not the
+human decision, so the gate stayed held. The owner approved the plan as written at 04:41 UTC
+(relayed by the architect, porchless, from main). Answer to question (a): keep the spec's
+behaviour, so a failed invalidation-driven refresh keeps serving the still-fresh open lists. I
+ran `porch approve 1995 plan-approval --a-human-explicitly-approved-this`. Entering implement,
+Phase 1 Step 0 (cost gate) first.

@@ -500,8 +500,9 @@ On a default GitHub workspace, Tower makes **one forge call per open-list refres
   invalidation-driven refresh that fails leaves the still-valid open lists serving, with
   `forgeStatus: 'ok'` and no `errors` text until they expire, at most 180 s after their fetch.
   On the four-call path the failed refetch overwrites them with a cached failure, so the error
-  shows at once. This changes when a human sees the error, so it goes to the architect at the
-  plan gate as an explicit question rather than living only here.
+  shows at once. This changes when a human sees the error, so it went to the architect at the
+  plan gate as an explicit question. **Owner ruling (2026-11-27, relayed): keep it as the spec
+  says.** A failed refresh keeps showing the still-fresh lists.
 
 #### Deliverables
 
