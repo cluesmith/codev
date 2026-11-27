@@ -152,8 +152,8 @@ describe("this Tower's own name from its peer list (G4)", () => {
       holder.config = { tower_id: '01JOTHER00000000000000000A', tower_name: 'other', api_key: 'ctk_other', server_url: 'http://127.0.0.1:9' };
       return listingResponse('ana-laptop');
     });
-    expect(await wiring.peerCloudRouteDeps().refreshListing()).toMatchObject({ fresh: false, problem: 'bad-listing' });
+    expect(await wiring.peerCloudRouteDeps().refreshListing()).toMatchObject({ fresh: false, problem: 'registration-changed' });
     expect(holder.config?.tower_name).toBe('other');
-    expect(logged).toEqual(["WARN Peer: Codev Cloud's peer list is for another Tower (its self is not this Tower's id); the cached list stands"]);
+    expect(logged).toEqual(["INFO Peer: this Tower's Codev Cloud registration changed while its peer list was fetched; that answer is not used"]);
   });
 });

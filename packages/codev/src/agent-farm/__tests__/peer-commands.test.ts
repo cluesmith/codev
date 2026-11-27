@@ -548,7 +548,16 @@ describe('afx peer list', () => {
     harness.cloud.refreshProblem = 'not-connected';
     harness.cloud.tunnelUp = false;
     // Not connected says so once; the tunnel being down follows from it.
-    expect(await notes()).toEqual(['[info] This Tower is not connected to Codev Cloud. Connect it with: afx tower connect']);
+    expect(await notes()).toEqual([
+      `[info] This Tower is not connected to Codev Cloud; the Towers above are from its last list, at ${ISO_T0}. Connect it with: afx tower connect`,
+    ]);
+    harness.cloud.refreshProblem = 'not-registered';
+    expect(await notes()).toEqual([
+      `[info] This Tower's registration was removed from Codev Cloud; the Towers above are from its last list, at ${ISO_T0}. Register it again with: afx tower connect --reauth`,
+    ]);
+    harness.cloud.refreshProblem = 'registration-changed';
+    harness.cloud.tunnelUp = true;
+    expect(await notes()).toEqual(["[info] This Tower's Codev Cloud registration changed while its peer list was fetched. List again: afx peer list"]);
     harness.cloud.refreshProblem = 'recent';
     harness.cloud.tunnelUp = true;
     expect(await notes()).toEqual([]);

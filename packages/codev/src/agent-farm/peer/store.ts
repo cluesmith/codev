@@ -272,21 +272,23 @@ function readListingScope(db: Database.Database): string | null {
  * fetched under the registration `scope`: after this Tower registers with another account,
  * Tower id or cloud, the previous registration's Towers are not its peers. Grants are a
  * human's and stay. Returns whether anything was dropped.
+ *
+ * Read on every peer-list read, so the common answers cost one row read: the scope is this
+ * one's, or there is none. A cached Tower or name exists only with a scope, since
+ * {@link writeListing} sets it and this drops all three together.
  */
 export function forgetListingUnlessFor(db: Database.Database, scope: string): boolean {
   nonEmpty(scope, 'listing registration');
-  return db.transaction((): boolean => {
-    if (readListingScope(db) === scope) return false;
-    const towers = db.prepare('DELETE FROM peer_towers').run().changes;
-    const names = db.prepare('DELETE FROM peer_tower_names').run().changes;
-    const listing = db
-      .prepare(
-        `UPDATE peer_settings SET listing_refreshed_at = NULL, listing_relay_protocols = NULL, listing_limits = NULL, listing_scope = NULL
-         WHERE id = 1 AND (listing_refreshed_at IS NOT NULL OR listing_scope IS NOT NULL)`,
-      )
-      .run().changes;
-    return towers + names + listing > 0;
+  const cachedFor = readListingScope(db);
+  if (cachedFor === null || cachedFor === scope) return false;
+  db.transaction(() => {
+    db.prepare('DELETE FROM peer_towers').run();
+    db.prepare('DELETE FROM peer_tower_names').run();
+    db.prepare(
+      'UPDATE peer_settings SET listing_refreshed_at = NULL, listing_relay_protocols = NULL, listing_limits = NULL, listing_scope = NULL WHERE id = 1',
+    ).run();
   })();
+  return true;
 }
 
 /** The cached listing's time and stated relay, without its Towers (read on every relay decision). */

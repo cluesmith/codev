@@ -792,3 +792,19 @@ Surprises:
   - **Taken (claude):** `relayStated` and `relay` read only the settings row; two wording nits.
   - **Answered, not changed (claude):** a malformed `server_url` stays a loud 500 naming the
     cause, per the fail-fast rule; `retryable` on an over-cap listing is unread but right.
+- **Phase 7 review (iter 2): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** Response:
+  `1967-phase_7-iter2-rebuttals.md`.
+  - **Taken (codex, and claude's note 1).** An in-flight listing was shared across
+    registrations, and the check after the call compared only `self.towerId`. So a cloud
+    change during a call, keeping the same Tower id, cached the old cloud's list under the new
+    scope.
+  - **The fix:**
+    - a call in flight is shared only under one registration;
+    - `refresh` compares the full scope from before and after the call, before reading the
+      answer;
+    - a changed registration reports the new problem `registration-changed` (CLI: "List
+      again"), not a malformed-list note.
+  - **Taken (claude, note 2).** With no registration, the note says the Towers shown are from
+    the last list, and when.
+  - **Taken (claude, note 3).** `forgetListingUnlessFor` takes a one-row fast path, with no
+    write, unless the scope differs.

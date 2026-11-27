@@ -137,6 +137,8 @@ function staleBecause(problem: PeerListProblem | null): string {
       return "; Codev Cloud refused this Tower's key";
     case 'bad-listing':
       return "; Codev Cloud's latest list was not in the expected form";
+    case 'registration-changed':
+      return "; this Tower's registration changed while its list was fetched";
     case 'no-relay':
       return '; this Codev Cloud has no relay';
     case 'not-connected':
@@ -247,8 +249,8 @@ export class PeerList {
 
   /**
    * Fetch the listing, within the call budget, and keep it. On any failure the cached list
-   * stands and the answer says why. A listing whose `self` is not this Tower, as the
-   * registration has it once the answer is in, is not used.
+   * stands and the answer says why. An answer is not used when the registration changed
+   * while the call was out, nor a listing whose `self` is not this Tower.
    */
   async refresh(purpose: ListingPurpose = 'on-demand'): Promise<PeerListRefresh> {
     const db = this.deps.db();
@@ -261,8 +263,16 @@ export class PeerList {
     const registration = this.scoped();
     if (registration === null) return fromCache('not-connected');
     if (registration.deregistered) return fromCache('not-registered');
+    const scope = listingScope(registration);
 
     const call = await this.deps.client.listTowers(purpose);
+    // Read again before the answer is read at all: an answer, or a failure, under the
+    // registration the call was made with says nothing of one written while it was out.
+    const current = this.scoped();
+    if (current === null || listingScope(current) !== scope) {
+      this.deps.log('INFO', "Peer: this Tower's Codev Cloud registration changed while its peer list was fetched; that answer is not used");
+      return fromCache('registration-changed');
+    }
     if (!call.called) {
       if (call.reason === 'budget') return fromCache('recent');
       return fromCache(call.reason === 'insecure' ? 'no-relay' : 'not-connected');
@@ -276,9 +286,7 @@ export class PeerList {
       return fromCache(problemOf(answer.reason), answer.retryAfterSec);
     }
     const { listing } = answer;
-    // Read again: a registration written while the call was out may be for another Tower.
-    const current = this.scoped();
-    if (current === null || listing.self.towerId !== current.towerId) {
+    if (listing.self.towerId !== current.towerId) {
       this.deps.log('WARN', "Peer: Codev Cloud's peer list is for another Tower (its self is not this Tower's id); the cached list stands");
       return fromCache('bad-listing');
     }

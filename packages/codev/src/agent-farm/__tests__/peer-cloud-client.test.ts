@@ -272,6 +272,24 @@ describe('the listing (section 3)', () => {
     expect(callsTo('listing')).toHaveLength(4);
   });
 
+  it('shares a call in flight only with callers under the same registration', async () => {
+    let serverUrl = 'https://one.example';
+    const answer: Array<(response: Response) => void> = [];
+    const fetch = vi.fn((_url: string) => new Promise<Response>((resolve) => answer.push(resolve)));
+    const client = clientFor(mbp, { registration: () => ({ serverUrl, apiKey: 'k' }), fetch });
+    const first = client.listTowers('on-demand');
+    const shared = client.listTowers('holding');
+    serverUrl = 'https://two.example';
+    const second = client.listTowers('on-demand');
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['https://one.example/api/peer/towers', 'https://two.example/api/peer/towers']);
+    answer[0](new Response(null, { status: 503 }));
+    answer[1](new Response(null, { status: 502 }));
+    expect(await first).toBe(await shared);
+    expect(await first).toMatchObject({ called: true, answer: { status: 503 } });
+    expect(await second).toMatchObject({ called: true, answer: { status: 502 } });
+  });
+
   it('shares a call in flight with every caller, and lets a clock that went back call again', async () => {
     const client = clientFor(mbp);
     const [a, b] = await Promise.all([client.listTowers('on-demand'), client.listTowers('holding')]);

@@ -148,7 +148,8 @@ export class CloudClient {
   private lastListingAt: number | null = null;
   /** The registration that last call was made under: a budget belongs to one. */
   private lastListingFor: string | null = null;
-  private listingInFlight: Promise<ListingCall> | null = null;
+  /** The listing call in flight, and the registration it was made under. */
+  private listingInFlight: { for: string; call: Promise<ListingCall> } | null = null;
 
   private reportGeneration = 0;
   private pendingReport: PendingReport | null = null;
@@ -230,16 +231,17 @@ export class CloudClient {
   /**
    * The listing, called at most every 10 seconds on demand and every 30 while holding
    * mail, counted from the last call made for either under the same registration. A caller
-   * asking while a call is in flight shares that call. (Everything before the call's first
-   * `await` runs at once, so a second caller always sees the first's call.)
+   * asking while a call is in flight under the same registration shares that call.
+   * (Everything before the call's first `await` runs at once, so a second caller always sees
+   * the first's call.)
    */
   async listTowers(purpose: ListingPurpose): Promise<ListingCall> {
-    if (this.listingInFlight !== null) return this.listingInFlight;
     const target = this.target(PEER_CLOUD_PATHS.towers);
     if (typeof target === 'string') return { called: false, reason: target };
+    const registration = `${target.url.href}\n${target.apiKey}`;
+    if (this.listingInFlight !== null && this.listingInFlight.for === registration) return this.listingInFlight.call;
     const now = this.options.now();
     const interval = purpose === 'holding' ? LISTING_HOLDING_INTERVAL_MS : LISTING_ON_DEMAND_INTERVAL_MS;
-    const registration = `${target.url.origin}\n${target.apiKey}`;
     if (this.lastListingAt !== null && this.lastListingFor === registration) {
       const since = now - this.lastListingAt;
       // A clock that went back counts as time passed: a budget must not lock the listing out.
@@ -247,15 +249,16 @@ export class CloudClient {
     }
     this.lastListingAt = now;
     this.lastListingFor = registration;
-    const inFlight = (async (): Promise<ListingCall> => {
+    const call = (async (): Promise<ListingCall> => {
       const result = await this.call('GET', target, {}, undefined, MAX_LISTING_BYTES);
       const answer = classifyListingAnswer(result, { relayStated: this.options.relayStated(), maxBytes: MAX_LISTING_BYTES });
       return { called: true, answer };
     })().finally(() => {
-      this.listingInFlight = null;
+      // A call under another registration may have started since; it stays the one in flight.
+      if (this.listingInFlight?.call === call) this.listingInFlight = null;
     });
-    this.listingInFlight = inFlight;
-    return inFlight;
+    this.listingInFlight = { for: registration, call };
+    return call;
   }
 
   // -------------------------------------------------------------------------

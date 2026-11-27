@@ -997,9 +997,12 @@ export interface PeerLimitsResponse {
  * - `unauthenticated`: the cloud refused this Tower's key;
  * - `rate-limited`: the cloud is limiting this Tower's calls (`retryAfterSec` with it);
  * - `bad-listing`: the cloud's list did not fit the contract, and was not used;
+ * - `registration-changed`: this Tower registered again while the list was being fetched, so the
+ *   answer was the previous registration's, and was not used;
  * - `recent`: the list was fetched moments ago, within the call budget (contract section 3).
  */
 export type PeerListProblem =
+  | 'registration-changed'
   | 'not-connected'
   | 'not-registered'
   | 'no-relay'

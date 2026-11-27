@@ -287,8 +287,9 @@ describe('the cached listing (C13)', () => {
     const pending = list.refresh();
     registration = { ...registration!, towerId: '01JSOMEONEELSE00000000000A', towerName: 'someone' };
     // The previous registration's list is not this one's either: it is dropped, and nothing replaces it.
-    expect(await pending).toMatchObject({ fresh: false, problem: 'bad-listing', listing: { refreshedAt: null, towers: [] } });
+    expect(await pending).toMatchObject({ fresh: false, problem: 'registration-changed', listing: { refreshedAt: null, towers: [] } });
     expect(adopted).toEqual([]);
+    expect(logged).toContain("INFO Peer: this Tower's Codev Cloud registration changed while its peer list was fetched; that answer is not used");
   });
 
   it("keeps the cached list when the cloud's does not fit, and says why in the log", async () => {
@@ -340,6 +341,34 @@ describe('after this Tower registers again', () => {
     registration = { ...registration!, serverUrl: `${relay.url}/` };
     expect(list.cached().towers.map((t) => t.slug)).toEqual(['devvm']);
     expect(logged.filter((line) => line.includes('registration changed'))).toEqual([]);
+  });
+
+  it("keeps nothing from the previous cloud's answer when only the cloud changes while the call is out", async () => {
+    const second = new StandInRelay({ now: () => clock.now });
+    await second.start();
+    try {
+      const account = second.addAccount({ ownerId: 'usr_ana', ownerEmail: 'ana@example.com' });
+      second.addTower({ account, slug: 'ana-s-mbp', towerId: mbp.towerId, apiKey: mbp.apiKey });
+      second.addTower({ account, slug: 'studio', towerId: '01JSTUDIO00000000000000AA' });
+      // The same Tower id, so only the scope tells the two answers apart.
+      const pending = list.refresh();
+      registration = { ...registration!, serverUrl: second.url };
+      expect(await pending).toMatchObject({ fresh: false, problem: 'registration-changed', listing: { refreshedAt: null, towers: [] } });
+      expect(store.listTowerNames(db)).toEqual([]);
+      // The next refresh is the second cloud's own, and within its own budget.
+      expect(await list.refresh()).toMatchObject({ fresh: true, listing: { towers: [{ slug: 'studio' }] } });
+    } finally {
+      await second.stop();
+    }
+  });
+
+  it("notes nothing from a failure under the previous registration either", async () => {
+    relay.setMode('absent');
+    const pending = list.refresh();
+    registration = { ...registration!, towerId: '01JSOMEONEELSE00000000000A' };
+    expect(await pending).toMatchObject({ problem: 'registration-changed' });
+    // The old cloud's bodyless 404 would have said "no relay"; it says nothing of this registration.
+    expect(list.relay()).toEqual({ state: 'unknown', why: null });
   });
 
   it('drops the list when only the cloud changes, and counts the listing budget afresh for it', async () => {

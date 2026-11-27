@@ -184,11 +184,14 @@ function relayNote(relay: PeerCloudRelay): string | null {
 function listingNote(answer: PeerTowersResponse): string | null {
   const { problem, refreshedAt, retryAfterSec } = answer.listing;
   const from = refreshedAt === null ? 'and this Tower has not listed its peers yet' : `this is the list from ${at(refreshedAt)}`;
+  const lastList = refreshedAt === null ? '' : `; the Towers above are from its last list, at ${at(refreshedAt)}`;
   switch (problem) {
     case 'not-connected':
-      return 'This Tower is not connected to Codev Cloud. Connect it with: afx tower connect';
+      return `This Tower is not connected to Codev Cloud${lastList}. Connect it with: afx tower connect`;
     case 'not-registered':
-      return "This Tower's registration was removed from Codev Cloud. Register it again with: afx tower connect --reauth";
+      return `This Tower's registration was removed from Codev Cloud${lastList}. Register it again with: afx tower connect --reauth`;
+    case 'registration-changed':
+      return "This Tower's Codev Cloud registration changed while its peer list was fetched. List again: afx peer list";
     case 'unauthenticated':
       return `Codev Cloud refused this Tower's key; ${from}. Run: afx tower connect --reauth`;
     case 'cloud-unreachable':
