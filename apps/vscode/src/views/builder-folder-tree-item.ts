@@ -22,9 +22,17 @@ export class BuilderFolderTreeItem extends vscode.TreeItem {
     public readonly scope: string = '',
   ) {
     super(node.name, vscode.TreeItemCollapsibleState.Expanded);
-    this.id = `${scope}${builderId}::folder::${node.fullPath}`;
-    this.iconPath = vscode.ThemeIcon.Folder;
-    this.contextValue = 'builder-file-folder';
-    // No `command` — folder rows have no click action.
+    applyChangedFolderRow(this, `${scope}${builderId}::folder::${node.fullPath}`, 'builder-file-folder');
   }
+}
+
+/**
+ * Presentation shared by every changed-files folder row, whatever the diff
+ * source: a stable id, the folder icon, a context value, and no click command.
+ */
+export function applyChangedFolderRow(item: vscode.TreeItem, id: string, contextValue: string): void {
+  item.id = id;
+  item.iconPath = vscode.ThemeIcon.Folder;
+  item.contextValue = contextValue;
+  // No `command` — folder rows have no click action.
 }

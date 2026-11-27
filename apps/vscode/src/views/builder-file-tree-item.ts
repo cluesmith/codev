@@ -75,28 +75,23 @@ const STATUS_LABEL: Record<ChangeStatus, string> = {
   U: 'Unmerged',
 };
 
-export class BuilderFileTreeItem extends vscode.TreeItem {
+/**
+ * Presentation shared by every changed-file row, whatever the diff source (a
+ * builder's worktree or a pull request's head commit): basename label, the
+ * directory (plus the `↤ oldPath` rename source) as the description, the status
+ * tooltip, and the `resourceUri` that drives the file-type icon and the
+ * status-letter decoration. Subclasses add the source-specific fields, the
+ * stable `id`, the `contextValue` and the click command.
+ */
+export abstract class ChangedFileTreeItem extends vscode.TreeItem {
   constructor(
-    public readonly builderId: string,
-    public readonly worktreePath: string,
-    public readonly baseRef: string,
     public readonly change: ChangeEntry,
     public readonly plan: ResourcePlan,
-    /** The tree builder that made the row (see `BuilderTreeItem.scope`); prefixes the id. */
-    public readonly scope: string = '',
+    row: { id: string; resourceUri: vscode.Uri; contextValue: string },
   ) {
     const rel = plan.resourcePath;
     super(path.basename(rel));
-
-    // Stable, unique id so the Builders tree can `reveal` this row when the
-    // active builder-diff editor changes (#1066). `reveal` matches recreated
-    // elements by id; without one a file row can't be located. The `builderId`
-    // prefix keeps two builders that changed the same relative path distinct
-    // (same reason `resourceUri` carries the worktree path, above). Distinct
-    // from folder ids (`<builderId>::folder::<...>`) and builder-row ids
-    // (`<builderId>#<version>`). The scope prefix (empty in the Agents view)
-    // keeps the same builder's row distinct across workspaces in the Cockpit.
-    this.id = `${scope}${builderId}::${rel}`;
+    this.id = row.id;
 
     const dir = path.dirname(rel);
     const dirLabel = dir === '.' ? '' : dir;
@@ -105,12 +100,39 @@ export class BuilderFileTreeItem extends vscode.TreeItem {
         ? `${dirLabel ? dirLabel + '  ' : ''}↤ ${change.oldPath}`
         : dirLabel;
 
+    this.resourceUri = row.resourceUri;
+    this.tooltip = `${STATUS_LABEL[change.status] ?? 'Changed'} · ${rel}`;
+    this.contextValue = row.contextValue;
+  }
+}
+
+export class BuilderFileTreeItem extends ChangedFileTreeItem {
+  constructor(
+    public readonly builderId: string,
+    public readonly worktreePath: string,
+    public readonly baseRef: string,
+    change: ChangeEntry,
+    plan: ResourcePlan,
+    /** The tree builder that made the row (see `BuilderTreeItem.scope`); prefixes the id. */
+    public readonly scope: string = '',
+  ) {
+    // Stable, unique id so the Builders tree can `reveal` this row when the
+    // active builder-diff editor changes (#1066). `reveal` matches recreated
+    // elements by id; without one a file row can't be located. The `builderId`
+    // prefix keeps two builders that changed the same relative path distinct
+    // (same reason `resourceUri` carries the worktree path, above). Distinct
+    // from folder ids (`<builderId>::folder::<...>`) and builder-row ids
+    // (`<builderId>#<version>`). The scope prefix (empty in the Agents view)
+    // keeps the same builder's row distinct across workspaces in the Cockpit.
+    //
     // resourceUri → native file-type icon + our decoration-provider badge.
     // Synthetic path (see builderFileResourceUri) keeps the built-in Git
     // decorator from path-resolving these rows and tinting the label grey (#799).
-    this.resourceUri = builderFileResourceUri(worktreePath, rel);
-    this.tooltip = `${STATUS_LABEL[change.status] ?? 'Changed'} · ${rel}`;
-    this.contextValue = 'builder-file';
+    super(change, plan, {
+      id: `${scope}${builderId}::${plan.resourcePath}`,
+      resourceUri: builderFileResourceUri(worktreePath, plan.resourcePath),
+      contextValue: 'builder-file',
+    });
     this.command = {
       command: 'codev.openBuilderFileDiff',
       title: 'Open Diff',

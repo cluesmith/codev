@@ -140,3 +140,33 @@ function compareNodes(a: FilePathNode, b: FilePathNode): number {
   if (aIsFolder !== bIsFolder) { return aIsFolder ? -1 : 1; }
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }
+
+/**
+ * Walk a (compacted) file-path tree and return the parent node of the node
+ * whose `fullPath` matches `targetPath`, or `undefined` when the target sits at
+ * top level (no parent folder) or isn't found. Used by `getParent` to
+ * reconstruct a file/folder row's enclosing folder for `reveal` (#1066).
+ *
+ * Folder fullPaths are compacted (`packages/codev/src`), and a file leaf's
+ * `fullPath` equals its `plan.resourcePath` (leaves aren't compacted), so a
+ * direct `fullPath` match resolves both row kinds.
+ *
+ * Returns `undefined` for both "top-level node (no parent folder)" and "not
+ * found"; the caller treats both as "parent is the builder row". Recursive
+ * calls always pass a defined `parent`, so a node found below the top level
+ * never resolves to `undefined`.
+ */
+export function findParentNode(
+  nodes: FilePathNode[],
+  targetPath: string,
+  parent?: FilePathNode,
+): FilePathNode | undefined {
+  for (const node of nodes) {
+    if (node.fullPath === targetPath) { return parent; }
+    if (node.children) {
+      const found = findParentNode(node.children, targetPath, node);
+      if (found !== undefined) { return found; }
+    }
+  }
+  return undefined;
+}

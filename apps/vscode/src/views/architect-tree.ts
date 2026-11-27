@@ -9,7 +9,9 @@ import { readBuildersFileViewAsTree } from '../builders-config.js';
 import { BuilderGroupTreeItem, BuilderTreeItem, IdleArchitectsGroupTreeItem } from './builder-tree-item.js';
 import { BuilderFileTreeItem } from './builder-file-tree-item.js';
 import { BuilderFolderTreeItem } from './builder-folder-tree-item.js';
-import { buildFilePathTree, type FilePathNode } from './file-path-tree.js';
+import { buildFilePathTree, findParentNode, type FilePathNode } from './file-path-tree.js';
+
+export { findParentNode };
 import type { BuilderDiffCache } from './builder-diff-cache.js';
 import { architectGrouping, type BuilderGroup, type BuilderGrouping } from './builder-grouping.js';
 import {
@@ -822,35 +824,6 @@ function materialiseNode(
   return new BuilderFileTreeItem(builderId, worktreePath, baseRef, node.file.change, node.file.plan, scope);
 }
 
-/**
- * Walk a (compacted) file-path tree and return the parent node of the node
- * whose `fullPath` matches `targetPath`, or `undefined` when the target sits at
- * top level (no parent folder) or isn't found. Used by `getParent` to
- * reconstruct a file/folder row's enclosing folder for `reveal` (#1066).
- *
- * Folder fullPaths are compacted (`packages/codev/src`), and a file leaf's
- * `fullPath` equals its `plan.resourcePath` (leaves aren't compacted), so a
- * direct `fullPath` match resolves both row kinds.
- *
- * Returns `undefined` for both "top-level node (no parent folder)" and "not
- * found"; the caller treats both as "parent is the builder row". Recursive
- * calls always pass a defined `parent`, so a node found below the top level
- * never resolves to `undefined`.
- */
-export function findParentNode(
-  nodes: FilePathNode[],
-  targetPath: string,
-  parent?: FilePathNode,
-): FilePathNode | undefined {
-  for (const node of nodes) {
-    if (node.fullPath === targetPath) { return parent; }
-    if (node.children) {
-      const found = findParentNode(node.children, targetPath, node);
-      if (found !== undefined) { return found; }
-    }
-  }
-  return undefined;
-}
 
 /**
  * Sync-check whether a builder has committed a review file on disk.

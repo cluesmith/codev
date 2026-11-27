@@ -33,10 +33,11 @@ import { setDiffInjectSession, upsertDiffInjectEntry, type DiffInjectSessionEntr
 import { ensureDiffEditorCodeLens } from '../ensure-diff-codelens.js';
 import { builderById } from '../builder-lookup.js';
 import { issueRef } from '../issue-id.js';
+import { DIFF_SCHEME, encodeDiffQuery, decodeDiffQuery, type DiffQuery, type DiffSide } from '../diff-query.js';
 
 const execFileAsync = promisify(execFile);
 
-export const DIFF_SCHEME = 'codev-diff';
+export { DIFF_SCHEME, encodeDiffQuery, decodeDiffQuery };
 
 // ── Pure helpers (exported for unit testing — no vscode/git dependency) ──
 
@@ -96,8 +97,9 @@ export function parseBinaryPaths(numstat: string): Set<string> {
 
 export interface SideSpec {
   /** `base` → git blob at merge-base; `file` → on-disk worktree file;
+   *  `head` → git blob at a second commit (a pull request's head);
    *  `empty` → empty doc; `binary` → "not shown" placeholder. */
-  kind: 'base' | 'file' | 'empty' | 'binary';
+  kind: 'base' | 'file' | 'head' | 'empty' | 'binary';
   /** Repo-relative path for `base`/`file` sides. */
   path?: string;
 }
@@ -112,10 +114,15 @@ export interface ResourcePlan {
 /**
  * Decide, per changed file, what the left (original) and right (modified)
  * sides of the diff should be. Pure — no vscode/git.
+ *
+ * `rightKind` picks where the modified side comes from: `file` (the default,
+ * a builder's live worktree) or `head` (a pull request's head commit, a
+ * read-only blob).
  */
 export function planResources(
   changes: ChangeEntry[],
   binaryPaths: Set<string>,
+  rightKind: 'file' | 'head' = 'file',
 ): ResourcePlan[] {
   return changes.map(c => {
     const resourcePath = c.path;
@@ -124,7 +131,7 @@ export function planResources(
     }
     switch (c.status) {
       case 'A':
-        return { resourcePath, left: { kind: 'empty' }, right: { kind: 'file', path: c.path } };
+        return { resourcePath, left: { kind: 'empty' }, right: { kind: rightKind, path: c.path } };
       case 'D':
         return { resourcePath, left: { kind: 'base', path: c.path }, right: { kind: 'empty' } };
       case 'R':
@@ -132,32 +139,16 @@ export function planResources(
         return {
           resourcePath,
           left: { kind: 'base', path: c.oldPath ?? c.path },
-          right: { kind: 'file', path: c.path },
+          right: { kind: rightKind, path: c.path },
         };
       default: // M, T, U
         return {
           resourcePath,
           left: { kind: 'base', path: c.path },
-          right: { kind: 'file', path: c.path },
+          right: { kind: rightKind, path: c.path },
         };
     }
   });
-}
-
-interface DiffQuery {
-  wt: string;
-  ref: string;
-  path: string;
-  empty?: true;
-  binary?: true;
-}
-
-export function encodeDiffQuery(q: DiffQuery): string {
-  return JSON.stringify(q);
-}
-
-export function decodeDiffQuery(query: string): DiffQuery {
-  return JSON.parse(query) as DiffQuery;
 }
 
 // ── codev-diff: content provider ────────────────────────────────────────
@@ -196,16 +187,39 @@ export function activateDiffView(context: vscode.ExtensionContext): void {
 
 // ── URI construction (thin wrappers over the pure encoder) ──────────────
 
-function baseUri(wt: string, ref: string, repoPath: string): vscode.Uri {
+/**
+ * Diff context for `diffUrisForChange`. `wt` + `ref` are the repository and the
+ * base (merge-base) commit. A pull-request diff adds `headRef` (the head commit
+ * the `head` side reads) and `prId`, which marks every side URI with the PR id
+ * and its side so the document's identity is recoverable from the URI alone.
+ */
+export interface DiffUriContext {
+  wt: string;
+  ref: string;
+  headRef?: string;
+  prId?: string;
+}
+
+/** The PR marker fields for one side, or nothing for a builder diff. */
+function prMarker(ctx: DiffUriContext, side: DiffSide): Pick<DiffQuery, 'pr' | 'side'> {
+  if (ctx.prId === undefined) { return {}; }
+  return { pr: ctx.prId, side };
+}
+
+function blobUri(wt: string, ref: string, repoPath: string, marker: Pick<DiffQuery, 'pr' | 'side'>): vscode.Uri {
   return vscode.Uri.from({
     scheme: DIFF_SCHEME,
     path: `/${repoPath}`,
-    query: encodeDiffQuery({ wt, ref, path: repoPath }),
+    query: encodeDiffQuery({ wt, ref, path: repoPath, ...marker }),
   });
 }
 
-function placeholderUri(repoPath: string, kind: 'empty' | 'binary'): vscode.Uri {
-  const q: DiffQuery = { wt: '', ref: '', path: repoPath, [kind]: true };
+function placeholderUri(
+  repoPath: string,
+  kind: 'empty' | 'binary',
+  marker: Pick<DiffQuery, 'pr' | 'side'>,
+): vscode.Uri {
+  const q: DiffQuery = { wt: '', ref: '', path: repoPath, [kind]: true, ...marker };
   return vscode.Uri.from({
     scheme: DIFF_SCHEME,
     path: `/${repoPath}`,
@@ -213,33 +227,36 @@ function placeholderUri(repoPath: string, kind: 'empty' | 'binary'): vscode.Uri 
   });
 }
 
-function sideUri(side: SideSpec, ctx: { wt: string; ref: string; resourcePath: string }): vscode.Uri {
-  switch (side.kind) {
+function sideUri(spec: SideSpec, ctx: DiffUriContext, resourcePath: string, side: DiffSide): vscode.Uri {
+  const marker = prMarker(ctx, side);
+  switch (spec.kind) {
     case 'file':
-      return vscode.Uri.file(path.join(ctx.wt, side.path!));
+      return vscode.Uri.file(path.join(ctx.wt, spec.path!));
     case 'base':
-      return baseUri(ctx.wt, ctx.ref, side.path!);
+      return blobUri(ctx.wt, ctx.ref, spec.path!, marker);
+    case 'head':
+      return blobUri(ctx.wt, ctx.headRef ?? '', spec.path!, marker);
     case 'binary':
-      return placeholderUri(ctx.resourcePath, 'binary');
+      return placeholderUri(resourcePath, 'binary', marker);
     default:
-      return placeholderUri(ctx.resourcePath, 'empty');
+      return placeholderUri(resourcePath, 'empty', marker);
   }
 }
 
 /**
- * Left/right URIs for one changed file — the shared seam used by both the
- * multi-file `vscode.changes` editor and the per-file `vscode.diff` opened
- * from the Builders tree. Left = base blob (or empty/binary placeholder);
- * right = the on-disk worktree file (or placeholder for deletes/binary).
+ * Left/right URIs for one changed file — the shared seam used by the
+ * multi-file `vscode.changes` editor, the per-file `vscode.diff` opened from
+ * the Builders tree, and the per-file pull-request diff. Left = base blob (or
+ * empty/binary placeholder); right = the on-disk worktree file for a builder,
+ * the head-commit blob for a pull request (or a placeholder for deletes/binary).
  */
 export function diffUrisForChange(
   plan: ResourcePlan,
-  ctx: { wt: string; ref: string },
+  ctx: DiffUriContext,
 ): { left: vscode.Uri; right: vscode.Uri } {
-  const sideCtx = { wt: ctx.wt, ref: ctx.ref, resourcePath: plan.resourcePath };
   return {
-    left: sideUri(plan.left, sideCtx),
-    right: sideUri(plan.right, sideCtx),
+    left: sideUri(plan.left, ctx, plan.resourcePath, 'base'),
+    right: sideUri(plan.right, ctx, plan.resourcePath, 'head'),
   };
 }
 
@@ -296,6 +313,26 @@ export async function getBuilderChanges(wt: string): Promise<BuilderChanges> {
   return {
     defaultBranch,
     baseRef,
+    changes: parseNameStatus(nameStatus.stdout),
+    binaryPaths: parseBinaryPaths(numstat.stdout),
+  };
+}
+
+/**
+ * A pull request's changed files: commit-to-commit, merge-base → head, the
+ * diff the forge shows. Never reads a working tree. Both commits must already
+ * be present in `repo` (see `ensurePullRequestHead`). Throws on git failure.
+ */
+export async function getPullRequestChanges(
+  repo: string,
+  mergeBase: string,
+  headSha: string,
+): Promise<{ changes: ChangeEntry[]; binaryPaths: Set<string> }> {
+  const [nameStatus, numstat] = await Promise.all([
+    execFileAsync('git', ['-C', repo, 'diff', '--name-status', '-M', mergeBase, headSha], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }),
+    execFileAsync('git', ['-C', repo, 'diff', '--numstat', '-M', mergeBase, headSha], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }),
+  ]);
+  return {
     changes: parseNameStatus(nameStatus.stdout),
     binaryPaths: parseBinaryPaths(numstat.stdout),
   };
@@ -486,6 +523,31 @@ export async function registerFileInjectSession(args: {
     });
   } catch {
     // keep the symbol/file lenses already registered
+  }
+}
+
+/**
+ * Open one pull-request changed file as a read-only per-file `vscode.diff`:
+ * merge-base blob ↔ head-commit blob, both `codev-diff:` documents.
+ *
+ * Deliberately registers NOTHING in the diff-inject registry and never offers
+ * the diff CodeLens setting: a PR is not a builder, so the forward-to-builder
+ * lenses, comment-for-builder ranges and the review queue (all keyed off that
+ * registry) can't attach to it. `showOptions` is forwarded like
+ * `openBuilderFileDiff`'s (navigation passes `{ preview: true }`).
+ */
+export async function openPullRequestFileDiff(
+  args: { repo: string; prId: string; baseRef: string; headSha: string; plan: ResourcePlan },
+  showOptions?: vscode.TextDocumentShowOptions,
+): Promise<void> {
+  const { left, right } = diffUrisForChange(args.plan, {
+    wt: args.repo, ref: args.baseRef, headRef: args.headSha, prId: args.prId,
+  });
+  const title = `${args.plan.resourcePath} (PR #${args.prId})`;
+  if (showOptions) {
+    await vscode.commands.executeCommand('vscode.diff', left, right, title, showOptions);
+  } else {
+    await vscode.commands.executeCommand('vscode.diff', left, right, title);
   }
 }
 
