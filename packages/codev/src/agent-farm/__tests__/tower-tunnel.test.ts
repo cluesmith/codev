@@ -42,6 +42,7 @@ const {
   mockRedeemToken,
   mockValidateDeviceName,
   mockFetch,
+  mockOnTunnelAuthOk,
 } = vi.hoisted(() => ({
   mockReadCloudConfig: vi.fn(),
   mockWriteCloudConfig: vi.fn(),
@@ -65,6 +66,7 @@ const {
   mockRedeemToken: vi.fn(),
   mockValidateDeviceName: vi.fn().mockReturnValue({ valid: true }),
   mockFetch: vi.fn(),
+  mockOnTunnelAuthOk: vi.fn(),
 }));
 
 vi.mock('../lib/cloud-config.js', () => ({
@@ -74,7 +76,7 @@ vi.mock('../lib/cloud-config.js', () => ({
   deleteCloudConfig: (...args: unknown[]) => mockDeleteCloudConfig(...args),
   getCloudConfigPath: (...args: unknown[]) => mockGetCloudConfigPath(...args),
   getOrCreateMachineId: (...args: unknown[]) => mockGetOrCreateMachineId(...args),
-  maskApiKey: (...args: unknown[]) => mockMaskApiKey(...args),
+  maskApiKey: (key: string) => mockMaskApiKey(key),
   DEFAULT_CLOUD_URL: 'https://cloud.codevos.ai',
 }));
 
@@ -91,6 +93,13 @@ vi.mock('../lib/tunnel-client.js', () => ({
     onAuthOk = mockOnAuthOk;
     resetCircuitBreaker = mockResetCircuitBreaker;
   },
+}));
+
+// The peer list's side of each auth_ok (Spec 1967, phase 7): what the tunnel hands it.
+vi.mock('../peer/cloud-wiring.js', () => ({
+  onTunnelAuthOk: mockOnTunnelAuthOk,
+  setTunnelSessionSource: vi.fn(),
+  shutdownPeerCloud: vi.fn(),
 }));
 
 vi.mock('../lib/nonce-store.js', () => ({
@@ -876,6 +885,20 @@ describe('tower-tunnel', () => {
         'INFO',
         'Tunnel: connecting → disconnected (connect timeout after 20000ms)',
       );
+    });
+
+    it("hands the peer list each auth_ok with the registration its connection was made under, not the one current when it arrives", async () => {
+      mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+      const deps = makeDeps();
+      await initTunnel(deps, { getInstances: async () => [] });
+      const onAuthOk = mockOnAuthOk.mock.calls[0][0] as (identity: { towerId: string; relay: string }) => void;
+
+      // Another registration is written while this connection's handshake is out.
+      mockReadCloudConfig.mockReturnValue({ ...FAKE_CONFIG, tower_id: 'tower-new', server_url: 'https://other.example' });
+      onAuthOk({ towerId: 'tower-abc', relay: 'available' });
+
+      // No auth was sent through the mock client, so no switch was stated.
+      expect(mockOnTunnelAuthOk).toHaveBeenCalledExactlyOnceWith('available', null, { serverUrl: 'https://codevos.ai', towerId: 'tower-abc' });
     });
 
     it('handles cloud config read failure gracefully', async () => {

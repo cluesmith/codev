@@ -80,11 +80,20 @@ export function peerCloud(): { client: CloudClient; list: PeerList } {
 /**
  * Each `auth_ok`: the relay it stated is noted, and a pending switch-state report is
  * dropped, since that `auth` stated the switch. If the switch changed after the `auth` was
- * sent, the change is reported now, as one made while connected is.
+ * sent, the change is reported now, as one made while connected is. `connectedAs` is the
+ * registration the session connected under; an `auth_ok` that arrives after another
+ * replaced it does none of this.
  */
-export function onTunnelAuthOk(relay: TunnelRelayStatus, statedSwitch: PeerSwitchState | null): void {
+export function onTunnelAuthOk(
+  relay: TunnelRelayStatus,
+  statedSwitch: PeerSwitchState | null,
+  connectedAs: Pick<OwnRegistration, 'serverUrl' | 'towerId'>,
+): void {
   const { client, list } = peerCloud();
-  list.noteAuthOk(relay);
+  if (!list.noteAuthOk(relay, connectedAs)) {
+    log('INFO', 'Peer: a connection made under a registration since replaced answered; its relay state is not taken in');
+    return;
+  }
   client.cancelSwitchReport();
   if (relay !== 'available' || statedSwitch === null) return;
   const now = readSwitch(getGlobalDb()).state;

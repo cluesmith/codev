@@ -146,8 +146,6 @@ function stopMetadataRefresh(): void {
 
 /** Whether the last read of the switch for `auth` failed, so its ERROR is logged once per failing run. */
 let switchReadFailing = false;
-/** The switch as the last `auth` stated it, for the `auth_ok` that answers it. */
-let lastStatedSwitch: PeerSwitchState | null = null;
 
 /** A database error as a log line may name it: its class, and its code when it has the shape of one. */
 function describeDbError(err: unknown): string {
@@ -167,7 +165,6 @@ function readSwitchForAuth(): PeerSwitchState {
   try {
     const state = readSwitch(getGlobalDb()).state;
     switchReadFailing = false;
-    lastStatedSwitch = state;
     return state;
   } catch (err) {
     const cause = `global.db could not be read (${describeDbError(err)})`;
@@ -241,12 +238,20 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     tunnelClient.disconnect();
   }
 
+  // The switch as this client's last `auth` stated it, for the `auth_ok` that answers it.
+  let statedSwitch: PeerSwitchState | null = null;
   const client = new TunnelClient({
     serverUrl: config.server_url,
     apiKey: config.api_key,
     towerId: config.tower_id,
     localPort: _deps.port,
-    peer: PEER_OPTIONS,
+    peer: {
+      ...PEER_OPTIONS,
+      remoteMessaging: () => {
+        statedSwitch = readSwitchForAuth();
+        return statedSwitch;
+      },
+    },
   });
 
   client.onStateChange((state: TunnelState, prev: TunnelState, reason?: string) => {
@@ -274,7 +279,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     // The peer list learns what this session stated of a relay; a switch change made while
     // the `auth` was in flight is reported now (Spec 1967, contract sections 1 and 2).
     try {
-      onTunnelAuthOk(identity.relay, lastStatedSwitch);
+      onTunnelAuthOk(identity.relay, statedSwitch, { serverUrl: config.server_url, towerId: config.tower_id });
     } catch (err) {
       _deps?.log('ERROR', `Peer: could not take in the connection's relay state: ${(err as Error).message}`);
     }
@@ -425,7 +430,6 @@ export async function initTunnel(
   _deps = deps;
   _getInstances = callbacks.getInstances;
   switchReadFailing = false;
-  lastStatedSwitch = null;
   setTunnelSessionSource(getTunnelPeerSession, logToTower);
 
   // Auto-connect tunnel if registered

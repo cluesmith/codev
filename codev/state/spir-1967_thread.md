@@ -808,3 +808,17 @@ Surprises:
     the last list, and when.
   - **Taken (claude, note 3).** `forgetListingUnlessFor` takes a one-row fast path, with no
     write, unless the scope differs.
+- **Phase 7 review (iter 3): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** Response:
+  `1967-phase_7-iter3-rebuttals.md`.
+  - **Taken (codex).** A delayed `auth_ok` from a registration since replaced was noted
+    against the new one, and it cancelled the new one's pending switch report.
+  - **The fix:**
+    - the tunnel passes the registration its connection was made under;
+    - `noteAuthOk` notes nothing for another scope;
+    - for such an `auth_ok`, `onTunnelAuthOk` cancels and reports nothing.
+  - **Taken (claude's nit).** The stated switch is now kept per tunnel client, not in a module
+    global.
+  - **Measured.** All three new tests fail with the fix removed. In passing, I fixed a type
+    error already in `tower-tunnel.test.ts`, in its `maskApiKey` mock.
+  - **Carried to phase 8 (claude).** The outbox must tie a relay answer to the registration
+    its call was made under. `CloudClient.relay` has no production caller in phase 7.

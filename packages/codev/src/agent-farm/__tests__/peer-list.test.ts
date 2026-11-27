@@ -109,32 +109,32 @@ afterEach(async () => {
 describe('whether the cloud has a relay', () => {
   it("is unknown until the cloud says, and then what the last auth_ok said", () => {
     expect(list.relay()).toEqual({ state: 'unknown', why: null });
-    list.noteAuthOk('available');
+    list.noteAuthOk('available', registration!);
     expect(list.relay()).toEqual({ state: 'available', why: null });
-    list.noteAuthOk('absent');
+    list.noteAuthOk('absent', registration!);
     expect(list.relay()).toEqual({ state: 'none', why: 'old-cloud' });
-    list.noteAuthOk('null');
+    list.noteAuthOk('null', registration!);
     expect(list.relay()).toEqual({ state: 'none', why: 'stated-none' });
-    list.noteAuthOk('unsupported');
+    list.noteAuthOk('unsupported', registration!);
     expect(list.relay()).toEqual({ state: 'none', why: 'unsupported' });
-    list.noteAuthOk('malformed');
+    list.noteAuthOk('malformed', registration!);
     expect(list.relay()).toEqual({ state: 'none', why: 'malformed' });
     // A session that did not state the protocol took no relay, and says nothing of one.
-    list.noteAuthOk('not-stated');
+    list.noteAuthOk('not-stated', registration!);
     expect(list.relay()).toEqual({ state: 'unknown', why: null });
   });
 
   it('is the latest statement, whether from the handshake or the listing', async () => {
-    list.noteAuthOk('available');
+    list.noteAuthOk('available', registration!);
     relay.setMode('null');
     expect((await list.refresh()).fresh).toBe(true);
     expect(list.relay()).toEqual({ state: 'none', why: 'stated-none' });
-    list.noteAuthOk('available');
+    list.noteAuthOk('available', registration!);
     expect(list.relay()).toEqual({ state: 'available', why: null });
   });
 
   it('applies the TLS rule first: a plain-HTTP cloud off loopback has none, and is never called', async () => {
-    list.noteAuthOk('available');
+    list.noteAuthOk('available', registration!);
     registration = { ...registration!, serverUrl: 'http://cloud.example' };
     expect(list.relay()).toEqual({ state: 'none', why: 'insecure' });
     expect(await list.refresh()).toMatchObject({ fresh: false, problem: 'no-relay' });
@@ -147,7 +147,7 @@ describe('whether the cloud has a relay', () => {
     expect(list.relay()).toEqual({ state: 'none', why: 'old-cloud' });
     expect(list.relayStated()).toBe(false);
     // The cloud gains a relay: its next handshake says so.
-    list.noteAuthOk('available');
+    list.noteAuthOk('available', registration!);
     expect(list.relay()).toEqual({ state: 'available', why: null });
   });
 
@@ -169,9 +169,9 @@ describe('whether the cloud has a relay', () => {
 
   it('counts as stated a relay object in the last auth_ok or a non-null relay in the last listing, and nothing else', async () => {
     expect(list.relayStated()).toBe(false);
-    list.noteAuthOk('insecure');
+    list.noteAuthOk('insecure', registration!);
     expect(list.relayStated()).toBe(true);
-    list.noteAuthOk('null');
+    list.noteAuthOk('null', registration!);
     expect(list.relayStated()).toBe(false);
     relay.setMode('null');
     await list.refresh();
@@ -316,8 +316,21 @@ describe('the cached listing (C13)', () => {
 });
 
 describe('after this Tower registers again', () => {
+  it('takes in no auth_ok from a connection made under a registration since replaced', () => {
+    const previous = registration!;
+    registration = { ...previous, towerId: '01JBOBSTOWER0000000000000A' };
+    expect(list.noteAuthOk('available', previous)).toBe(false);
+    expect(list.relay()).toEqual({ state: 'unknown', why: null });
+    expect(list.relayStated()).toBe(false);
+    expect(list.noteAuthOk('null', registration)).toBe(true);
+    expect(list.relay()).toEqual({ state: 'none', why: 'stated-none' });
+    // The same Tower on the same cloud, its URL written another way, is the same registration.
+    expect(list.noteAuthOk('available', { ...registration, serverUrl: `${registration.serverUrl}/` })).toBe(true);
+    expect(list.relay()).toEqual({ state: 'available', why: null });
+  });
+
   it("shows none of the previous account's Towers or relay, with the new cloud unreachable", async () => {
-    list.noteAuthOk('available');
+    list.noteAuthOk('available', registration!);
     await list.refresh();
     expect(list.cached().towers.map((t) => t.slug)).toEqual(['devvm']);
     expect(list.relay()).toEqual({ state: 'available', why: null });

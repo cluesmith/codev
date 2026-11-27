@@ -22,6 +22,8 @@ import { writeRemoteMessaging } from '../peer/store.js';
 
 const SELF = '01JMBP000000000000000000AA';
 const DEVVM = '01JDEVVM0000000000000000AA';
+/** The registration the test's tunnel session connected under: the one in its cloud config. */
+const CONNECTED_AS = { serverUrl: 'http://127.0.0.1:9', towerId: SELF };
 
 const holder = vi.hoisted(() => ({
   db: null as unknown as import('better-sqlite3').Database,
@@ -116,23 +118,34 @@ describe('reporting a switch change', () => {
 describe('each auth_ok', () => {
   it('notes the relay it stated, and drops a pending report', () => {
     expect(wiring.peerCloudRouteDeps().relay()).toEqual({ state: 'unknown', why: null });
-    wiring.onTunnelAuthOk('available', 'off');
+    wiring.onTunnelAuthOk('available', 'off', CONNECTED_AS);
     expect(cancelSwitchReport).toHaveBeenCalledTimes(1);
     expect(wiring.peerCloudRouteDeps().relay()).toEqual({ state: 'available', why: null });
-    wiring.onTunnelAuthOk('absent', 'off');
+    wiring.onTunnelAuthOk('absent', 'off', CONNECTED_AS);
     expect(wiring.peerCloudRouteDeps().relay()).toEqual({ state: 'none', why: 'old-cloud' });
     expect(cancelSwitchReport).toHaveBeenCalledTimes(2);
     expect(reportSwitch).not.toHaveBeenCalled();
   });
 
+  it('does nothing for an auth_ok from a connection made under a registration since replaced', () => {
+    wiring.setTunnelSessionSource(() => null, (level, message) => logged.push(`${level} ${message}`));
+    setSwitch('on');
+    holder.config = { tower_id: '01JOTHER00000000000000000A', tower_name: 'other', api_key: 'ctk_other', server_url: 'https://cloud.example' };
+    wiring.onTunnelAuthOk('available', 'off', CONNECTED_AS);
+    expect(wiring.peerCloudRouteDeps().relay()).toEqual({ state: 'unknown', why: null });
+    expect(cancelSwitchReport).not.toHaveBeenCalled();
+    expect(reportSwitch).not.toHaveBeenCalled();
+    expect(logged).toEqual(['INFO Peer: a connection made under a registration since replaced answered; its relay state is not taken in']);
+  });
+
   it('reports a change made after the auth was sent, and only to a cloud with a relay', () => {
     setSwitch('on');
-    wiring.onTunnelAuthOk('available', 'on');
+    wiring.onTunnelAuthOk('available', 'on', CONNECTED_AS);
     expect(reportSwitch).not.toHaveBeenCalled();
-    wiring.onTunnelAuthOk('null', 'off');
-    wiring.onTunnelAuthOk('available', null);
+    wiring.onTunnelAuthOk('null', 'off', CONNECTED_AS);
+    wiring.onTunnelAuthOk('available', null, CONNECTED_AS);
     expect(reportSwitch).not.toHaveBeenCalled();
-    wiring.onTunnelAuthOk('available', 'off');
+    wiring.onTunnelAuthOk('available', 'off', CONNECTED_AS);
     expect(reportSwitch).toHaveBeenCalledExactlyOnceWith('on');
   });
 });

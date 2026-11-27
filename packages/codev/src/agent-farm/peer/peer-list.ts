@@ -197,11 +197,18 @@ export class PeerList {
   // Whether the cloud has a relay
   // -------------------------------------------------------------------------
 
-  /** The tunnel's `auth_ok` stated (or did not state) a relay. */
-  noteAuthOk(status: TunnelRelayStatus): void {
-    this.scoped();
+  /**
+   * The tunnel's `auth_ok` stated (or did not state) a relay. `connectedAs` is the
+   * registration that session connected under: an `auth_ok` that arrives after another
+   * registration replaced it says nothing of the new one, and is not noted. Returns whether
+   * it was noted.
+   */
+  noteAuthOk(status: TunnelRelayStatus, connectedAs: Pick<OwnRegistration, 'serverUrl' | 'towerId'>): boolean {
+    const current = this.scoped();
+    if (current === null || listingScope(current) !== listingScope(connectedAs)) return false;
     const relay = relayOfAuthOk(status);
     this.authOk = relay === null ? null : { seq: ++this.seq, relay, status };
+    return true;
   }
 
   /**
