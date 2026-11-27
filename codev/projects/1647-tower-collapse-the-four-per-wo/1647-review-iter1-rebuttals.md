@@ -20,3 +20,17 @@ codex's.
 | 4 | `read_connection` on the last issue page fails the bundle for a next page without a cursor, which cannot cause truncation there | **Fixed.** `read_connection` takes a `last` marker that skips `pageInfo`. It is passed for issue page 2 and for search page 10, the two pages after which paging stops anyway. The first page and middle search pages keep the guard. New test: issue page 2 and search page 10 both say "next page" with a null cursor, and the bundle succeeds with 200 issues and the merged section intact. Removing the marker turns exactly that test red. |
 | 5 | The Windows run was still in flight when the PR opened | **Addressed.** Same as codex 1. |
 | 6 | The fixture README dates the `ISSUE` vs `ISSUE_ADVANCED` check 2026-11-27, a day ahead of today | **Rebutted.** Every date in this project's artifacts is UTC. The check ran on 2026-11-27 UTC, the evening of 2026-11-26 local time; `status.yaml` and the thread use the same clock. |
+
+## Disputed: the fixture README's "2026-11-27" verification date is future-dated (claude 6)
+
+It is not. Every date in this project's artifacts is UTC. The `ISSUE` vs `ISSUE_ADVANCED`
+comparison ran on 2026-11-27 UTC, the evening of 2026-11-26 local time (UTC−8). `status.yaml`
+records the same clock, e.g. `plan-approval` approved at `2026-11-27T04:41:52Z`, and so does the
+thread.
+
+## Note for the next round: the Windows run (codex 1, claude 5)
+
+Not disputed; it is resolved. Run 45952952774 finished green on 42231b9aa: CLI tests, unit tests,
+install verification, and both Windows probes; the targeted-tests and install-guard jobs were
+skipped, as dispatched. The PR-review fixes in 43573c098 touch the script, so the workflow was
+re-dispatched on that commit as run 45954554101. Both are linked in the PR body.
