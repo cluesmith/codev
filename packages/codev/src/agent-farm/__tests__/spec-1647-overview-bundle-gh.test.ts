@@ -42,6 +42,7 @@ function firstPage(next: { issues: boolean; merged: boolean }) {
 // Windows too, where it is the one check of the bundled default through Git Bash.
 describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and a fake gh', { timeout: scriptTestTimeoutMs }, () => {
   const originalPath = process.env.PATH;
+  const originalDebug = process.env.CODEV_DEBUG;
   let root: string;
   let fake: FakeGh;
   let clock: number;
@@ -52,12 +53,17 @@ describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and 
     dbState.globalDbPath = path.join(root, 'global.db');
     fake = new FakeGh(path.join(root, 'fake'));
     fake.route('user-identity', { body: 'octocat' });
-    process.env.PATH = `${fake.dir}${path.delimiter}${originalPath ?? ''}`;
+    process.env.PATH = `${fake.pathEntries}${path.delimiter}${originalPath ?? ''}`;
+    // The forge layer then logs each failed command with its stderr: what a call-count
+    // failure on a loaded CI machine needs, and silent on a passing run.
+    process.env.CODEV_DEBUG = '1';
     clock = Date.now();
   });
 
   afterEach(() => {
     process.env.PATH = originalPath;
+    if (originalDebug === undefined) delete process.env.CODEV_DEBUG;
+    else process.env.CODEV_DEBUG = originalDebug;
     vi.useRealTimers();
     expect(fake.violations(), 'an unexpected gh call').toEqual([]);
     fs.rmSync(root, { recursive: true, force: true });
@@ -72,6 +78,8 @@ describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and 
   }
 
   const ops = () => fake.calls().map(operation);
+  /** The cache's view of a refresh, for a call-count assertion's failure message. */
+  const seen = (data: { forgeStatus?: string; errors?: unknown }) => fake.diagnosis({ forgeStatus: data.forgeStatus, errors: data.errors });
   const tally = () => ops().reduce<Record<string, number>>((t, op) => ({ ...t, [op]: (t[op] ?? 0) + 1 }), {});
 
   // -------------------------------------------------------------------------------------------
@@ -86,7 +94,7 @@ describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and 
         clock += 2_500;
         await cache.getOverview(ws);
       }
-      expect(tally()).toEqual({ OverviewBundle: 1, 'api user': 1 });
+      expect(tally(), seen(data)).toEqual({ OverviewBundle: 1, 'api user': 1 });
       expect(data.forgeStatus).toBe('ok');
       expect(data.pendingPRs).toHaveLength(6);
       expect(data.backlog.length).toBeGreaterThan(0);
@@ -104,10 +112,10 @@ describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and 
       const ws = workspace('large');
       const cache = new OverviewCache({ now });
       const start = clock;
-      await cache.getOverview(ws);
+      const data = await cache.getOverview(ws);
       clock += 2_500;
       await cache.getOverview(ws);
-      expect(tally()).toEqual({ OverviewBundle: 1, OverviewIssuesPage: 1, 'api user': 1 });
+      expect(tally(), seen(data)).toEqual({ OverviewBundle: 1, OverviewIssuesPage: 1, 'api user': 1 });
 
       clock = start + LIST_TTL_MS;
       await cache.getOverview(ws);
@@ -135,8 +143,8 @@ describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and 
     const fourCall = await new OverviewCache({ now }).getOverview(workspace('four-call', { 'overview-bundle': null }));
     const fourCallOps = ops().slice(bundledOps.length);
 
-    expect(bundledOps.sort()).toEqual(['OverviewBundle', 'OverviewIssuesPage', 'OverviewSearchPage.merged', 'api user']);
-    expect(fourCallOps.sort()).toEqual(['api user', 'issue list', 'issue list', 'pr list', 'pr list']);
+    expect(bundledOps.sort(), seen(bundled)).toEqual(['OverviewBundle', 'OverviewIssuesPage', 'OverviewSearchPage.merged', 'api user']);
+    expect(fourCallOps.sort(), seen(fourCall)).toEqual(['api user', 'issue list', 'issue list', 'pr list', 'pr list']);
     expect(bundled.forgeStatus).toBe('ok');
     // Not vacuous: every section has content, and the 24 h window both kept and dropped items.
     expect(bundled.pendingPRs).toHaveLength(6);
@@ -159,7 +167,7 @@ describe.skipIf(!withJq)('Spec 1647 — OverviewCache over the real scripts and 
       fake.route('recently-merged', { body: [] });
       const ws = workspace('override', { 'issue-list': `cat "${issuesFile}"` });
       const data = await new OverviewCache({ now }).getOverview(ws);
-      expect(ops().sort()).toEqual(['api user', 'issue list', 'pr list', 'pr list']); // the issue list is the closed search
+      expect(ops().sort(), seen(data)).toEqual(['api user', 'issue list', 'pr list', 'pr list']); // the issue list is the closed search
       expect(data.backlog.map(b => [b.id, b.title])).toEqual([['5', 'From the override']]);
       expect(data.forgeStatus).toBe('ok');
     });

@@ -169,7 +169,7 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
 
   const env = (since: string = SINCE): Record<string, string> => ({
     CODEV_SINCE_DATE: since,
-    PATH: `${pathPrefix}${fake.dir}${path.delimiter}${process.env.PATH ?? ''}`,
+    PATH: `${pathPrefix}${fake.pathEntries}${path.delimiter}${process.env.PATH ?? ''}`,
     TMPDIR: scratchTmp,
   });
 

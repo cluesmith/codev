@@ -83,6 +83,17 @@ if [ -f "$r.err" ]; then cat "$r.err" >&2; fi
 exit "$(cat "$r.code" 2>/dev/null || echo 0)"
 `;
 
+/**
+ * Next on PATH after the fake. A shell that cannot execute the fake for any reason but "not
+ * found" goes on searching PATH (dash and bash both do), and without this the next `gh` would
+ * be a real one, against a real account. Reaching it is a violation, with the reason the fake
+ * was skipped left to the shell's own error.
+ */
+const GUARD_GH = `#!/bin/sh
+printf '%s\\n' "fell through to the next gh on PATH: $*" >> "$(dirname "$0")/../violations"
+exit 96
+`;
+
 export interface Route {
   /** stdout: an object is written as JSON, a string verbatim. */
   body?: unknown;
@@ -106,6 +117,20 @@ export class FakeGh {
     fs.mkdirSync(path.join(dir, 'routes'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'gh'), FAKE_GH);
     fs.chmodSync(path.join(dir, 'gh'), 0o755);
+    fs.mkdirSync(path.join(dir, 'guard'));
+    fs.writeFileSync(path.join(dir, 'guard', 'gh'), GUARD_GH);
+    fs.chmodSync(path.join(dir, 'guard', 'gh'), 0o755);
+  }
+
+  /** The PATH entries to put first: the fake, then the guard that keeps a real gh from running. */
+  get pathEntries(): string {
+    return `${this.dir}${path.delimiter}${path.join(this.dir, 'guard')}`;
+  }
+
+  /** What a failed call-count assertion needs: violations and the calls recorded so far. */
+  diagnosis(extra: Record<string, unknown> = {}): string {
+    const calls = fs.readdirSync(this.dir).filter(name => name.startsWith('call.')).sort();
+    return JSON.stringify({ ...extra, violations: this.violations(), calls });
   }
 
   route(key: string, r: Route): void {
