@@ -16,8 +16,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
-import { PEER_MAX_BODY_BYTES, type AgentAddress, type PeerCloudRelay, type PeerListingTower } from '@cluesmith/codev-types';
+import { PEER_MAX_BODY_BYTES, type AgentAddress, type PeerCloudRelay, type PeerListingTower, type PeerWireSenderAddress } from '@cluesmith/codev-types';
+import { isRemoteAddress, parseAddress } from '@cluesmith/codev-sdk/address';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
+import { formatRemoteMessage, remoteReplyRoute } from '../utils/message-format.js';
 import { classifyRelayAnswer, SENDER_CHECK_ORDER, type ClassifiedAnswer } from '../peer/contract.js';
 import type { FirstAnswer } from '../peer/outbox.js';
 import type { OwnRegistration, PeerNameResolution } from '../peer/peer-list.js';
@@ -393,6 +395,53 @@ describe('the builder rule for remote addresses', () => {
   it("a builder reaches the front door, and another Tower's builders", async () => {
     expect(await f.sender.send(request({ from: builder, toChange: { name: undefined } }))).toMatchObject({ outcome: 'delivered' });
     expect(await f.sender.send(request({ from: builder, toChange: { kind: 'id', name: 'spir-12' } }))).toMatchObject({ outcome: 'delivered' });
+  });
+
+  // The round trip of Decision 7's footer for a builder messaged from another of my Towers:
+  // the receiver's own framing writes the footer, and the command it prints, as printed, is
+  // the builder's own send on this Tower.
+  it("each footer row for a builder messaged from another Tower prints a command the builder's own send accepts", async () => {
+    const rows: Array<{ from: PeerWireSenderAddress; command: string; goes: 'devvm' | 'its-own-architect' }> = [
+      // Another builder: its address.
+      { from: { workspace: 'codev', kind: 'id', name: 'spir-12' }, command: 'afx send afx://devvm/codev:spir-12', goes: 'devvm' },
+      // The workspace's `main` architect, named or not: the front door, which reaches it.
+      { from: { workspace: 'codev', kind: 'architect', name: 'main' }, command: 'afx send afx://devvm/codev:architect', goes: 'devvm' },
+      { from: { workspace: 'codev', kind: 'architect' }, command: 'afx send afx://devvm/codev:architect', goes: 'devvm' },
+      // A named architect that is not the builder's own: through the builder's own architect.
+      { from: { workspace: 'codev', kind: 'architect', name: 'review' }, command: 'afx send architect', goes: 'its-own-architect' },
+    ];
+    for (const row of rows) {
+      const where = `a message from afx://devvm/${row.from.workspace}:${row.from.kind === 'id' ? row.from.name : `architect${row.from.name ? `:${row.from.name}` : ''}`}`;
+
+      // 1. The frame, as the receiver writes it for a builder recipient (receiver.ts, step 16).
+      const origin = { towerSlug: 'devvm', sender: row.from };
+      const frame = formatRemoteMessage(origin, 'spir-1967', remoteReplyRoute(origin, false), 'CI is green on the tunnel branch');
+
+      // 2. The reply command, taken out of the footer as printed.
+      const printed = /\(reply(?: through your architect)?: (afx send (\S+)) "…"\)$/.exec(frame.split('\n').at(-1) as string);
+      expect(printed?.[1], where).toBe(row.command);
+      const parsed = parseAddress((printed as RegExpExecArray)[2]);
+      if (!parsed.ok) throw new Error(`${where}: the footer's address does not parse: ${parsed.error.message}`);
+
+      if (row.goes === 'its-own-architect') {
+        // The builder's own spawning architect: a send on this Tower, which a builder may
+        // always make (stage 1). It names no Tower, so the remote sender never sees it.
+        expect(parsed.address, where).toEqual({ kind: 'architect' });
+        expect(isRemoteAddress(parsed.address), where).toBe(false);
+        continue;
+      }
+
+      // 3, 4. Handed to this Tower's sender as that builder: it passes the builder rule and
+      // every other check, and is stored for the peer.
+      const before = f.queued.length;
+      const result = await f.sender.send(request({ from: builder, to: parsed.address }));
+      expect(result, where).toMatchObject({ outcome: 'delivered' });
+      const stored = f.queued.slice(before);
+      expect(stored, where).toHaveLength(1);
+      expect(stored[0], where).toMatchObject({ peerTowerId: DEVVM, toAddress: printed?.[2], fromAgent: 'spir-1967' });
+      expect(store.getOutbox(f.db, stored[0].messageId), where).not.toBeNull();
+    }
+    expect(f.records().filter((r) => r.outcome === 'refused')).toEqual([]);
   });
 
   it('an architect naming an architect on another Tower is not a builder', async () => {
