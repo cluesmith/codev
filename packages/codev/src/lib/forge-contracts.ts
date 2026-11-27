@@ -234,8 +234,10 @@ export interface PrViewResult {
  *
  * **Output on exit 0.** One JSON object with these four required keys. Each holds what
  * the corresponding concept emits for the same repository state, under that concept's
- * contract, or `null`, which means that section alone could not be fetched. Extra
- * top-level keys are ignored, as extra item fields are.
+ * contract, or `null`, which means that section alone could not be fetched. Items are
+ * held to those contracts, not to any one CLI's full output: the GitHub script emits only
+ * the contract fields, so its items are narrower than `gh --json`'s (no `is_bot`, no label
+ * `color`). Extra top-level keys are ignored, as extra item fields are.
  *
  * **Non-zero exit.** The whole bundle failed. stderr carries the reason; the rate
  * limiter reads it.

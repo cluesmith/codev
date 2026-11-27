@@ -14,7 +14,9 @@
  *
  * Pins:
  *   1. Parity: for a state recorded from real gh (fixtures/spec-1647-overview-bundle), each
- *      section equals its sibling script's output on that concept's contract fields.
+ *      section equals its sibling script's output on that concept's contract fields. This is
+ *      not byte parity: the bundle emits only the contract fields, so its items are narrower
+ *      than `gh --json`'s (no `is_bot`, no label `color`).
  *   2. Search qualifiers: the exact search strings, and real GitHub's exclusions as recorded.
  *   3. Process counts and paging caps.
  *   4. Argument guards: `-F` only where gh must expand {owner}/{repo}; fixed query text.
@@ -422,6 +424,32 @@ describe.skipIf(!posixWithJq)('Spec 1647 — the github overview-bundle script',
       expect(ops()).toEqual(['OverviewBundle', ...Array(9).fill(`OverviewSearchPage.${section}`)]);
       const cursors = fake.calls().flatMap(argv => fields(argv).filter(([, n]) => n === 'cursor').map(([, , v]) => v));
       expect(cursors).toEqual(['p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10']);
+    });
+
+    it('a degenerate search chain (next page, no results) stops at page 10', async () => {
+      fake.route('OverviewBundle', { body: bundleBody({ merged: [MERGED_NODE], mergedNext: 'p2' }) });
+      for (let page = 2; page <= 11; page++) {
+        fake.route(graphqlKey('OverviewSearchPage', { section: 'merged', cursor: `p${page}` }), {
+          body: searchPage([], `p${page + 1}`),
+        });
+      }
+      const bundle = await runBundle();
+      expect(bundle.recentlyMerged).toHaveLength(1);
+      expect(ops()).toEqual(['OverviewBundle', ...Array(9).fill('OverviewSearchPage.merged')]);
+    });
+
+    it.each([
+      ['a null', null],
+      ['an empty', ''],
+    ])('a next page with %s cursor fails the bundle rather than truncating it', async (_name, endCursor) => {
+      const body = bundleBody({ issuesNext: 'unused' });
+      (body.data.repository.issues.pageInfo as { endCursor: unknown }).endCursor = endCursor;
+      fake.route('OverviewBundle', { body });
+      const result = await runConcept('overview-bundle');
+      expect(result.data).toBeNull();
+      expect(result.error?.exitCode).toBe(1);
+      expect(result.error?.stderr).toContain('unexpected response shape');
+      expect(ops()).toEqual(['OverviewBundle']);
     });
 
     it('caps open PRs at 30', async () => {

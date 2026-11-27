@@ -166,13 +166,18 @@ is_rate_limited() {
     <"$tmp/$1.out" >/dev/null 2>&1
 }
 
-# Reads the connection at JSON path $2 (an array literal) of staged response $1.
-# Sets page_count and page_cursor (empty when there is no next page).
+# Reads the connection at JSON path $2 (an array literal) of staged response $1, and fails
+# the whole bundle unless it holds a nodes array. Sets page_count and page_cursor (empty
+# when there is no next page). A next page without a cursor is a failure too: paging would
+# otherwise stop early and truncate the section in silence.
 read_connection() {
   info=$(jq -r --argjson path "$2" '
     getpath($path)
     | if (type == "object") and ((.nodes | type) == "array") then
-        "\(.nodes | length) \(if .pageInfo.hasNextPage == true then (.pageInfo.endCursor // "") else "" end)"
+        "\(.nodes | length) \(if .pageInfo.hasNextPage != true then ""
+                              elif (.pageInfo.endCursor | type) == "string" and .pageInfo.endCursor != ""
+                              then .pageInfo.endCursor
+                              else error("next page without a cursor") end)"
       else error("unexpected response shape") end' <"$tmp/$1.out" 2>/dev/null)
   if [ $? -ne 0 ] || [ -z "$info" ]; then
     echo "overview-bundle: unexpected response shape from gh ($1)" >&2
@@ -226,6 +231,8 @@ if [ "$gh_status" -ne 0 ]; then
     <"$tmp/first.out" >&2
 fi
 
+# Open PRs never page (first: 30, as `gh pr list`): this read only asserts the shape, so a
+# successful response without the PR connection fails here instead of emitting no PRs.
 read_connection first '["data","repository","pullRequests"]'
 read_connection first '["data","repository","issues"]'
 issues_cursor=$page_cursor
@@ -257,7 +264,9 @@ fi
 # $1 = section (closed|merged), $2 = its search string. Appends each follow-up page to the
 # stream and sets search_pages to how many it appended. A failed page sets search_ok=false
 # (the section becomes null, never truncated) unless it is a rate limit, which fails the
-# whole bundle. A failed page's output is never appended.
+# whole bundle. A failed page's output is never appended. Paging stops at 1,000 results or
+# at page 10, whichever comes first: 100 per page reaches the cap at page 10, and the page
+# bound keeps the worst case at 20 gh processes even if pages come back short.
 page_search() {
   section=$1
   search=$2
@@ -267,7 +276,7 @@ page_search() {
   count=$page_count
   cursor=$page_cursor
   page=1
-  while [ -n "$cursor" ] && [ "$count" -lt 1000 ]; do
+  while [ -n "$cursor" ] && [ "$count" -lt 1000 ] && [ "$page" -lt 10 ]; do
     page=$((page + 1))
     gh_request "$section.$page" api graphql \
       -f query="$Q_SEARCH_PAGE" \
