@@ -237,3 +237,6 @@ SPIR, soft mode. Spawned by architect `porchless`.
     `jq` shim test pins it on POSIX.
   - Also from claude: source-only plan resolution (no per-poll script reads), a test holding
     the script's rate-limit ERE equal to the limiter's, and a bounded lock spin.
+- PR round 3: claude APPROVE after re-verifying the round-2 fixes. Codex asked only for `main`,
+  10 commits ahead (AIR #1977). The merge was clean (963ba5d97) and touched no forge or
+  overview file. Root build and the full suite were green on it: 10,149 passed.

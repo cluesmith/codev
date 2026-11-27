@@ -251,6 +251,18 @@ re-reviewed. The owner approved the spec as written.
 - **Concern**: a retired `search(type: ISSUE)` would fail the whole bundle → **Addressed** as a follow-up item (no code change; a path-less error stays a whole failure by the spec's rule).
 - **Concern**: unbounded lock spin; stale commit in the PR body → **Addressed**.
 
+### Review Phase, PR #2004 (Round 3): codex REQUEST_CHANGES, claude APPROVE
+
+#### Codex
+- **Concern**: the branch was 10 commits behind `main`, and the suite evidence predated them → **Addressed**: merged cleanly (963ba5d97, AIR #1977; no forge or overview file touched), then the root build and the full suite were re-run on the merge.
+
+#### Claude
+- Re-verified both round-2 blockers against the files and approved.
+- **Concern**: `fail_with_gh` greps stderr twice → **N/A**: cosmetic.
+- **Concern**: the named rate-limit line is added only when stderr is silent → **N/A**: the intended contract, pinned by three tests.
+- **Concern**: could not verify that the later commits are docs-only → **Addressed**: checked with `git diff --stat`.
+- **Concern**: the Work view browser check is still open → **N/A**: scheduled for verify.
+
 ## Lessons Learned
 
 ### What Went Well
