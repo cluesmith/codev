@@ -40,6 +40,7 @@ import { normalizeWorkspacePath } from './tower-utils.js';
 import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId, isIssueKey } from '../../lib/issue-id.js';
 import { resolveIssueIdKind, loadForgeConfig } from '../../lib/forge.js';
 import { LIST_TTL_MS, SEARCH_TTL_MS, USER_TTL_MS, INVALIDATE_DEBOUNCE_MS } from '../../lib/overview-budget.js';
+import { buildAgentName } from '../utils/agent-names.js';
 
 // =============================================================================
 // Status YAML parser (lightweight, no library dependency)
@@ -554,12 +555,16 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   if (pirMatch) return `builder-pir-${Number(pirMatch[1])}`;
 
   // Task: task-NAvW → builder-task-navw. The whole remainder is the short id:
-  // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3,
-  // as buildAgentName produces; #1740).
+  // base64url short ids can contain '-' and '_' (task-Ab-3 → builder-task-ab-3;
+  // #1740). Named through buildAgentName, as spawn names the terminal, so an
+  // all-digit short id loses its leading zeros the same way (task-0042 →
+  // builder-task-42; #1844).
   const taskMatch = lower.match(SHORT_ID_NAME_TASK);
-  if (taskMatch) return `builder-task-${taskMatch[1]}`;
+  if (taskMatch) return buildAgentName('task', taskMatch[1]);
 
-  // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
+  // Worktree: worktree-foIg → worktree-foig (no builder- prefix). Spawn names
+  // this terminal `worktree-<short id>` directly, not via buildAgentName, so
+  // leading zeros stay.
   const worktreeMatch = lower.match(SHORT_ID_NAME_WORKTREE);
   if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
 
@@ -575,12 +580,13 @@ export function worktreeNameToRoleId(dirName: string): string | null {
   // Generic protocol: experiment-1560[-slug] → builder-experiment-1560 (a
   // numbered spawn), else experiment-AbCd → builder-experiment-abcd, where the
   // whole remainder is the issue-less spawn's short id, '-'/'_' included
-  // (maintain-x_9Q → builder-maintain-x_9q, as buildAgentName produces; #1740).
+  // (maintain-x_9Q → builder-maintain-x_9q; #1740). Named through
+  // buildAgentName, as spawn names the terminal, so leading zeros go the same
+  // way (experiment-0042 → builder-experiment-42; #1844).
   const genericMatch = lower.match(/^([a-z]+)-(.+)$/);
   if (genericMatch) {
     const numbered = genericMatch[2].match(/^(\d+)(?:-|$)/);
-    if (numbered) return `builder-${genericMatch[1]}-${numbered[1]}`;
-    return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+    return buildAgentName('protocol', numbered ? numbered[1] : genericMatch[2], genericMatch[1]);
   }
 
   return null;

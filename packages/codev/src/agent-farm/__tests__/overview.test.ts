@@ -1309,6 +1309,24 @@ describe('overview', () => {
       expect(worktreeNameToRoleId('worktree-a_-1')).toBe('worktree-a_-1');
     });
 
+    it('maps the ids reported in #1844 to the role id their terminal registers', () => {
+      expect(worktreeNameToRoleId('task-S0-L')).toBe(buildAgentName('task', 'S0-L'));
+      expect(worktreeNameToRoleId('task-_-LM')).toBe(buildAgentName('task', '_-LM'));
+    });
+
+    it('strips leading zeros from an all-digit short id, as buildAgentName does (#1844)', () => {
+      // A base64url short id can be all digits. Spawn names the terminal through
+      // buildAgentName, which strips leading zeros: task-0042 registers builder-task-42.
+      expect(worktreeNameToRoleId('task-0042')).toBe('builder-task-42');
+      expect(worktreeNameToRoleId('task-0042')).toBe(buildAgentName('task', '0042'));
+      expect(worktreeNameToRoleId('task-0000')).toBe(buildAgentName('task', '0000'));
+      expect(worktreeNameToRoleId('experiment-0042')).toBe(buildAgentName('protocol', '0042', 'experiment'));
+      expect(worktreeNameToRoleId('maintain-0007-x')).toBe(buildAgentName('protocol', '0007', 'maintain'));
+      // `afx spawn --worktree` names its terminal `worktree-<short id>` directly,
+      // not through buildAgentName, so the zeros stay.
+      expect(worktreeNameToRoleId('worktree-0042')).toBe('worktree-0042');
+    });
+
     it('resolves every pre-#1740 numeric and short-id form exactly as before', () => {
       const cases: Array<[string, string]> = [
         ['spir-126-x', 'builder-spir-126'], ['bugfix-296-x', 'builder-bugfix-296'], ['pir-1298-x', 'builder-pir-1298'],
@@ -2281,6 +2299,18 @@ describe('overview', () => {
       const cache = new OverviewCache();
       const data = await cache.getOverview(tmpDir, new Set());
       expect(data.builders).toHaveLength(0);
+    });
+
+    it('keeps a live task builder whatever characters its short id holds (#1844)', async () => {
+      // No global.db row, so each role id comes from the directory name. The
+      // active set holds the role ids spawn registers the terminals under.
+      createBuilderWorktree(tmpDir, 'task-S0-L');
+      createBuilderWorktree(tmpDir, 'task-_-LM');
+      createBuilderWorktree(tmpDir, 'task-0042');
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir, new Set(['builder-task-s0-l', 'builder-task-_-lm', 'builder-task-42']));
+      expect(data.builders.map(b => b.id).sort()).toEqual(['task-0042', 'task-S0-L', 'task-_-LM']);
     });
 
     it('enriches builder issueTitle from GitHub issue titles', async () => {
