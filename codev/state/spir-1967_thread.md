@@ -516,7 +516,8 @@ above is struck through. A test breaks both invariants by hand and finds neither
     cmd) byte for byte, CLI tests and install verification.
   - Red: Unit tests. All 10 198 tests passed, but `bugfix-1871-cloud-identity` failed in
     teardown with EBUSY unlinking its own test.db.
-  - Cause: since phase 5 each `auth_ok` reads the switch via `getGlobalDb()`, and that suite
+  - Cause: since phase 5 each `auth` the client sends states the switch, read via
+    `getGlobalDb()`, and that suite
     (the real tower-tunnel and a real db) never closed it.
 
   Reported to the architect before any rerun. Ruling 2026-11-27T02:50Z: close the db in that
@@ -528,3 +529,22 @@ above is struck through. A test breaks both invariants by hand and finds neither
 - Windows re-dispatch (the one the ruling allows) at 94b6bd1a2, with the review fixes and the
   bugfix-1871 close together, `suites=true`:
   https://github.com/cluesmith/codev/actions/runs/45930869011
+- **Windows re-dispatch 45930869011 (94b6bd1a2): green.**
+  - Both probe legs, with all six `afx://` argv steps byte for byte.
+  - Unit tests, including bugfix-1871's teardown, CLI tests and install verification.
+  - The phase's Windows criterion is met.
+- **Phase 5 review (iter 2): codex REQUEST_CHANGES (new point), claude APPROVE**, both HIGH.
+  Response: `1967-phase_5-iter2-rebuttals.md`; nothing disputed.
+  - Taken (codex): an `auth_ok` whose `towerId`, `slug` or `name` repeats the session secret
+    it carries is not used at all, before anything is kept, persisted (cloud-config) or
+    logged. The comparison covers the secret as sent and decoded into base64url, base64 or
+    hex, and applies whether or not the secret would have been taken. Tested against a clean
+    control, and shown to fail with the check disabled.
+  - Taken (claude): a test that the old session's secret and ids are dropped on a reconnect
+    and on a disconnect; the comment wording (the switch is read when the client sends
+    `auth`).
+  - **Left for the architect (claude, non-blocking):** an unreadable switch fails the connect
+    attempt, which takes the dashboard, VS Code remote and `/t/` down with it. Stating `off`
+    with a WARN would also be fail-closed for messaging, but it is a fallback. Kept as built
+    (design choice 5, the owner's fail-fast rule); asked in the phase report.
+

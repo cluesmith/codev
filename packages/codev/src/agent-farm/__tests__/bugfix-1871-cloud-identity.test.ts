@@ -101,8 +101,9 @@ describe('Issue #1871: Tower follows the cloud identity', () => {
 
   afterEach(async () => {
     shutdownTunnel();
-    // Every auth_ok reads the remote-messaging switch from the real global db (Spec 1967),
-    // which opens it under TEST_DIR; close it so each test, and the final rmSync, starts clean.
+    // Every `auth` the tunnel client sends states the remote-messaging switch, read from the
+    // real global db (Spec 1967), which opens it under TEST_DIR; close it so each test, and
+    // the final rmSync, starts clean.
     closeGlobalDb();
     vi.useRealTimers();
     vi.restoreAllMocks();

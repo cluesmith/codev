@@ -425,6 +425,33 @@ function unreadableAuthResponse(text: string): string {
   return `invalid auth response (${Buffer.byteLength(text, 'utf8')} bytes, not shown: it may carry a session secret)`;
 }
 
+/**
+ * Whether a field of `auth_ok` that Tower keeps or logs (`towerId`, `slug`, `name`) repeats
+ * the session secret the same response carries: as sent, or decoded and written as
+ * base64url, base64 or hex. Such an `auth_ok` is not used at all (Spec 1967: the secret lives
+ * only in the tunnel session and never reaches a file or a log), whether or not the secret
+ * itself would have been kept.
+ */
+function authOkRepeatsSecret(authOk: Readonly<Record<string, unknown>>, offer: RelayOffer): boolean {
+  const relay = authOk.relay;
+  const sent = typeof relay === 'object' && relay !== null ? (relay as Record<string, unknown>).sessionSecret : undefined;
+  const forms: string[] = [];
+  // A sent value too short to be a secret could match ordinary text; the decoded forms cover a real one.
+  if (typeof sent === 'string' && sent.length >= 16) forms.push(sent);
+  let hex: string | null = null;
+  if (offer.relay === 'offered') {
+    const bytes = Buffer.from(offer.secret);
+    forms.push(bytes.toString('base64url'), bytes.toString('base64'), bytes.toString('base64').replace(/=+$/, ''));
+    hex = bytes.toString('hex');
+  }
+  return ['towerId', 'slug', 'name'].some((field) => {
+    const value = authOk[field];
+    if (typeof value !== 'string') return false;
+    if (forms.some((form) => value.includes(form))) return true;
+    return hex !== null && value.toLowerCase().includes(hex);
+  });
+}
+
 /** An auth response type, shown only when it has the shape of one. */
 function shownAuthType(type: unknown): string {
   return typeof type === 'string' && /^[a-z_]{1,32}$/.test(type) ? type : '(not shown)';
@@ -1009,8 +1036,13 @@ export class TunnelClient {
       // An `auth_ok` carries the session secret, so nothing below echoes the response.
       try {
         if (msg.type === 'auth_ok') {
+          const offer = readRelayOffer(msg);
+          if (authOkRepeatsSecret(msg, offer)) {
+            this.handleConnectionError(new Error('auth_ok not used: a field repeats its session secret (not shown)'));
+            return;
+          }
           this.options.towerId = msg.towerId as string;
-          const session = this.openSession(msg);
+          const session = this.openSession(msg, offer);
           this.session = session;
           this.emitAuthOk({
             towerId: msg.towerId as string,
@@ -1036,12 +1068,8 @@ export class TunnelClient {
    * A new connection's peer state, from its `auth_ok` (Spec 1967, contract section 1):
    * its own id and name, and the relay as the TLS rule allows this Tower to take it.
    */
-  private openSession(authOk: Record<string, unknown>): TunnelSession {
-    const taken = takeRelay(
-      readRelayOffer(authOk),
-      new URL(buildTunnelWsUrl(this.options.serverUrl)),
-      this.options.peer !== undefined,
-    );
+  private openSession(authOk: Record<string, unknown>, offer: RelayOffer): TunnelSession {
+    const taken = takeRelay(offer, new URL(buildTunnelWsUrl(this.options.serverUrl)), this.options.peer !== undefined);
     return {
       id: randomUUID(),
       // An id that is not a string matches no statement's `toTowerId` (step 5).

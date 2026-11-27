@@ -284,6 +284,30 @@ describe('the handshake', () => {
     expect(handed).toEqual([]);
   });
 
+  it("drops the old session's secret and statement ids when its tunnel goes, on a reconnect and on a disconnect", async () => {
+    type Held = { secret: Uint8Array | null; statementIds: Map<string, number> };
+    const held = (tunnel: TunnelClient) => (tunnel as unknown as { session: Held | null }).session;
+    const tunnel = newClient();
+    await connected(tunnel);
+    await present();
+    const first = held(tunnel)!;
+    expect(first.secret).toHaveLength(32);
+    expect(first.statementIds.size).toBe(1);
+
+    await reconnected(tunnel);
+    expect(first.secret).toBeNull();
+    expect(first.statementIds.size).toBe(0);
+    await present();
+    const second = held(tunnel)!;
+    expect(second).not.toBe(first);
+    expect(second.secret).toHaveLength(32);
+
+    tunnel.disconnect();
+    expect(held(tunnel)).toBeNull();
+    expect(second.secret).toBeNull();
+    expect(second.statementIds.size).toBe(0);
+  });
+
   it('a client given no peer options states nothing, takes no relay, and verifies nothing', async () => {
     const tunnel = newClient({ peer: null });
     await connected(tunnel);
@@ -826,6 +850,60 @@ describe('the secret never reaches a log', () => {
         });
         for (const text of [...reasons, ...lines]) {
           for (const form of forms) expect(text).not.toContain(form);
+        }
+      }
+    } finally {
+      for (const socket of cloud.clients) socket.terminate();
+      await new Promise<void>((resolve) => cloud.close(() => resolve()));
+    }
+  });
+
+  it('an auth_ok that repeats its session secret in a field Tower keeps is not used, and nothing of it is kept or logged', async () => {
+    const cloud = new WebSocketServer({ host: '127.0.0.1', port: 0, path: '/tunnel' });
+    await once(cloud, 'listening');
+    let reply = '';
+    cloud.on('connection', (socket) => socket.once('message', () => socket.send(reply)));
+    const port = (cloud.address() as { port: number }).port;
+    const secret = randomBytes(32);
+    const [b64url, b64, hex] = secretForms(secret);
+    const authOk = (fields: Record<string, unknown>) =>
+      JSON.stringify({ type: 'auth_ok', towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: { protocols: [1], sessionSecret: b64url }, ...fields });
+    try {
+      for (const [fields, used] of [
+        // The control: the same response without the repeat is used.
+        [{}, true],
+        [{ name: `devvm ${b64url}` }, false],
+        [{ name: hex.toUpperCase() }, false],
+        [{ slug: hex }, false],
+        [{ slug: b64.replace(/=+$/, '') }, false],
+        [{ towerId: `${r.towerId}${b64}` }, false],
+        // A secret the client would not take (padded, so malformed) is still never kept.
+        [{ relay: { protocols: [1], sessionSecret: `${b64url}=` }, name: `${b64url}=` }, false],
+      ] as const) {
+        reply = authOk(fields);
+        const reasons: string[] = [];
+        const identities: unknown[] = [];
+        const lines = await consoleLines(async () => {
+          const tunnel = newClient({ serverUrl: `http://127.0.0.1:${port}` });
+          tunnel.onStateChange((_state, _prev, reason) => reasons.push(reason ?? ''));
+          tunnel.onAuthOk((identity) => identities.push(identity));
+          tunnel.connect();
+          const settled = await waitFor(
+            async () => identities.length > 0 || reasons.some((reason) => reason.includes('auth_ok not used')),
+            10_000,
+            5,
+          );
+          expect(settled, JSON.stringify(fields)).toBe(true);
+          tunnel.disconnect();
+        });
+        if (used) {
+          expect(identities).toEqual([{ towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: 'available' }]);
+        } else {
+          expect(identities, JSON.stringify(fields)).toEqual([]);
+          expect(reasons).toContain('connection error: auth_ok not used: a field repeats its session secret (not shown)');
+        }
+        for (const text of [...reasons, ...lines, JSON.stringify(identities)]) {
+          for (const form of [b64url, b64, hex]) expect(text.toLowerCase()).not.toContain(form.toLowerCase());
         }
       }
     } finally {
