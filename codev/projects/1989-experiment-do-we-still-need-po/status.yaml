@@ -1,0 +1,14 @@
+id: '1989'
+title: experiment-do-we-still-need-po
+protocol: experiment
+phase: hypothesis
+plan_phases: []
+current_plan_phase: null
+gates:
+  experiment-complete:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-27T07:13:35.339Z'
+updated_at: '2026-11-27T07:13:35.340Z'
