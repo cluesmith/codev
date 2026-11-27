@@ -1,7 +1,7 @@
 id: '1647'
 title: tower-collapse-the-four-per-wo
 protocol: spir
-phase: implement
+phase: review
 plan_phases:
   - id: phase_1
     title: overview-bundle concept and GitHub script
@@ -14,8 +14,8 @@ plan_phases:
     status: complete
   - id: phase_4
     title: Adopter documentation
-    status: in_progress
-current_plan_phase: phase_4
+    status: complete
+current_plan_phase: null
 gates:
   spec-approval:
     status: approved
@@ -30,10 +30,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T06:23:02.221Z'
+updated_at: '2026-11-27T06:27:04.394Z'
 force_advanced:
   phase: specify
   iteration: 3
@@ -56,3 +56,5 @@ context_refreshes:
   - boundary: plan-phase:phase_4
     at: '2026-11-27T06:11:05.582Z'
     acknowledged_at: '2026-11-27T06:11:17.597Z'
+  - boundary: enter:review
+    at: '2026-11-27T06:27:04.394Z'
