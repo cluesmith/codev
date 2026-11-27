@@ -657,7 +657,8 @@ From here **the statement is used up**, whatever the outcome. Then, in this orde
     `malformed`. Then `sentAt` is not more than 5 minutes ahead of R's clock (`clock-skew`) nor
     more than 30 days old (`expired`), and the body is at most 48 KiB (`too-large`).
 13. The recipient resolves: otherwise `no-such-agent`; a shell is `not-addressable`.
-14. A grant covers this peer and recipient: otherwise `no-grant`.
+14. A grant covers this peer and recipient: otherwise `no-grant`. Where several grants cover them
+    with different modes, hold wins: the message is held for release if any of them holds it.
 15. R's limits: 30 a minute from this peer, 50 accepted but undelivered from this peer: otherwise
     `rate-limited`.
 16. R persists the message, makes one gate attempt as a local send does, and answers `delivered`

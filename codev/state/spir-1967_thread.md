@@ -425,3 +425,14 @@ above is struck through. A test breaks both invariants by hand and finds neither
   longer called "not valid JSON". Not taken: moving `PEER_MIN_RETENTION_DAYS` into
   codev-types. `lib/config.ts` already imports from `agent-farm/`, and retention is
   Tower-local policy, not wire protocol. The lazy-withdrawal carry-forward stays with phase 6.
+- **Architect, 2026-11-27T02:01Z, on phase 4:** both choices accepted. (1) Hold wins: written
+  as one line in the spec (R's check 14); phase 13's docs say it too. (2) `on` and `grant`
+  refused through the tunnel: follows from the design's threat table (a request through the
+  cloud's proxy carries the local key). Consequences carried forward: **phase 12**, the Peers
+  panel loaded through the cloud shows turning on and granting as unavailable there, with the
+  reason, and does not offer a button that fails with 403; **phase 13**, the docs say these two
+  are done at the machine. Narrow readings (architect-only grants, builders only under --all,
+  former names list and revoke but do not create) accepted. **Phase 6:** withdrawal on
+  switch-off and revoke is EAGER (matches the approved scenarios' "waits for release"); an
+  off-then-on must not release mail by itself. **Phase 5** dispatches the Windows workflow
+  with the three-shell probe.
