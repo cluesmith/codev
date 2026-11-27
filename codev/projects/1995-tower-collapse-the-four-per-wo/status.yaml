@@ -27,24 +27,14 @@ gates:
     approved_at: '2026-11-27T04:41:50.958Z'
   pr:
     status: pending
+    requested_at: '2026-11-27T06:46:59.687Z'
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
-history:
-  - iteration: 1
-    build_output: ''
-    reviews:
-      - model: codex
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-codex.txt
-      - model: claude
-        verdict: REQUEST_CHANGES
-        file: >-
-          /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-claude.txt
+build_complete: false
+history: []
 started_at: '2026-11-26T01:28:07.091Z'
-updated_at: '2026-11-27T06:38:32.604Z'
+updated_at: '2026-11-27T06:46:59.687Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-26T22:13:27.161Z'
@@ -66,3 +56,4 @@ pr_history:
     pr_number: 2005
     branch: builder/spir-1995
     created_at: '2026-11-27T06:38:12.504Z'
+pr_ready_for_human: true
