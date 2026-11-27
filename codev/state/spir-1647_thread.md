@@ -121,3 +121,21 @@ SPIR, soft mode. Spawned by architect `porchless`.
   check removed, bot prefix removed) each turn exactly the expected tests red.
 - Small adjacent change: `forge-windows-launcher.test.ts` lists every concept, so it gains
   `overview-bundle`.
+
+## 2026-11-27: Implement Phase 2 (mode resolution, spend projection, doctor line)
+- `src/lib/overview-budget.ts` owns the four TTL/debounce constants, `OVERVIEW_CONSTITUENTS`,
+  `OverviewPlan` and `projectHourlyForgeCalls`. `OverviewCache` imports the constants; the
+  failure-window constants stay in overview.ts. No behaviour change: a test pins `pr-list`
+  refetching at exactly `LIST_TTL_MS` (not 1 ms before) and `recently-closed` at exactly
+  `SEARCH_TTL_MS`.
+- `resolveOverviewPlan` (forge.ts) is built on `resolveAllConcepts` sources, with no I/O. Two calls
+  the plan left open:
+  - When `overview-bundle` is disabled, a project `null` wins as the reason
+    (`bundle-disabled`) even on a preset that also disables it.
+  - `bypassed` lists overridden constituents first, then disabled ones.
+- Doctor line separator: ` — ` between reason and projection, not the plan example's `:`. A
+  colon gave "four calls: issue-list overridden: 52 forge calls/h …". Real output on this repo:
+  `- overview  bundled — 20 forge calls/h idle, 60 under constant invalidation`.
+- doctor.test.ts's forge mock now hands doctor the real `resolveOverviewPlan`, so each doctor
+  case is driven by a forge config, not a canned plan. The concept list gains `overview-bundle`
+  and its comment is count-free. The two "18 concepts" comments in doctor.ts are count-free too.

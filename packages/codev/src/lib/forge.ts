@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { IssueIdKind } from '@cluesmith/codev-types';
 import { loadConfig as loadCodevConfig } from './config.js';
 import { commandLaunch } from './platform/command-launch.js';
+import { OVERVIEW_CONSTITUENTS, type FourCallCause, type OverviewConstituent, type OverviewPlan } from './overview-budget.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -232,6 +233,43 @@ export function resolveAllConcepts(forgeConfig?: ForgeConfig | null): ConceptRes
     const cmd = getDefaultCommands()[concept] ?? null;
     return { concept, command: cmd, source: 'default' as ConceptSource, executable: cmd ? extractExecutable(cmd) : null };
   });
+}
+
+/**
+ * Whether the overview uses `overview-bundle` or its four constituents, decided
+ * from configuration alone; there is no runtime fallback (Spec 1647). The bundle
+ * is used when it resolves to a command and either the project overrides it, or
+ * no constituent is overridden or disabled, so a project's own `issue-list`
+ * stays in force. An overridden bundle discloses the constituent settings it hides.
+ */
+export function resolveOverviewPlan(forgeConfig?: ForgeConfig | null): OverviewPlan {
+  const sources = new Map(resolveAllConcepts(forgeConfig).map((r) => [r.concept, r.source]));
+  const sourceOf = (concept: OverviewConstituent) => sources.get(concept);
+  const overridden = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) === 'override');
+  const disabled = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) === 'disabled');
+  const runnable = OVERVIEW_CONSTITUENTS.filter((c) => sourceOf(c) !== 'disabled');
+
+  const bundleSource = sources.get('overview-bundle');
+  if (bundleSource === 'disabled') {
+    const provider = forgeConfig?.provider;
+    const cause: FourCallCause = forgeConfig?.['overview-bundle'] === null || provider === undefined
+      ? { kind: 'bundle-disabled' }
+      : { kind: 'preset-disabled', provider };
+    return { mode: 'four-call', cause, runnable };
+  }
+  if (bundleSource === 'override') {
+    return {
+      mode: 'bundled',
+      bypassed: [
+        ...overridden.map((concept) => ({ concept, how: 'overridden' as const })),
+        ...disabled.map((concept) => ({ concept, how: 'disabled' as const })),
+      ],
+    };
+  }
+  if (overridden.length > 0 || disabled.length > 0) {
+    return { mode: 'four-call', cause: { kind: 'constituents', overridden, disabled }, runnable };
+  }
+  return { mode: 'bundled', bypassed: [] };
 }
 
 /**
