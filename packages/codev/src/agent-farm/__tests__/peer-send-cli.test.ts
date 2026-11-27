@@ -297,6 +297,15 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
       expect(paths).toContain('/api/send');
     });
 
+    it('a message file and an attachment that each fit, but not in one request, are not sent', async () => {
+      const paths = towerAnswering({ send: () => delivered(1) });
+      const half = 'x'.repeat(600 * 1024);
+      await expect(send({ builder: TO, messageFile: file('msg.txt', half), file: file('att.txt', half) })).rejects.toMatchObject({ code: 1 });
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(/^\[error\] Not sent: the request would be 12\d{5} bytes, and Tower reads none over 1048576\.$/);
+      expect(paths).not.toContain('/api/send');
+    });
+
     it('a file no request could carry is refused with no call; a local recipient keeps the 48 KiB limit', async () => {
       const paths = towerAnswering({ send: () => delivered(1) });
       await expect(send({ builder: TO, messageFile: file('huge.txt', 'x'.repeat(1024 * 1024 + 1)) })).rejects.toThrow(

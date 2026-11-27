@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR, MAX_REQUEST_BODY_BYTES } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { isRemoteAddress, parseAddress } from './address.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
@@ -36,6 +36,12 @@ const REMOTE_SEND_TIMEOUT_MS = 65_000;
 
 /** `POST /api/send`'s code for a refused send to another Tower; the value itself, as the SDK carries no runtime import. */
 const REMOTE_REFUSED: typeof REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
+
+/** The largest request body Tower reads; mirrored the same way. Past it, Tower drops the request unanswered. */
+const TOWER_MAX_REQUEST_BYTES: typeof MAX_REQUEST_BODY_BYTES = 1_048_576;
+
+/** `sendMessage`'s code for a send it did not make: its request is larger than Tower reads. */
+const REQUEST_TOO_LARGE = 'REQUEST_TOO_LARGE';
 
 /** `POST /api/send`'s code for a message stored and held on the sending Tower but not sent now; mirrored the same way. */
 const REMOTE_HELD_ON_FAULT: typeof REMOTE_HELD_ON_FAULT_ERROR = 'REMOTE_HELD_ON_FAULT';
@@ -1270,6 +1276,30 @@ export class TowerClient {
      */
     unverifiedCause?: 'no-echo' | 'input-raced';
   }> {
+    const body = JSON.stringify({
+      to,
+      message,
+      from: options?.from,
+      workspace: options?.workspace,
+      fromWorkspace: options?.fromWorkspace,
+      options: {
+        raw: options?.raw,
+        noEnter: options?.noEnter,
+        interrupt: options?.interrupt,
+        escape: options?.escape,
+        deliverAfter: options?.deliverAfter,
+      },
+    });
+    // Tower drops a request past its ceiling unanswered, before any check could refuse it in
+    // words; the request is measured here, as it will be sent, and not sent at all.
+    const requestBytes = new TextEncoder().encode(body).length;
+    if (requestBytes > TOWER_MAX_REQUEST_BYTES) {
+      return {
+        ok: false,
+        error: `Not sent: the request would be ${requestBytes} bytes, and Tower reads none over ${TOWER_MAX_REQUEST_BYTES}.`,
+        errorCode: REQUEST_TOO_LARGE,
+      };
+    }
     const result = await this.request<{
       ok: boolean;
       resolvedTo: string;
@@ -1289,23 +1319,7 @@ export class TowerClient {
       remote?: RemoteSendAnswer;
     }>(
       '/api/send',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          to,
-          message,
-          from: options?.from,
-          workspace: options?.workspace,
-          fromWorkspace: options?.fromWorkspace,
-          options: {
-            raw: options?.raw,
-            noEnter: options?.noEnter,
-            interrupt: options?.interrupt,
-            escape: options?.escape,
-            deliverAfter: options?.deliverAfter,
-          },
-        }),
-      },
+      { method: 'POST', body },
       namesATower(to) ? Math.max(REMOTE_SEND_TIMEOUT_MS, this.requestTimeoutMs) : this.requestTimeoutMs,
     );
 

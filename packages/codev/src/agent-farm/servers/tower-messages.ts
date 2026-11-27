@@ -159,8 +159,8 @@ export interface ResolveError {
   message: string;
 }
 
-/** What the resolvers say of an address that names a Tower. */
-export const LOCAL_ADDRESS_ONLY_MESSAGE = localAddressOnlyMessage('This');
+/** What the resolvers say of an address that names a Tower: they find agents on this Tower. */
+export const LOCAL_ADDRESS_ONLY_MESSAGE = localAddressOnlyMessage('Finding an agent on this Tower');
 
 /**
  * Who is asking (Spec 1940). `id` is the sender's local id, as `/api/send`'s `from`

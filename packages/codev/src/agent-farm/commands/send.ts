@@ -24,10 +24,10 @@ import { hostPaths } from '../../lib/platform/host-paths.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { checkTower } from '../lib/tower-check.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
-import { MAX_MESSAGE_BYTES, MAX_REQUEST_BODY_BYTES, messageLimitError } from '../utils/message-format.js';
+import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { parseAddress } from '@cluesmith/codev-sdk/address';
-import type { RemoteSendAnswer } from '@cluesmith/codev-types';
+import { MAX_REQUEST_BODY_BYTES, type RemoteSendAnswer } from '@cluesmith/codev-types';
 import { olderTowerError } from '../utils/older-tower.js';
 import { namesATower } from '../utils/agent-names.js';
 
@@ -251,7 +251,8 @@ function readFileContent(filePath: string, label: string, toAnotherTower: boolea
   }
   const fileBuffer = readFileSync(filePath);
   // A message for another Tower is sized by Tower's sender, in the contract's order and on
-  // the body once normalised (Spec 1967): only a file no request could carry is refused here.
+  // the body once normalised (Spec 1967). A file no request could carry is refused before it
+  // is sent; the SDK measures the request itself, which is the exact check.
   if (toAnotherTower && fileBuffer.length > MAX_REQUEST_BODY_BYTES) {
     throw new Error(`${label} too large: ${fileBuffer.length} bytes (Tower takes no request over ${MAX_REQUEST_BODY_BYTES} bytes)`);
   }

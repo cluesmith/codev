@@ -176,6 +176,7 @@ export {
   type TowerVersionInfo,
   type ProtocolStats,
   type AnalyticsResponse,
+  MAX_REQUEST_BODY_BYTES,
 } from './api.js';
 
 export {

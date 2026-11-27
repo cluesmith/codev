@@ -9,6 +9,12 @@ import type { PeerCloudLimits, PeerListedSwitchState } from './peer-wire.js';
  * VS Code extension (packages/codev-vscode).
  */
 
+/**
+ * The largest request body Tower reads, in bytes: past it, the request is dropped
+ * unanswered. A literal, so the SDK's mirror of it is checked against this.
+ */
+export const MAX_REQUEST_BODY_BYTES = 1_048_576;
+
 // --- Dashboard State (GET /workspace/:path/api/state) ---
 
 export interface ArchitectState {

@@ -317,6 +317,51 @@ describe('TowerClient.sendMessage — a send to another Tower', () => {
     expect(await read('devvm')).toBeUndefined();
   });
 
+  describe('a request larger than Tower reads', () => {
+    const CAP = 1024 * 1024;
+    let bodies: string[];
+
+    beforeEach(() => {
+      bodies = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          bodies.push(String(init?.body));
+          return new Response(JSON.stringify({ ok: true, resolvedTo: 'x' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }),
+      );
+    });
+
+    const bytes = (text: string) => new TextEncoder().encode(text).length;
+    const TO = 'afx://devvm/codev:architect';
+
+    it('is sent at exactly the ceiling, and not sent one byte past it', async () => {
+      await new TowerClient().sendMessage(TO, '', { from: 'architect:main', workspace: '/work/codev' });
+      const envelope = bytes(bodies[0]);
+
+      const atCap = await new TowerClient().sendMessage(TO, 'a'.repeat(CAP - envelope), { from: 'architect:main', workspace: '/work/codev' });
+      expect(atCap.ok).toBe(true);
+      expect(bytes(bodies[1])).toBe(CAP);
+
+      const over = await new TowerClient().sendMessage(TO, 'a'.repeat(CAP - envelope + 1), { from: 'architect:main', workspace: '/work/codev' });
+      expect(over).toEqual({
+        ok: false,
+        error: `Not sent: the request would be ${CAP + 1} bytes, and Tower reads none over ${CAP}.`,
+        errorCode: 'REQUEST_TOO_LARGE',
+      });
+      expect(bodies).toHaveLength(2);
+    });
+
+    it('is measured as encoded: a message under the ceiling that escaping takes past it is not sent', async () => {
+      const quotes = '"'.repeat(600 * 1024);
+      expect(bytes(quotes)).toBeLessThan(CAP);
+      const result = await new TowerClient().sendMessage(TO, quotes);
+      expect(result).toMatchObject({ ok: false, errorCode: 'REQUEST_TOO_LARGE' });
+      expect(result.error).toMatch(/^Not sent: the request would be 12\d{5} bytes, and Tower reads none over 1048576\.$/);
+      expect(bodies).toEqual([]);
+    });
+  });
+
   it('gives a message stored and held but not sent now in its own words, with nothing after them', async () => {
     const words =
       'Message stored and held on this Tower — mailbox id m-9 — but not sent to devvm now: this Tower is stopping. ' +

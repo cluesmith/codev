@@ -937,7 +937,9 @@ Surprises:
     Tower's own name included, is refused as `LOCAL_ADDRESS_ONLY` before the sender is asked.
   - Mailbox ids are printed in full, as local holds and `afx inbox` print them (the
     walkthrough shows eight characters).
-  - `bodyLength` is the body as typed, as for a local send.
+  - ~~`bodyLength` is the body as typed, as for a local send.~~ Superseded in review
+    iteration 2: a remote send's `bodyLength` is the body as stored and sent, once
+    normalised. The review document takes that reading, not this one.
   - The SDK waits 65 s for an answer to a send naming another Tower (the sender's 20 s per
     call, the cloud's 15 s for the receiver, and room for the route), or the client's own
     timeout when that is longer.
@@ -1009,3 +1011,17 @@ Surprises:
     `errorCode`.
   - **Verified.** Layer A 10 887 passed, 116 skipped, 242.4 s. Layer B 20 of 20 in 60.9 s
     at load 3.8.
+- **Phase 9 review (iter 3): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** All
+  taken, none disputed. Response: `1967-phase_9-iter3-rebuttals.md`.
+  - **codex 1 / claude 2: the 1 MiB guard measured a file, not the request.** The
+    envelope, escaping, or two files together could still pass it and be dropped
+    unanswered. Now the SDK's `sendMessage` encodes the request once, measures it as
+    `parseJsonBody` counts, and refuses one past the ceiling with no call
+    (`REQUEST_TOO_LARGE`). `MAX_REQUEST_BODY_BYTES` lives in `codev-types` as a literal;
+    `parseJsonBody` defaults to it and the SDK's mirror is type-checked against it. The
+    CLI's raw-file check stays as a cheap first refusal.
+  - **claude 1.** The superseded `bodyLength` reading above is struck through.
+  - **claude 3.** The lookup's refusal reads "Finding an agent on this Tower takes a local
+    address: …".
+  - **Verified.** Layer A 10 888 passed, 116 skipped, 244.0 s. Layer B 20 of 20 in 59.6 s
+    at load 3.1.
