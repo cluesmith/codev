@@ -68,10 +68,15 @@ refresh against 7 for the four calls.
       four-call variant kept. (Phase 3)
 - [x] All four concept-enumerating docs describe `overview-bundle`, and the stale "18 concepts"
       counts are corrected to 21. (Phases 2 and 4)
-- [x] Windows (Git Bash): the on-demand `windows.yml` run on this branch passed
-      ([45952952774](https://github.com/cluesmith/codev/actions/runs/45952952774): CLI tests,
-      unit tests, install verification, both probes). It was re-dispatched after the PR-review
-      fixes changed the script. (Review)
+- [x] Windows (Git Bash), corrected in PR round 2. The first two runs (45952952774, 45954554101)
+      were green but ran none of the script tests: both files were gated off win32. With the
+      gates on `jq` alone, `windows.yml -f filter=spec-1647` ran them under Git Bash. Its first run
+      found a CRLF bug in the search classification, fixed in ea435efc3. The re-run
+      [45956770907](https://github.com/cluesmith/codev/actions/runs/45956770907) passed: all 5
+      cache end-to-end tests and 36 script tests, with 14 POSIX-only or shim tests skipped by
+      design. Not pinned on Windows: the timeout kill and temp cleanup (a Windows kill delivers
+      no catchable signal, as the script documents) and the hostile-string round trip.
+      (Review)
 - [ ] Verify-phase item, still open by design: a browser check of the Work view on the
       architect's install.
 
@@ -109,7 +114,9 @@ refresh against 7 for the four calls.
   this branch's import in `overview.ts`, so the merge needed one conflict resolved (both lines
   kept). The build and full suite were re-run on the merge commit. The PR review then added two
   script hardenings, a body-only rate limit named on stderr and no cursor check on the last
-  page, plus a lock trap in the fake `gh` (see Consultation Feedback).
+  page, plus a lock trap in the fake `gh` (see Consultation Feedback). Round 2 moved the script
+  tests onto native Windows. That found and fixed a CRLF bug, and it also added the source-only
+  plan resolution and the pattern-equality test.
 
 ## Consultation Feedback
 
@@ -232,6 +239,18 @@ re-reviewed. The owner approved the spec as written.
 - **Concern**: the Windows run was in flight → **Addressed**: same as codex.
 - **Concern**: a "future-dated" fixture note → **Rebutted**: all dates are UTC, and it was 2026-11-27 UTC.
 
+### Review Phase, PR #2004 (Round 2): both REQUEST_CHANGES
+
+#### Codex
+- **Concern**: the re-dispatched Windows run had not finished → **Addressed**: superseded by claude's finding below.
+
+#### Claude
+- **Concern**: the Windows runs never executed `overview-bundle.sh`, because both script test files skipped on win32 → **Addressed**: correct. The tests are now gated on `jq` alone and run under Git Bash, except four POSIX-only pieces that skip by name; a targeted Windows run executes them. The earlier `[x]` claim was wrong and has been corrected. The first real Windows run then found a bug. With both searches failed, `jq.exe`'s CRLF left `closed\r`, which matched no section, so a search-local failure became a whole-bundle failure. The script now decides by `jq -e` exit status and reads cursors with `-j`. A CRLF `jq` shim pins this on POSIX; both shim tests fail against the old script.
+- **Concern**: `overviewPlan()` reads every concept script on every poll → **Addressed**: a source-only resolver with no file I/O.
+- **Concern**: the rate-limit pattern is duplicated with nothing pinning it → **Addressed**: a test holds the script's ERE equal to the limiter's regex; mutation-checked.
+- **Concern**: a retired `search(type: ISSUE)` would fail the whole bundle → **Addressed** as a follow-up item (no code change; a path-less error stays a whole failure by the spec's rule).
+- **Concern**: unbounded lock spin; stale commit in the PR body → **Addressed**.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -266,9 +285,15 @@ re-reviewed. The owner approved the spec as written.
   read therefore goes through shell redirection.
 - **Measuring points.** Rate-limit headers were unreliable, so costs were measured with
   `rateLimit(dryRun: true)` inside the real queries.
+- **Windows evidence that was not evidence.** The first two Windows runs were green, but every
+  script test had skipped there. Once the tests ran under Git Bash, they found a CRLF bug in the
+  search classification on the first try (see Consultation Feedback, PR round 2).
 
 ### What Would Be Done Differently
 
+- Read the test gates before citing a platform run. The first two Windows runs were green but
+  skipped every Spec 1647 script test, and the PR claimed Git Bash coverage on their strength
+  until the second PR review caught it.
 - Grep `main` for every symbol and path an issue names before drafting the spec, and raise the
   missing ones in the first message to the architect, not after a draft.
 - Define the cost units (invocations, processes, requests, points) in the spec's first draft.
@@ -302,6 +327,12 @@ re-reviewed. The owner approved the spec as written.
   `-f`. It exits 1 on any GraphQL error with partial data on stdout.
 - Routed: cold — Debugging and Root Cause Analysis — measure GraphQL point costs with
   `rateLimit(dryRun: true)` in the query, not rate-limit deltas.
+- Routed: cold — Testing — a Windows CI run is evidence only for the tests that actually ran
+  there. Read the tests' skip gates (and the run's report) before citing a green run for a
+  platform claim.
+- Routed: cold — Architecture — a POSIX script that runs on native Windows must not parse
+  `jq`'s text output: `jq.exe` writes CRLF and Git Bash strips only the last line ending of a
+  capture. Decide with `jq -e`, print with `-j`, and pin it with a CRLF `jq` shim.
 - Hot tier: no change. `lessons-critical.md` is at its cap of 10, and these three are narrow to
   forge scripts and `gh`. The "issue names code that is not on main" lesson is already covered by
   the hot lessons on checking existing work and verifying claims against the actual file.
@@ -319,5 +350,9 @@ No flaky tests encountered.
   the searches on 600 s) adds onto the same concept. If blanking all four sections on a
   whole-bundle failure proves too costly, Approach 3 or stale-if-error are the named remedies.
   Neither is needed now.
+- If GitHub ever retires `search(type: ISSUE)`, the enum error carries no `path`, so the bundle
+  fails whole and all four sections blank, not only the two searches. `gh` itself already sends
+  `ISSUE_ADVANCED`. Worth an issue so that day is diagnosable; the fixture README records the
+  rationale for `ISSUE`.
 - Verify phase: the browser check of the Work view on the architect's install (it needs a Tower
   restart, which needs the owner's permission), and the real-`gh` smoke on the merged build.

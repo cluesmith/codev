@@ -226,3 +226,14 @@ SPIR, soft mode. Spawned by architect `porchless`.
   - no cursor check on the last issue page or search page 10.
   The "future-dated" fixture note is rebutted: the dates are UTC. Both script fixes were
   mutation-checked.
+- PR round 2: codex again waited only on the Windows run. Claude found the real gap: both
+  script test files were gated `process.platform !== 'win32'`, so the two green Windows runs had
+  never executed the script, and my `[x] Windows` claim was wrong.
+  - Re-gated both files on `jq` alone, with four POSIX-only pieces skipped by name.
+  - Ran them with `windows.yml -f filter=spec-1647`. The first run (45955987403) found a real
+    bug: `jq.exe` writes CRLF, so with both searches failed `closed\r` matched no section, and
+    a search-local failure became a whole-bundle failure.
+  - Fixed it (ea435efc3): `jq -e` exit status for the classification, `-j` for cursors. A CRLF
+    `jq` shim test pins it on POSIX.
+  - Also from claude: source-only plan resolution (no per-poll script reads), a test holding
+    the script's rate-limit ERE equal to the limiter's, and a bounded lock spin.
