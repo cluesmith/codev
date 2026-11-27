@@ -130,7 +130,8 @@ window_only_error() {
        and .data.repository.pullRequests != null
        and .data.repository.issues != null
        and all(.errors[]; (.path | type == "array") and (.path[0] == "closed" or .path[0] == "merged"))
-    then [.errors[].message] | join("; ")
+    then [.errors[].message | select(type == "string" and test("\\S"))]
+         | if length == 0 then "window search failed" else join("; ") end
     else error("not a window-only error")
     end' "$1" 2>/dev/null
 }
@@ -142,7 +143,8 @@ window_page_error() {
     if type == "object"
        and (.errors | type == "array" and length > 0)
        and all(.errors[]; (.path | type == "array") and .path[0] == $alias)
-    then [.errors[].message] | join("; ")
+    then [.errors[].message | select(type == "string" and test("\\S"))]
+         | if length == 0 then "window search failed" else join("; ") end
     else error("not a window error")
     end' "$1" 2>/dev/null
 }
@@ -216,6 +218,9 @@ fi
 # null author (a deleted account) comes out of gh as `app/`: its bot check is
 # "not a User", and the login is empty. That is reproduced, because the
 # overview shows `author.login` and must not change with the transport.
+# The search index can lag a reopen: an issue reopened moments ago can still
+# match is:closed, with its closedAt already null. recently-closed drops such
+# an item in the 24 h filter, so it is dropped here too.
 jq -n \
   --slurpfile main "$main" \
   --slurpfile issuePages "$tmp/issue-pages.json" \
@@ -246,7 +251,7 @@ jq -n \
     elif $windowsError != "" then {windowsError: $windowsError}
     else {
       recentlyClosed: ([$d.closed.nodes[], ($closedPages[] | .data.closed.nodes[])]
-                       | .[:$windowCap] | map(closedIssue)),
+                       | .[:$windowCap] | map(select(.closedAt != null) | closedIssue)),
       recentlyMerged: ([$d.merged.nodes[], ($mergedPages[] | .data.merged.nodes[])]
                        | .[:$windowCap] | map(mergedPr))
     }

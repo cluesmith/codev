@@ -241,6 +241,13 @@ describe.skipIf(!posixWithJq)('Spec 1995 — github overview-bundle script', () 
       expect(out.issues[0]).toMatchObject({ labels: [], assignees: [] });
     });
 
+    it('drops a just-reopened issue the search index still lists as closed', async () => {
+      fixture('main', mainResponse({ closed: conn([closedNode(20), { ...closedNode(21), closedAt: null }]), merged: conn([]) }));
+      const out = (await run(WINDOWS)).data as Out;
+      expect(out.recentlyClosed?.map((i) => i.number)).toEqual([20]);
+      expect(typeof parseOverviewBundle(out, true)).toBe('object');
+    });
+
     it('emits exactly the contract fields, which the contract validator accepts', async () => {
       fixture('main', mainResponse({ closed: conn([closedNode(20)]), merged: conn([mergedNode(30)]) }));
       const out = (await run(WINDOWS)).data as Out;
@@ -269,6 +276,11 @@ describe.skipIf(!posixWithJq)('Spec 1995 — github overview-bundle script', () 
       expect(out.issues).toHaveLength(1);
       expect(out.recentlyClosed).toBeUndefined();
       expect(out.recentlyMerged).toBeUndefined();
+    });
+
+    it('an empty error message still salvages with a named reason', async () => {
+      fixture('main', { ...mainResponse({ closed: null, merged: null }), errors: [{ message: '', path: ['closed'] }] }, { exit: 1 });
+      expect(((await run(WINDOWS)).data as Out).windowsError).toBe('window search failed');
     });
 
     it('a window-only error does not cut the open-issue paging short', async () => {
@@ -386,7 +398,8 @@ describe('Spec 1995 — fetchForOverview(overview-bundle)', () => {
 
     answer({ prs: [], issues: [] });
     await fetchForOverview('overview-bundle', '/ws');
-    expect(dispatch.mock.calls[1][1]).toEqual({});
+    // Set, not omitted: an inherited CODEV_INCLUDE_WINDOWS=1 would buy discarded windows.
+    expect(dispatch.mock.calls[1][1]).toEqual({ CODEV_INCLUDE_WINDOWS: '' });
   });
 
   it('passes its own named time and output budgets', async () => {

@@ -181,3 +181,18 @@ unused fragment, so each query carries exactly the fragments it spreads.
   (`select(.__typename == "User")`); an early draft also took Bot and Mannequin logins, which
   would have diverged on a Copilot review request. No sampled repo had one, so parity runs alone
   would not have caught it.
+
+## 2026-11-27 — Phase 1 consultation (iter 1): codex APPROVE, claude APPROVE
+Claude's non-blocking notes, all taken:
+- A just-reopened issue the search index still lists as `is:closed` arrives with `closedAt: null`.
+  Today `withinLast24h` drops it silently, but the strict validator would have failed the whole
+  call over it. The GitHub script now drops it the same way, and the validator stays strict for
+  adopter bundles.
+- `CODEV_INCLUDE_WINDOWS` was inherited from Tower's environment on the open-only path, so a stray
+  `1` would have bought windows only to throw them away. It is now always passed, as `''` when
+  the windows are off.
+- Copilot reviewers had been verified from source only. Verified on real data now:
+  erigontech/erigon has a Bot review request (raw GraphQL `Bot:1`); `gh pr list` exports
+  Users only; parity exact on erigon and microsoft/fluentui-android.
+- Nit: an all-empty error message made the salvage die on an opaque jq error. It now salvages
+  with "window search failed".

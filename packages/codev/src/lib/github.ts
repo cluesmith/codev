@@ -289,9 +289,12 @@ export async function fetchForOverview(
   switch (concept) {
     case 'overview-bundle': {
       const includeWindows = options.includeWindows === true;
+      // The switch is always set: an unset one would be inherited from Tower's
+      // own environment, and a stray "1" there would fetch, and pay for,
+      // windows that are then thrown away.
       const env: Record<string, string> = includeWindows
         ? { CODEV_INCLUDE_WINDOWS: '1', CODEV_SINCE_DATE: sinceTimestamp24h() }
-        : {};
+        : { CODEV_INCLUDE_WINDOWS: '' };
       const r = await executeForgeCommandDetailed(concept, env, {
         cwd,
         timeoutMs: OVERVIEW_BUNDLE_TIMEOUT_MS,
