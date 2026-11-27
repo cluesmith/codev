@@ -121,7 +121,8 @@ function makeCtx(): RouteContext {
     version: '9.9.9',
     startedAt: '2026-01-01T00:00:00.000Z',
     templatePath: null,
-    reactDashboardPath: '/tmp/dash',
+    // Never read: hasReactDashboard is false, so no route serves the dashboard.
+    reactDashboardPath: '/nonexistent/dashboard/dist',
     hasReactDashboard: false,
     getShellperManager: () => null,
     broadcastNotification: vi.fn(),

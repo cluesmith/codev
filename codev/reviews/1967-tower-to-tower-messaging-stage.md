@@ -932,6 +932,9 @@ changes are in `a2f660715`.
 
 ### What Would Be Done Differently
 
+- **Check CI on the head before announcing a gate.** The `pr` gate was announced while CI was red and unseen: the Unit
+  Tests job had failed at its `/tmp` residue check on every push since the PR opened, so the unit tests had never run
+  on Linux. The check is `gh pr checks` on the head before the announcement.
 - **Write the scenario-to-test table with the plan, and keep it per phase.** The builder footer's
   two halves were built and tested in phases 6 and 8, and the missing round trip between them was
   found only at the end.

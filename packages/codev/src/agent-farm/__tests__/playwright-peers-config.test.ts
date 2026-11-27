@@ -221,9 +221,11 @@ describe('peersDirs', () => {
 
   it('refuses an environment that records only one of the two, or an owner that is not <pid>:<nonce>, in a worker', () => {
     const worker = { pid: 5151, ppid: 4242, isWorker: true, made: {} };
-    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: '/tmp/x' }, tmpdir(), worker)).toThrow(/Only one of/);
+    // Only a value: the environment is refused before anything touches the disk.
+    const root = path.join(tmpdir(), 'peers-run');
+    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: root }, tmpdir(), worker)).toThrow(/Only one of/);
     expect(() => peersDirs({ [PEERS_RUN_VARS.owner]: `1:${NONCE}` }, tmpdir(), worker)).toThrow(/Only one of/);
-    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: '/tmp/x', [PEERS_RUN_VARS.owner]: 'me' }, tmpdir(), worker)).toThrow(/does not read as/);
+    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: root, [PEERS_RUN_VARS.owner]: 'me' }, tmpdir(), worker)).toThrow(/does not read as/);
   });
 });
 

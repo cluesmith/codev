@@ -1551,3 +1551,13 @@ a line this phase wrote.
 - `a2f660715` changes one line of production code since the green Windows run (`errorKind` in
   `outbox.ts`, not platform code). Whether that needs a Windows run is the architect's call; it is
   named in the PR body.
+- **The architect stopped the gate (14:36Z): CI was red and I had not looked.** The Unit Tests job
+  had failed at "Check /tmp residue" on every push since the PR opened, so the unit tests had never
+  run on Linux. Three of this project's test files used `/tmp` without an allowlist entry. All
+  three were strings that nothing opens: `reactDashboardPath` in `peer-inbox` and
+  `peer-routes-wiring` (`hasReactDashboard` is false, so no route reads it), and a run root in
+  `playwright-peers-config` that `recordedPeersRun` refuses before any filesystem call. Each is now
+  spelled without `/tmp`, so no allowlist entry is needed: `'/nonexistent/dashboard/dist'`, as
+  `air-1977-liveness-route` has, and `path.join(tmpdir(), 'peers-run')`. The script passes and the
+  three files pass, 50 tests. The lesson is in the review: check `gh pr checks` on the head before
+  announcing a gate.
