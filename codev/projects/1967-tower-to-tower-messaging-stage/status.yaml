@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 1
-build_complete: true
+iteration: 2
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -239,8 +239,20 @@ history:
         verdict: APPROVE
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_10-iter1-claude.txt
+  - iteration: 1
+    plan_phase: phase_12
+    build_output: ''
+    reviews:
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_12-iter1-codex.txt
+      - model: claude
+        verdict: COMMENT
+        file: >-
+          /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_12-iter1-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-27T11:53:10.128Z'
+updated_at: '2026-11-27T12:11:33.257Z'
 force_advanced:
   phase: phase_9
   iteration: 3
