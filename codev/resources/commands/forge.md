@@ -208,6 +208,8 @@ workspace, idle and under constant invalidation. The reasons it gives are:
 - `four calls: overview-bundle disabled`;
 - `four calls: disabled by the gitlab preset`.
 
+Constituent causes combine, e.g. `four calls: issue-list overridden, recently-merged disabled`.
+
 **Overriding it on another forge.** An override pays off when your forge can answer all four
 sections in fewer requests than four calls, typically with one GraphQL query. The sketch below
 shows the contract using the commands the gitlab preset's four concepts already run. It is one
@@ -228,7 +230,9 @@ invocation but still four `glab` processes, and its searches refresh every 180 s
 # forge-executable: glab
 # Exit non-zero only when the whole overview failed. A 24 h search that fails on its own
 # becomes null. Output is staged to files: POSIX sh has no pipefail, so `glab … | jq` would
-# turn a failed call into an empty success.
+# turn a failed call into an empty success. The two searches below ignore CODEV_SINCE_DATE,
+# as the gitlab preset's own do, and Tower filters them to the last 24 h; where your forge can
+# filter by close or merge date, pass it CODEV_SINCE_DATE instead of over-fetching.
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
