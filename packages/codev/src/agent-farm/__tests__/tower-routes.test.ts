@@ -2803,7 +2803,7 @@ describe('tower-routes', () => {
         });
 
         it('hands the sender the parsed address, the body, the options and who sends', async () => {
-          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          scripted({ outcome: 'delivered', messageId: 'm-1', bytes: 5, peer: PEER, detail: null, duplicate: false });
           await send('afx://DevVM/codev:architect:local', 'architect:review', { options: { raw: true, noEnter: true } });
           expect(told).toEqual([
             {
@@ -2823,7 +2823,7 @@ describe('tower-routes', () => {
         });
 
         it('says a builder is one, by its id, so the builder rule can apply', async () => {
-          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          scripted({ outcome: 'delivered', messageId: 'm-1', bytes: 5, peer: PEER, detail: null, duplicate: false });
           await send('afx://devvm/codev:architect', BUILDER);
           expect(told[0].from).toEqual({
             workspacePath: CODEV,
@@ -2834,7 +2834,7 @@ describe('tower-routes', () => {
         });
 
         it('states no sender for a send with none, or from a sender that is not an agent (G7)', async () => {
-          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          scripted({ outcome: 'delivered', messageId: 'm-1', bytes: 5, peer: PEER, detail: null, duplicate: false });
           await send('afx://devvm/codev:architect', undefined);
           await send('afx://devvm/codev:architect', 'vscode-user');
           expect(told.map((request) => [request.from.agent, request.from.address])).toEqual([
@@ -2848,13 +2848,13 @@ describe('tower-routes', () => {
           fs.mkdirSync(spaced);
           setArchitectByName(spaced, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
           liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [spaced]: { architects: ['main'] } });
-          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          scripted({ outcome: 'delivered', messageId: 'm-1', bytes: 5, peer: PEER, detail: null, duplicate: false });
           await send('afx://devvm/codev:architect', 'architect:main', { workspace: spaced, fromWorkspace: spaced });
           expect(told[0].from.address).toEqual({ kind: 'architect', name: 'main' });
         });
 
         it('answers delivered with the full address, the message id and the bytes sent, and stores nothing in the mailbox', async () => {
-          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          scripted({ outcome: 'delivered', messageId: 'm-1', bytes: 5, peer: PEER, detail: null, duplicate: false });
           const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review');
           expect(status).toBe(200);
           expect(body).toEqual({
@@ -2871,7 +2871,7 @@ describe('tower-routes', () => {
         });
 
         it('answers held with where it waits and why: on the receiving Tower, or here with how many are ahead', async () => {
-          scripted({ outcome: 'held', where: 'recipient', reason: 'busy', messageId: 'm-2', peer: PEER, detail: null, duplicate: true });
+          scripted({ outcome: 'held', where: 'recipient', reason: 'busy', messageId: 'm-2', bytes: 5, peer: PEER, detail: null, duplicate: true });
           const there = await send('afx://devvm/codev:architect:local', 'architect:review');
           expect(there.status).toBe(200);
           expect(there.body).toMatchObject({
@@ -2883,7 +2883,7 @@ describe('tower-routes', () => {
             remote: { peer: 'devvm', heldWhere: 'recipient', duplicate: true },
           });
 
-          scripted({ outcome: 'held', where: 'this-tower', reason: 'tower-offline', messageId: 'm-3', peer: PEER, ahead: 2 });
+          scripted({ outcome: 'held', where: 'this-tower', reason: 'tower-offline', messageId: 'm-3', bytes: 5, peer: PEER, ahead: 2 });
           const here = await send('afx://devvm/codev:architect:local', 'architect:review');
           expect(here.body).toMatchObject({
             held: true,
@@ -2954,11 +2954,11 @@ describe('tower-routes', () => {
           });
           expect((await send('afx://devvm/codev:architect:local', 'architect:review')).body.detail).toBe('ask Sam to grant it');
 
-          scripted({ outcome: 'held', where: 'recipient', reason: 'busy', messageId: 'm-6', peer: PEER, detail: 'in a long turn', duplicate: false });
+          scripted({ outcome: 'held', where: 'recipient', reason: 'busy', messageId: 'm-6', bytes: 5, peer: PEER, detail: 'in a long turn', duplicate: false });
           const held = await send('afx://devvm/codev:architect:local', 'architect:review');
           expect(held.body).toMatchObject({ detail: null, remote: { peer: 'devvm', heldWhere: 'recipient', detail: 'in a long turn' } });
 
-          scripted({ outcome: 'delivered', messageId: 'm-7', peer: PEER, detail: 'read at once', duplicate: false });
+          scripted({ outcome: 'delivered', messageId: 'm-7', bytes: 5, peer: PEER, detail: 'read at once', duplicate: false });
           const delivered = await send('afx://devvm/codev:architect:local', 'architect:review');
           expect(delivered.body).toMatchObject({ detail: null, remote: { peer: 'devvm', detail: 'read at once' } });
         });
@@ -2966,14 +2966,17 @@ describe('tower-routes', () => {
         it('leaves the size of a body for another Tower to the sender, in its order, and on the body once normalised', async () => {
           // Over 48 KiB as sent, under it once CRLF becomes LF: the sender is handed it.
           const crlf = 'x'.repeat(10).concat('\r\n').repeat(4200);
+          const normalised = Buffer.byteLength(crlf.trim().replace(/\r\n/g, '\n'));
           expect(Buffer.byteLength(crlf)).toBeGreaterThan(48 * 1024);
-          expect(Buffer.byteLength(crlf.replace(/\r\n/g, '\n'))).toBeLessThanOrEqual(48 * 1024);
-          scripted({ outcome: 'delivered', messageId: 'm-8', peer: PEER, detail: null, duplicate: false });
+          expect(normalised).toBeLessThanOrEqual(48 * 1024);
+          scripted({ outcome: 'delivered', messageId: 'm-8', bytes: normalised, peer: PEER, detail: null, duplicate: false });
           mockParseJsonBody.mockResolvedValue({ to: 'afx://devvm/codev:architect:local', message: crlf, from: 'architect:review', workspace: CODEV, fromWorkspace: CODEV });
-          const { res, statusCode } = makeRes();
+          const { res, statusCode, body } = makeRes();
           await handleRequest(makeReq('POST', '/api/send'), res, makeCtx());
           expect(statusCode()).toBe(200);
           expect(told[0].body).toBe(crlf.trim());
+          // The bytes reported are the body as stored and sent, not as typed.
+          expect(JSON.parse(body()).bodyLength).toBe(normalised);
         });
 
         it('still refuses an over-large body to this Tower, named by its own name, as a local send', async () => {

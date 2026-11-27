@@ -2086,7 +2086,6 @@ function respondToRemoteSend(
   ctx: RouteContext,
   outcome: Exclude<PeerSendResult, { outcome: 'local' }>,
   to: AgentAddress,
-  bodyLength: number,
 ): void {
   const resolvedTo = formatAddress(to);
   if (outcome.outcome === 'refused') {
@@ -2104,7 +2103,8 @@ function respondToRemoteSend(
   }
   // The top-level `detail` is the local gate's verdict (#1482); what the receiving Tower said
   // goes in `remote.detail`, so the two are never read as one another.
-  const answered = { ok: true, resolvedTo, mailboxId: outcome.messageId, bodyLength, detail: null };
+  // `bodyLength` is the body as stored and sent, once normalised, which a person reads as "what was sent".
+  const answered = { ok: true, resolvedTo, mailboxId: outcome.messageId, bodyLength: outcome.bytes, detail: null };
   const said = (detail: string | null) => (detail === null ? {} : { detail });
   if (outcome.outcome === 'delivered') {
     const remote: RemoteSendAnswer = { peer: outcome.peer.name, duplicate: outcome.duplicate, ...said(outcome.detail) };
@@ -2716,7 +2716,7 @@ async function handleSend(
       return;
     }
     if (outcome.outcome !== 'local') {
-      respondToRemoteSend(res, ctx, outcome, address, bodyLength);
+      respondToRemoteSend(res, ctx, outcome, address);
       return;
     }
     // This Tower's own name: a local send after all, with a local send's size limit.

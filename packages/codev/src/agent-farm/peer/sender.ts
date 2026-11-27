@@ -119,12 +119,21 @@ export type PeerSendResult =
       messageId: string | null;
       peer: PeerNamed | null;
     }
-  | { outcome: 'delivered'; messageId: string; peer: PeerNamed; detail: string | null; duplicate: boolean }
+  | {
+      outcome: 'delivered';
+      messageId: string;
+      /** The body's length as stored and sent: UTF-8 bytes, once normalised (check 6). */
+      bytes: number;
+      peer: PeerNamed;
+      detail: string | null;
+      duplicate: boolean;
+    }
   | {
       outcome: 'held';
       where: 'recipient';
       reason: PeerHeldReason;
       messageId: string;
+      bytes: number;
       peer: PeerNamed;
       detail: string | null;
       duplicate: boolean;
@@ -135,6 +144,7 @@ export type PeerSendResult =
       /** Why the queue for that peer holds. */
       reason: string;
       messageId: string;
+      bytes: number;
       peer: PeerNamed;
       /** How many messages for that peer are held ahead of this one. */
       ahead: number;
@@ -330,7 +340,7 @@ export class Sender {
       throw new PeerSendHeldOnFaultError(row.messageId, peer, stopping);
     }
     const words: RefusalWords = { own: this.deps.registration()?.towerName ?? 'this Tower', peer, recipient: local };
-    return this.answered(first, row.messageId, words);
+    return this.answered(first, row.messageId, body.bytes, words);
   }
 
   /** Checks 1 to 4: this Tower's own state, read now. */
@@ -375,11 +385,11 @@ export class Sender {
   }
 
   /** The first answer, as the sender is told it. */
-  private answered(first: FirstAnswer, messageId: string, words: RefusalWords): PeerSendResult {
+  private answered(first: FirstAnswer, messageId: string, bytes: number, words: RefusalWords): PeerSendResult {
     const { peer } = words;
     switch (first.kind) {
       case 'held':
-        return { outcome: 'held', where: 'this-tower', reason: first.reason, messageId, peer, ahead: first.ahead };
+        return { outcome: 'held', where: 'this-tower', reason: first.reason, messageId, bytes, peer, ahead: first.ahead };
       case 'ended':
         return {
           outcome: 'refused',
@@ -392,7 +402,7 @@ export class Sender {
           peer,
         };
       case 'resolved':
-        return fromAnswer(first.answer, messageId, words);
+        return fromAnswer(first.answer, messageId, bytes, words);
     }
   }
 }
@@ -481,16 +491,16 @@ function cloudRefusalMessage(reason: string, retryAfterSec: number | null, words
 }
 
 /** An answer that resolved the row, as the sender is told it. */
-function fromAnswer(answer: ClassifiedAnswer, messageId: string, words: RefusalWords): PeerSendResult {
+function fromAnswer(answer: ClassifiedAnswer, messageId: string, bytes: number, words: RefusalWords): PeerSendResult {
   const { peer } = words;
   const body = answer.answer;
   const detail = body?.detail === undefined ? null : printableDetail(body.detail);
   const duplicate = body?.duplicate === true;
   switch (answer.outcome) {
     case 'delivered':
-      return { outcome: 'delivered', messageId, peer, detail, duplicate };
+      return { outcome: 'delivered', messageId, bytes, peer, detail, duplicate };
     case 'held':
-      return { outcome: 'held', where: 'recipient', reason: answer.reason as PeerHeldReason, messageId, peer, detail, duplicate };
+      return { outcome: 'held', where: 'recipient', reason: answer.reason as PeerHeldReason, messageId, bytes, peer, detail, duplicate };
     case 'refused': {
       const by = answer.decidedBy === 'receiver' ? 'peer' : 'cloud';
       const retryAfterSec = body !== null && 'retryAfterSec' in body && body.retryAfterSec !== undefined ? body.retryAfterSec : null;

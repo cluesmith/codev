@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_REFUSED_ERROR } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { isRemoteAddress, parseAddress } from './address.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
@@ -37,6 +37,9 @@ const REMOTE_SEND_TIMEOUT_MS = 65_000;
 /** `POST /api/send`'s code for a refused send to another Tower; the value itself, as the SDK carries no runtime import. */
 const REMOTE_REFUSED: typeof REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
 
+/** `POST /api/send`'s code for a message stored and held on the sending Tower but not sent now; mirrored the same way. */
+const REMOTE_HELD_ON_FAULT: typeof REMOTE_HELD_ON_FAULT_ERROR = 'REMOTE_HELD_ON_FAULT';
+
 /** Is `to` an address that names a Tower? Text that is not an address is not, and Tower refuses it. */
 function namesATower(to: string): boolean {
   const parsed = parseAddress(to);
@@ -56,6 +59,20 @@ function readRemoteRefusal(body: Record<string, unknown> | undefined): RemoteSen
     mailboxId: typeof mailboxId === 'string' ? mailboxId : null,
     peer: typeof peer === 'string' ? peer : null,
     detail: typeof detail === 'string' ? detail : null,
+  };
+}
+
+/** The `remote` part of an answer from a send to another Tower, each field only if it has its type. */
+function readRemoteAnswer(remote: unknown): RemoteSendAnswer | undefined {
+  if (typeof remote !== 'object' || remote === null) return undefined;
+  const { peer, heldWhere, ahead, duplicate, detail } = remote as Record<string, unknown>;
+  if (typeof peer !== 'string') return undefined;
+  return {
+    peer,
+    ...(heldWhere === 'recipient' || heldWhere === 'this-tower' ? { heldWhere } : {}),
+    ...(typeof ahead === 'number' ? { ahead } : {}),
+    ...(typeof duplicate === 'boolean' ? { duplicate } : {}),
+    ...(typeof detail === 'string' ? { detail } : {}),
   };
 }
 
@@ -1295,12 +1312,17 @@ export class TowerClient {
     if (!result.ok) {
       const failure = { ok: false, error: result.error, connectionRefused: result.connectionRefused };
       if (result.errorCode === undefined) return failure;
-      const refusal = result.errorCode === REMOTE_REFUSED ? readRemoteRefusal(result.errorBody) : undefined;
       const message = result.errorBody?.message;
+      // Words that say the message is stored and not to send it again: those, and nothing appended.
+      if (result.errorCode === REMOTE_HELD_ON_FAULT && typeof message === 'string') {
+        return { ...failure, error: message, errorCode: result.errorCode };
+      }
+      const refusal = result.errorCode === REMOTE_REFUSED ? readRemoteRefusal(result.errorBody) : undefined;
       if (refusal === undefined || typeof message !== 'string') return { ...failure, errorCode: result.errorCode };
       return { ...failure, error: message, errorCode: result.errorCode, refusal };
     }
 
+    const remote = readRemoteAnswer(result.data!.remote);
     return {
       ok: true,
       resolvedTo: result.data!.resolvedTo,
@@ -1317,7 +1339,7 @@ export class TowerClient {
       bodyLength: result.data!.bodyLength,
       verified: result.data!.verified,
       unverifiedCause: result.data!.unverifiedCause,
-      ...(result.data!.remote === undefined ? {} : { remote: result.data!.remote }),
+      ...(remote === undefined ? {} : { remote }),
     };
   }
 

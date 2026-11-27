@@ -304,4 +304,30 @@ describe('TowerClient.sendMessage — a send to another Tower', () => {
     vi.stubGlobal('fetch', mockFetchReturning({ ok: true, resolvedTo: 'main' }));
     expect(await new TowerClient().sendMessage('architect', 'hi')).not.toHaveProperty('remote');
   });
+
+  it("reads an answer's remote part as the refusal is read: each field only if it has its type", async () => {
+    const read = async (remote: unknown) => {
+      vi.stubGlobal('fetch', mockFetchReturning({ ok: true, resolvedTo: 'afx://devvm/codev:architect', delivered: true, remote }));
+      return (await new TowerClient().sendMessage('afx://devvm/codev:architect', 'hi')).remote;
+    };
+    expect(await read({ peer: 'devvm', duplicate: true, detail: 'read at once' })).toEqual({ peer: 'devvm', duplicate: true, detail: 'read at once' });
+    expect(await read({ peer: 'devvm', heldWhere: 'elsewhere', ahead: '2', duplicate: 'yes', detail: { text: 'hi' } })).toEqual({ peer: 'devvm' });
+    // With no peer named, or no object at all, there is no remote part to read.
+    expect(await read({ duplicate: false })).toBeUndefined();
+    expect(await read('devvm')).toBeUndefined();
+  });
+
+  it('gives a message stored and held but not sent now in its own words, with nothing after them', async () => {
+    const words =
+      'Message stored and held on this Tower — mailbox id m-9 — but not sent to devvm now: this Tower is stopping. ' +
+      'It is sent when that clears. Do not send it again. See or dismiss it with: afx inbox';
+    const body = { error: 'REMOTE_HELD_ON_FAULT', message: words, mailboxId: 'm-9', peer: 'devvm' };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, text: async () => JSON.stringify(body) }) as unknown as Response));
+
+    expect(await new TowerClient().sendMessage('afx://devvm/codev:architect', 'hi')).toEqual({
+      ok: false,
+      error: words,
+      errorCode: 'REMOTE_HELD_ON_FAULT',
+    });
+  });
 });

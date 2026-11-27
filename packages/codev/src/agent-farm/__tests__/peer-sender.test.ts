@@ -227,9 +227,9 @@ describe("the sending Tower's checks (section 4, G14)", () => {
   });
 
   it('a body of exactly 48 KiB is sent; the size is counted as UTF-8 once normalised', async () => {
-    expect(await f.sender.send(request({ body: 'a'.repeat(PEER_MAX_BODY_BYTES) }))).toMatchObject({ outcome: 'delivered' });
+    expect(await f.sender.send(request({ body: 'a'.repeat(PEER_MAX_BODY_BYTES) }))).toMatchObject({ outcome: 'delivered', bytes: PEER_MAX_BODY_BYTES });
     const crlf = 'a\r\n'.repeat(PEER_MAX_BODY_BYTES / 2);
-    expect(await f.sender.send(request({ body: crlf }))).toMatchObject({ outcome: 'delivered' });
+    expect(await f.sender.send(request({ body: crlf }))).toMatchObject({ outcome: 'delivered', bytes: PEER_MAX_BODY_BYTES });
     expect(await f.sender.send(request({ body: 'é'.repeat(PEER_MAX_BODY_BYTES / 2 + 1) }))).toMatchObject({ reason: 'too-large' });
   });
 
@@ -432,7 +432,7 @@ describe('the persisted message and the answer the sender is told', () => {
   });
 
   const told: Array<[string, () => FirstAnswer, Partial<PeerSendResult> & Record<string, unknown>]> = [
-    ['delivered', () => ({ kind: 'resolved', state: 'accepted', answer: fromR({ outcome: 'delivered' }) }), { outcome: 'delivered', detail: null, duplicate: false }],
+    ['delivered', () => ({ kind: 'resolved', state: 'accepted', answer: fromR({ outcome: 'delivered' }) }), { outcome: 'delivered', bytes: 20, detail: null, duplicate: false }],
     [
       'delivered as a duplicate',
       () => ({ kind: 'resolved', state: 'accepted', answer: fromR({ outcome: 'delivered', duplicate: true }) }),
@@ -441,12 +441,12 @@ describe('the persisted message and the answer the sender is told', () => {
     [
       'held at the recipient',
       () => ({ kind: 'resolved', state: 'accepted', answer: fromR({ outcome: 'held', reason: 'held-for-release', detail: 'waiting for a human' }) }),
-      { outcome: 'held', where: 'recipient', reason: 'held-for-release', detail: 'waiting for a human' },
+      { outcome: 'held', where: 'recipient', reason: 'held-for-release', bytes: 20, detail: 'waiting for a human' },
     ],
     [
       'held on this Tower',
       () => ({ kind: 'held', reason: 'tower-offline', answer: null, ahead: 3 }),
-      { outcome: 'held', where: 'this-tower', reason: 'tower-offline', ahead: 3 },
+      { outcome: 'held', where: 'this-tower', reason: 'tower-offline', bytes: 20, ahead: 3 },
     ],
     [
       'refused by the peer, in its own words made printable',

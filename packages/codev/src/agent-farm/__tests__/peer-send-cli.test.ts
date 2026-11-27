@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -45,14 +45,14 @@ function json(status: number, payload: unknown): Response {
 }
 
 /** A Tower, as a transport: `/health` is healthy, and the routes answer as given. */
-function towerAnswering(routes: { send: (to: string) => Response; peerTowers?: () => Response }): string[] {
+function towerAnswering(routes: { send: (to: string, message: string) => Response; peerTowers?: () => Response }): string[] {
   const paths: string[] = [];
   transport.fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const { pathname } = new URL(String(input));
     paths.push(pathname);
-    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as { to?: string }) : undefined;
+    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as { to?: string; message?: string }) : undefined;
     if (pathname === '/health') return json(200, { status: 'healthy' });
-    if (pathname === '/api/send') return routes.send(body?.to ?? '');
+    if (pathname === '/api/send') return routes.send(body?.to ?? '', body?.message ?? '');
     if (pathname === '/api/peer/towers' && routes.peerTowers) return routes.peerTowers();
     return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
   }) as typeof fetch;
@@ -195,7 +195,7 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
 
     await expect(send({ builder: TO, message: 'hi', retry: 3 })).rejects.toMatchObject({ code: 1 });
 
-    expect(errors).toEqual([`[error] ${words} (REMOTE_HELD_ON_FAULT)`]);
+    expect(errors).toEqual([`[error] ${words}`]);
     // Not sent a second time, whatever --retry allows: only a refused connection is retried.
     expect(paths.filter((path) => path === '/api/send')).toHaveLength(1);
   });
@@ -255,6 +255,59 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
     await expect(send({ builder: 'codev:architect', message: big })).rejects.toMatchObject({ code: 1 });
     expect(errors.at(-1)).toMatch(/^\[error\] Message body is 49153 bytes, over the 49152-byte \(48KB\) limit/);
     expect(local).toEqual([]);
+  });
+
+  describe('a file for another Tower: its size is left to Tower, as a message is', () => {
+    const OFF = 'Remote messaging is off on this Tower (mbp). A human turns it on with: afx peer on';
+    const file = (name: string, content: string): string => {
+      const path = join(workspace, name);
+      writeFileSync(path, content);
+      return path;
+    };
+    const delivered = (bodyLength: number) =>
+      json(200, { ok: true, resolvedTo: TO, mailboxId: MESSAGE_ID, bodyLength, delivered: true, held: false, detail: null, remote: { peer: 'devvm', duplicate: false } });
+
+    it('a --message-file over 48 KiB with remote messaging off is refused as off, by Tower', async () => {
+      const paths = towerAnswering({ send: () => refused('this-tower', 'remote-off', OFF) });
+      await expect(send({ builder: TO, messageFile: file('big.txt', 'x'.repeat(48 * 1024 + 1)) })).rejects.toMatchObject({ code: 1 });
+      expect(errors).toEqual([`[error] ${OFF}`]);
+      expect(paths).toContain('/api/send');
+    });
+
+    it('a --message-file over 48 KiB as written but under it once normalised is sent as written', async () => {
+      const crlf = 'x'.repeat(10).concat('\r\n').repeat(4200);
+      expect(Buffer.byteLength(crlf)).toBeGreaterThan(48 * 1024);
+      const sent: string[] = [];
+      towerAnswering({
+        send: (_to, message) => {
+          sent.push(message);
+          return delivered(46_199);
+        },
+      });
+      await expect(send({ builder: TO, messageFile: file('crlf.txt', crlf) })).resolves.toBe('delivered');
+      // Only the file's own last line ending is dropped; normalising is the sender's.
+      expect(sent).toEqual([crlf.slice(0, -2)]);
+      expect(lastLine()).toBe(`[ok] Message delivered to ${TO} (46199 bytes)`);
+    });
+
+    it('a --file attachment that takes the body over 48 KiB reaches Tower too', async () => {
+      const paths = towerAnswering({ send: () => refused('this-tower', 'remote-off', OFF) });
+      await expect(send({ builder: TO, message: 'see attached', file: file('att.txt', 'y'.repeat(48 * 1024)) })).rejects.toMatchObject({ code: 1 });
+      expect(errors).toEqual([`[error] ${OFF}`]);
+      expect(paths).toContain('/api/send');
+    });
+
+    it('a file no request could carry is refused with no call; a local recipient keeps the 48 KiB limit', async () => {
+      const paths = towerAnswering({ send: () => delivered(1) });
+      await expect(send({ builder: TO, messageFile: file('huge.txt', 'x'.repeat(1024 * 1024 + 1)) })).rejects.toThrow(
+        'Message file too large: 1048577 bytes (Tower takes no request over 1048576 bytes)',
+      );
+      await expect(send({ builder: 'codev:architect', messageFile: file('big.txt', 'x'.repeat(48 * 1024 + 1)) })).rejects.toThrow(
+        'Message file too large: 49153 bytes (max 49152 bytes / 48KB)',
+      );
+      await expect(send({ all: true, messageFile: file('big.txt', 'x'.repeat(48 * 1024 + 1)) })).rejects.toThrow('Message file too large: 49153 bytes');
+      expect(paths).not.toContain('/api/send');
+    });
   });
 
   describe('the hint for a Tower written as a second workspace', () => {

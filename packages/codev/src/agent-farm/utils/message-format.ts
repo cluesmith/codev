@@ -123,6 +123,13 @@ export function senderHeaderLabel(sender: string): string {
  */
 export const MAX_MESSAGE_BYTES = 48 * 1024;
 
+/**
+ * The largest request body Tower reads (`parseJsonBody`'s default): past it, the request is
+ * dropped unanswered. A message for another Tower is sized by Tower's sender, on the body
+ * once normalised (Spec 1967), so the CLI bounds a file for one only by this.
+ */
+export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+
 /** The over-limit error text, shared by the CLI precheck and the route (one wording). */
 export function messageTooLargeError(bytes: number): string {
   return (

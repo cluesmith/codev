@@ -24,7 +24,7 @@ import { hostPaths } from '../../lib/platform/host-paths.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { checkTower } from '../lib/tower-check.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/architect-name.js';
-import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
+import { MAX_MESSAGE_BYTES, MAX_REQUEST_BODY_BYTES, messageLimitError } from '../utils/message-format.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { parseAddress } from '@cluesmith/codev-sdk/address';
 import type { RemoteSendAnswer } from '@cluesmith/codev-types';
@@ -245,12 +245,17 @@ export function architectSenderId(): string {
 /**
  * Read file content for --file (and, #1950, --message-file), with size validation.
  */
-function readFileContent(filePath: string, label = 'File'): string {
+function readFileContent(filePath: string, label: string, toAnotherTower: boolean): string {
   if (!existsSync(filePath)) {
     throw new Error(`${label} not found: ${filePath}`);
   }
   const fileBuffer = readFileSync(filePath);
-  if (fileBuffer.length > MAX_FILE_SIZE) {
+  // A message for another Tower is sized by Tower's sender, in the contract's order and on
+  // the body once normalised (Spec 1967): only a file no request could carry is refused here.
+  if (toAnotherTower && fileBuffer.length > MAX_REQUEST_BODY_BYTES) {
+    throw new Error(`${label} too large: ${fileBuffer.length} bytes (Tower takes no request over ${MAX_REQUEST_BODY_BYTES} bytes)`);
+  }
+  if (!toAnotherTower && fileBuffer.length > MAX_FILE_SIZE) {
     throw new Error(
       `${label} too large: ${fileBuffer.length} bytes (max ${MAX_FILE_SIZE} bytes / 48KB)`
     );
@@ -531,6 +536,8 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   // Determine the message
   let message = options.message;
   let target = options.builder;
+  // With --all the one positional is the message, and every recipient is on this Tower.
+  const toAnotherTower = !options.all && target !== undefined && namesATower(target);
 
   // #1950 --message-file: the body comes from the file, never through a shell. With --all the
   // first positional IS the message, so any positional there is a second message. Only the one
@@ -540,7 +547,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
     if (message !== undefined || (options.all && target !== undefined)) {
       fatal('Give the message on the command line or with --message-file, not both.');
     }
-    message = readFileContent(options.messageFile, 'Message file').replace(/\r?\n$/, '');
+    message = readFileContent(options.messageFile, 'Message file', toAnotherTower).replace(/\r?\n$/, '');
   }
 
   // When using --all, the first positional arg (builder) is actually the message
@@ -569,7 +576,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
 
   // Append file content to message if --file specified
   if (options.file) {
-    const fileContent = readFileContent(options.file);
+    const fileContent = readFileContent(options.file, 'File', toAnotherTower);
     message = message + '\n\nAttached content:\n```\n' + fileContent + '\n```';
   }
 
@@ -578,7 +585,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   // append because that content travels in the same body and counts against the same limit.
   // A recipient on another Tower is sized by Tower's sender, in the contract's order of
   // refusals and on the body once normalised (Spec 1967), so it is not checked here.
-  const tooLarge = target !== undefined && namesATower(target) ? null : messageLimitError(message);
+  const tooLarge = toAnotherTower ? null : messageLimitError(message);
   if (tooLarge) fatal(tooLarge);
 
   logger.header('Sending Instruction');

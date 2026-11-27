@@ -993,3 +993,19 @@ Surprises:
     PR.
   - **Verified.** Layer A 10 883 passed, 116 skipped, 245.3 s. Layer B 20 of 20 in 59.0 s at
     load 8.1.
+- **Phase 9 review (iter 2): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** All
+  taken, none disputed. Response: `1967-phase_9-iter2-rebuttals.md`.
+  - **codex 1: a file for another Tower.** `--message-file` and `--file` were refused over
+    48 KiB before the recipient was known: codex 2 of iteration 1, on a path I missed. For
+    a remote recipient a file's size is now Tower's sender's to judge. The only bound left
+    is Tower's own request ceiling, 1 MiB (`MAX_REQUEST_BODY_BYTES`, now `parseJsonBody`'s
+    default too); past it the request is dropped unanswered, so the CLI refuses it first.
+  - **codex 2 / claude 1: `bodyLength`.** My reading was "the body as typed". Changed: a
+    remote send reports the body as stored and sent, once normalised (the sender's new
+    `bytes`), which is what check 6 measured and what R stores.
+  - **claude 2.** The SDK reads an answer's `remote` field by field (`readRemoteAnswer`),
+    as it reads a refusal.
+  - **claude 3.** The held-on-fault line is the words alone; the SDK keeps the code in
+    `errorCode`.
+  - **Verified.** Layer A 10 887 passed, 116 skipped, 242.4 s. Layer B 20 of 20 in 60.9 s
+    at load 3.8.
