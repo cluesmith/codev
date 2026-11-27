@@ -19,6 +19,7 @@ import {
   isRemoteAddress,
   isReservedWorkspaceName,
   parseAddress,
+  parseTowerRef,
   sameAddress,
   tryFormatAddress,
 } from '../address.js';
@@ -285,5 +286,62 @@ describe('helpers', () => {
     expect(sameAddress({ kind: 'architect' }, { kind: 'architect' })).toBe(true);
     expect(sameAddress({ kind: 'architect' }, { kind: 'architect', name: 'main' })).toBe(false);
     expect(sameAddress({ workspace: 'a', kind: 'id', name: 'x' }, { workspace: 'b', kind: 'id', name: 'x' })).toBe(false);
+  });
+});
+
+describe('parseTowerRef (Spec 1967): how commands and grants name a Tower', () => {
+  it('reads a Tower alone, and an owner and a Tower, trimmed and lower-cased', () => {
+    expect(parseTowerRef('devvm')).toEqual({ ok: true, ref: { tower: 'devvm' } });
+    expect(parseTowerRef('  DevVM ')).toEqual({ ok: true, ref: { tower: 'devvm' } });
+    expect(parseTowerRef('sam@studio')).toEqual({ ok: true, ref: { owner: 'sam', tower: 'studio' } });
+    expect(parseTowerRef('ana-s-mbp')).toEqual({ ok: true, ref: { tower: 'ana-s-mbp' } });
+  });
+
+  it('holds a Tower and an owner to the same rules as the authority of an afx:// address', () => {
+    for (const ref of ['devvm', 'sam@studio', 'a1@b-2', '9box']) {
+      const viaAddress = parseAddress(`afx://${ref}/codev:architect`);
+      const direct = parseTowerRef(ref);
+      expect(direct.ok).toBe(true);
+      expect(viaAddress.ok).toBe(true);
+      if (direct.ok && viaAddress.ok) {
+        expect(direct.ref.tower).toBe(viaAddress.address.tower);
+        expect(direct.ref.owner).toBe(viaAddress.address.owner);
+      }
+    }
+    for (const ref of ['dev_vm', 'dev.vm', '-x', '1sam@studio', 'sam@st_udio']) {
+      expect(parseTowerRef(ref).ok).toBe(false);
+      expect(parseAddress(`afx://${ref}/codev:architect`).ok).toBe(false);
+    }
+  });
+
+  it('refuses an address, a URL, a port, an empty part and a second owner, with the shape it expected', () => {
+    const cases: Array<[string, AddressParseErrorCode]> = [
+      ['', 'EMPTY_COMPONENT'],
+      ['   ', 'EMPTY_COMPONENT'],
+      ['@studio', 'EMPTY_COMPONENT'],
+      ['sam@', 'EMPTY_COMPONENT'],
+      ['a@b@c', 'REMOTE_BAD_AUTHORITY'],
+      ['afx://devvm', 'INVALID_COMPONENT'],
+      ['devvm/codev:architect', 'INVALID_COMPONENT'],
+      ['devvm:4100', 'INVALID_COMPONENT'],
+      ['x'.repeat(MAX_ADDRESS_LENGTH + 1), 'ADDRESS_TOO_LONG'],
+    ];
+    for (const [text, code] of cases) {
+      const parsed = parseTowerRef(text);
+      expect(parsed.ok, text).toBe(false);
+      if (!parsed.ok) {
+        expect(parsed.error.code, text).toBe(code);
+        expect(parsed.error.expected).toBe('[<owner>@]<tower>');
+      }
+    }
+  });
+
+  it('quotes back only printable ASCII, cut short', () => {
+    const parsed = parseTowerRef(`dev\u0007/${'y'.repeat(100)}`);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error.message).not.toContain('\u0007');
+      expect(parsed.error.message).toContain('...');
+    }
   });
 });

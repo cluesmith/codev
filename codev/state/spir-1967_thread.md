@@ -357,3 +357,62 @@ Both approved. Claude's three minor notes were cheap, so I took them before adva
 first no longer sets `release_hold`, which a local row never carries), `release()` says
 `AND remote_tower_id IS NOT NULL` like `holdForRelease()`, and the superseded phase 6 note
 above is struck through. A test breaks both invariants by hand and finds neither row reached.
+
+## 2026-11-27 — phase 4: the remote-messaging switch and grants
+
+- Re-entered after a context refresh at the phase boundary. Files: `peer/grants.ts` (matcher,
+  grant-request checks, tower-ref resolution), `peer/switch.ts`, `servers/peer-routes.ts`
+  (wired from `tower-routes.ts` by the `/api/peer/` prefix, after the key check),
+  `commands/peer.ts` + `cli.ts`, `peer` settings in `lib/config.ts` (`resolvePeerSettings`),
+  the drainer's prune pass now also runs `prunePeerStorage` with `peer.recordRetentionDays`,
+  SDK client calls + codev-types request/response types, and `parseTowerRef` in the one shared
+  address parser (`tower-ref = [owner "@"] tower`, same owner/Tower rules as an `afx://`
+  authority; phases 7/8/11 need it for `peer show`/`peer log --peer`).
+- **Readings I took where the plan and spec are silent** (flag at review):
+  - **Overlapping grants: hold wins.** If several grants cover a recipient, the mail is held for
+    release if any of them holds it. Avoids defining which of front-door / named architect is
+    "more specific"; one grant can keep mail out of a prompt, none can let in what another
+    holds. `afx peer grants` prints the rule when one Tower has both modes.
+  - **Grant addresses must name the workspace** (`codev:architect:local`, not
+    `architect:local`), and only architects: a builder/shell address is refused pointing at
+    `--all` (Decision 4's four scopes have no single-builder grant).
+  - **A grant may name a registered workspace that is not running** (Decision 4 says
+    "registered"): the lookup is `findWorkspaceByAddressName` with every registered workspace
+    counted as running. Architect existence = a row in the registry (`architect` table).
+  - **The matcher reads the world at the moment of asking**: an architect-naming scope covers
+    only an architect registered in its workspace now, so an architect grant stops matching
+    when it is removed and applies again when the name returns (in the matcher itself, not
+    only via step 13's no-such-agent). `--all` covers whatever resolved, a shell excepted.
+  - **Tower-refs resolve from the cached listing only** (phase 7 fetches it). `grant` takes a
+    current name only; a former name is refused naming the current one. `revoke` and
+    `grants <tower>` also accept a former name, so grants to a renamed or vanished Tower can
+    still be listed and removed. `owner@tower` is NOT_AVAILABLE (stage 3); this Tower's own
+    name (cloud-config `tower_name`) or id is NOT_A_PEER.
+  - **Human flag enforced twice**: the CLI refuses before calling Tower, and the route
+    refuses without `humanApproved: true`. **Added, not in the plan:** `on` and `grant` are
+    refused (403 NOT_OVER_TUNNEL) when the request carries the tunnel marker
+    `x-codev-tunnel-proxy`, the precedent being `/api/ide/session`. Off and revoke are allowed
+    through the tunnel (they only narrow).
+  - `afx peer revoke <tower>` with no recipients removes every grant for the peer; `--all`
+    there means the `--all` grant only. Revoking what does not exist is a 404, exits non-zero.
+  - Config: a malformed `peer.*` value throws naming the key; `afx peer limits` reports it
+    (500 CONFIG_INVALID); the drainer falls back to 30 days as it does for the mailbox's own
+    retention. Retention below 30 is used as 30 by the resolver and again by the store.
+- **For phase 6:** use `matchGrant(listGrants(db, peer), peer, recipient, world)`; `null` is
+  `no-grant`, `mode: 'hold'` stores `release_hold = 1`. Withdrawal on switch-off / revoke is
+  still phase 6's drainer re-check (as planned); note that a lazy re-check means a row that was
+  accepted, then the switch went off and back on before the drainer passed, would deliver.
+  Decision 4 says such mail "stays so when the switch is turned on again"; phase 6 should
+  decide whether `setSwitch`/revoke move rows eagerly (cheap: `holdForRelease` per row).
+  - **Grant recipients carrying a control character are refused** (INVALID_PARAMS) before any
+    lookup. Local address parts are deliberately lenient (Spec 1940), so without this a
+    refusal could quote ESC sequences back to the CLI's terminal; text that fails to parse is
+    quoted printable-ASCII and cut short, the shared parser's rule.
+- **For phase 7:** `resolvePeerTower` is the seam for "a send to a name it does not know"
+  refreshing the listing; `setSwitch` returns `changed` for the switch-state report.
+  `store.writeListing` checks a listed slug only for being non-empty, and `afx peer grants`
+  prints listed slugs: the listing fetch should hold each slug (and `self.slug`) to the
+  Tower-name rule (`parseTowerRef`) before caching it.
+- Layer A wall time: 0.9 s for the three new codev files (80 tests), 0.19 s for the SDK's
+  address + peer-client files (188 tests), three runs each. Full `npm test` (porch's
+  command): 467 files, 10436 passed, 230.7 s.

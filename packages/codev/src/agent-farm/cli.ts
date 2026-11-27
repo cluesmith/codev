@@ -906,6 +906,89 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Peer commands (Spec 1967) — the remote-messaging switch and grants between your Towers
+  const peerCmd = program
+    .command('peer')
+    .description('Messaging between your Towers: the remote-messaging switch and grants');
+
+  /** Run one `afx peer` command: a refusal is printed and exits non-zero. */
+  const runPeer = async (run: (peer: typeof import('./commands/peer.js')) => Promise<void>): Promise<void> => {
+    const peer = await import('./commands/peer.js');
+    try {
+      await run(peer);
+    } catch (error) {
+      logger.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  };
+  const portOf = (options: { port?: string }): number | undefined => (options.port ? parseInt(options.port, 10) : undefined);
+
+  peerCmd
+    .command('on')
+    .description('Turn remote messaging on for this Tower (human only)')
+    .option('--a-human-explicitly-approved-this', 'A human is turning remote messaging on')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((options) =>
+      runPeer((peer) => peer.peerOn({ humanApproved: options.aHumanExplicitlyApprovedThis === true, port: portOf(options) })),
+    );
+
+  peerCmd
+    .command('off')
+    .description('Turn remote messaging off: this Tower sends nothing to other Towers and accepts nothing')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((options) => runPeer((peer) => peer.peerOff({ port: portOf(options) })));
+
+  peerCmd
+    .command('grants [tower]')
+    .description("List this Tower's grants, or one Tower's")
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((tower, options) => runPeer((peer) => peer.peerGrants({ tower, port: portOf(options) })));
+
+  peerCmd
+    .command('grant <tower> [addresses...]')
+    .description(
+      'Let another of your Towers message recipients here (human only): addresses such as ' +
+        'codev:architect:local or codev:architect (the front door), --workspace <name>, or --all',
+    )
+    .option('--workspace <name>', 'Every architect in this workspace')
+    .option('--all', 'Everything on this Tower: every architect and builder')
+    .option('--deliver', 'Deliver its mail directly (the default)')
+    .option('--hold', 'Hold its mail for release by a human (afx inbox release)')
+    .option('--a-human-explicitly-approved-this', 'A human is adding this grant')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((tower, addresses, options) =>
+      runPeer((peer) =>
+        peer.peerGrant({
+          tower,
+          addresses,
+          workspace: options.workspace,
+          all: options.all === true,
+          deliver: options.deliver === true,
+          hold: options.hold === true,
+          humanApproved: options.aHumanExplicitlyApprovedThis === true,
+          port: portOf(options),
+        }),
+      ),
+    );
+
+  peerCmd
+    .command('revoke <tower> [addresses...]')
+    .description('Remove grants for a Tower: those named, or all of them when none are')
+    .option('--workspace <name>', 'The grant of every architect in this workspace')
+    .option('--all', 'The grant of everything on this Tower')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((tower, addresses, options) =>
+      runPeer((peer) =>
+        peer.peerRevoke({ tower, addresses, workspace: options.workspace, all: options.all === true, port: portOf(options) }),
+      ),
+    );
+
+  peerCmd
+    .command('limits')
+    .description('Show the limits this Tower enforces on messages from other Towers')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((options) => runPeer((peer) => peer.peerLimits({ port: portOf(options) })));
+
   // Inbox commands (Spec 1313) — list/dismiss held (undelivered) mailbox messages
   const inboxCmd = program
     .command('inbox')

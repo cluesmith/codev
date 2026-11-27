@@ -28,6 +28,7 @@ import type {
   AddressParseError,
   AddressParseErrorCode,
   AddressParseResult,
+  TowerRefParseResult,
 } from '@cluesmith/codev-types';
 
 /** The prefix that marks an address as leaving this Tower. */
@@ -150,6 +151,33 @@ function parseAgentPath(path: string, expected: string): AddressParseResult {
   return { ok: true, address };
 }
 
+/**
+ * The rules for an owner's handle and a Tower's name, shared by the authority of an
+ * `afx://` address and a tower-ref, so the two can never disagree about what a Tower
+ * may be called. Null when both fit.
+ */
+function checkOwnerAndTower(
+  owner: string | undefined,
+  tower: string,
+  expected: string,
+): { ok: false; error: AddressParseError } | null {
+  if (owner !== undefined && !OWNER_PATTERN.test(owner)) {
+    return fail(
+      'INVALID_COMPONENT',
+      `owner \`${quoted(owner)}\` may contain only lower-case letters, digits and hyphens, and must start with a letter`,
+      expected,
+    );
+  }
+  if (!TOWER_PATTERN.test(tower)) {
+    return fail(
+      'INVALID_COMPONENT',
+      `Tower name \`${quoted(tower)}\` may contain only lower-case letters, digits and hyphens`,
+      expected,
+    );
+  }
+  return null;
+}
+
 function parseRemote(rest: string): AddressParseResult {
   // No escaping or encoding exists. These three are free for later use, so they are
   // refused now and not quietly read as part of a name.
@@ -182,20 +210,8 @@ function parseRemote(rest: string): AddressParseResult {
   if (tower === '') {
     return fail('EMPTY_COMPONENT', 'an afx:// address must name a Tower', REMOTE_SHAPE);
   }
-  if (owner !== undefined && !OWNER_PATTERN.test(owner)) {
-    return fail(
-      'INVALID_COMPONENT',
-      `owner \`${quoted(owner)}\` may contain only lower-case letters, digits and hyphens, and must start with a letter`,
-      REMOTE_SHAPE,
-    );
-  }
-  if (!TOWER_PATTERN.test(tower)) {
-    return fail(
-      'INVALID_COMPONENT',
-      `Tower name \`${quoted(tower)}\` may contain only lower-case letters, digits and hyphens`,
-      REMOTE_SHAPE,
-    );
-  }
+  const named = checkOwnerAndTower(owner, tower, REMOTE_SHAPE);
+  if (named) return named;
 
   if (path === '') {
     return fail('REMOTE_NO_WORKSPACE', 'an afx:// address must name a workspace and an agent after the Tower', REMOTE_SHAPE);
@@ -272,6 +288,53 @@ export function parseAddress(text: string): AddressParseResult {
     );
   }
   return parseAgentPath(input, LOCAL_SHAPE);
+}
+
+const TOWER_REF_SHAPE = '[<owner>@]<tower>';
+
+/**
+ * Read a tower-ref, the way commands, grants and listings name a Tower (spec Decision 1):
+ *
+ *   tower-ref = [ owner "@" ] tower
+ *
+ * Trimmed and lower-cased like an address, and held to the same owner and Tower rules as
+ * the authority of an `afx://` address. It names a Tower and nothing on it, so a slash, a
+ * colon or a scheme is refused rather than read past.
+ */
+export function parseTowerRef(text: string): TowerRefParseResult {
+  const input = text.trim().toLowerCase();
+  if (input === '') {
+    return fail('EMPTY_COMPONENT', 'no Tower is named', TOWER_REF_SHAPE);
+  }
+  if (input.length > MAX_ADDRESS_LENGTH) {
+    return fail(
+      'ADDRESS_TOO_LONG',
+      `a Tower name is at most ${MAX_ADDRESS_LENGTH} characters, and this one has ${input.length}`,
+      TOWER_REF_SHAPE,
+    );
+  }
+  if (input.includes('/') || input.includes(':')) {
+    return fail(
+      'INVALID_COMPONENT',
+      `\`${quoted(input)}\` is not a Tower name: write the Tower alone, as in \`devvm\`, not an address`,
+      TOWER_REF_SHAPE,
+    );
+  }
+  const parts = input.split('@');
+  if (parts.length > 2) {
+    return fail('REMOTE_BAD_AUTHORITY', 'a Tower is named with at most one owner before `@`', TOWER_REF_SHAPE);
+  }
+  const owner = parts.length === 2 ? parts[0] : undefined;
+  const tower = parts[parts.length - 1];
+  if (owner === '') {
+    return fail('EMPTY_COMPONENT', 'the owner before `@` is empty', TOWER_REF_SHAPE);
+  }
+  if (tower === '') {
+    return fail('EMPTY_COMPONENT', 'no Tower is named after the owner', TOWER_REF_SHAPE);
+  }
+  const named = checkOwnerAndTower(owner, tower, TOWER_REF_SHAPE);
+  if (named) return named;
+  return { ok: true, ref: owner === undefined ? { tower } : { owner, tower } };
 }
 
 /**

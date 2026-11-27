@@ -47,6 +47,7 @@ import {
   markEscalatedDelivered,
   findStarvingAgents,
 } from '../db/mailbox.js';
+import { PEER_MIN_RETENTION_DAYS, prunePeerStorage } from '../peer/store.js';
 import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
 import { writeStrategyForApp, type PacedSubmitResult, type WriteStrategy } from './message-write.js';
@@ -1401,6 +1402,9 @@ export class MailboxDrainer {
   private db: Database.Database | undefined;
   private readonly intervalMs: number;
   private readonly retentionDays: number;
+  // Spec 1967: the peer tables' retention (`peer.recordRetentionDays`), pruned in the same pass
+  // as terminal mailbox rows. `prunePeerStorage` raises it to 30 days whatever is passed.
+  private readonly peerRecordRetentionDays: number;
   private readonly escalationMs: number;
   private readonly ownerNoticeMs: number;
   private readonly notCleanStreak = new Map<string, number>();
@@ -1435,9 +1439,18 @@ export class MailboxDrainer {
   // this generation's state.
   private generation = 0;
 
-  constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number; ownerNoticeMs?: number } = {}) {
+  constructor(
+    opts: {
+      intervalMs?: number;
+      pruneRetentionDays?: number;
+      peerRecordRetentionDays?: number;
+      escalationMs?: number;
+      ownerNoticeMs?: number;
+    } = {},
+  ) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
     this.retentionDays = opts.pruneRetentionDays ?? DEFAULT_PRUNE_RETENTION_DAYS;
+    this.peerRecordRetentionDays = opts.peerRecordRetentionDays ?? PEER_MIN_RETENTION_DAYS;
     this.escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
     this.ownerNoticeMs = opts.ownerNoticeMs ?? this.escalationMs * DEFAULT_OWNER_NOTICE_MULTIPLE;
   }
@@ -1447,6 +1460,7 @@ export class MailboxDrainer {
     this.ports = ports;
     this.db = db;
     pruneTerminal(db, this.retentionDays, ports.now()); // boot prune
+    prunePeerStorage(db, this.peerRecordRetentionDays, ports.now());
     this.timer = setInterval(() => void this.tick(), this.intervalMs);
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
@@ -1652,6 +1666,7 @@ export class MailboxDrainer {
       this.escalateOverdue(ports, db);
       this.noticeOverdue(ports, db);
       pruneTerminal(db, this.retentionDays, ports.now());
+      prunePeerStorage(db, this.peerRecordRetentionDays, ports.now());
     } catch (err) {
       // Backstop for escalateOverdue/pruneTerminal (DB ops) or anything the per-agent guard missed:
       // a tick runs under setInterval, so an unhandled throw becomes an unhandledRejection → exit(1)

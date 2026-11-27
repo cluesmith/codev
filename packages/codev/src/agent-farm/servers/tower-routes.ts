@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { networkInterfaces, tmpdir } from 'node:os';
+import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { readCloudConfig } from '../lib/cloud-config.js';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,7 @@ import type { PtySessionInfo } from '../../terminal/pty-session.js';
 import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
 import {
   getArchitectByName,
+  getArchitects,
   getBuilders,
   setArchitectByName,
   getRegisteredWorkspaces,
@@ -85,6 +86,8 @@ import {
 import { addressBook } from './tower-address-book.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
+import { createPeerRouteHandler, PEER_ROUTE_PREFIX, type PeerRouteDeps } from './peer-routes.js';
+import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import {
   formatArchitectMessage,
   formatArchitectToBuilderMessage,
@@ -294,6 +297,26 @@ function respondStartingUp(res: http.ServerResponse): void {
   }));
 }
 
+/** What the peer routes read in production (Spec 1967): the live Tower, its database and config. */
+function peerRouteDeps(ctx: RouteContext): PeerRouteDeps {
+  return {
+    db: getGlobalDb,
+    now: Date.now,
+    world: () => ({
+      registered: getRegisteredWorkspaces(),
+      running: runningWorkspacePaths(),
+      architectsOf: (workspacePath) => getArchitects(workspacePath).map((a) => a.name),
+    }),
+    ownTower: () => {
+      const cloud = readCloudConfig();
+      return { name: cloud?.tower_name ?? null, towerId: cloud?.tower_id ?? null };
+    },
+    // Tower-global, from the user-global layer, as the mailbox settings are read.
+    settings: () => resolvePeerSettings(loadConfig(homedir())),
+    log: ctx.log,
+  };
+}
+
 // ============================================================================
 // IDE forward cookie (Issue #1869)
 // ============================================================================
@@ -480,6 +503,15 @@ export async function handleRequest(
     // exactly one and answer when none is open (spec 1401).
     if (url.pathname.startsWith(CANVAS_ROUTE_PREFIX)) {
       return await handleCanvasRoute(req, res, url, ctx);
+    }
+
+    // Peers: the remote-messaging switch and grants (Spec 1967). Self-routing, like the
+    // command relay. Grant answers name workspaces as they are addressed now, which depends
+    // on which are running, so they wait for the startup reconcile as the address-name
+    // route does.
+    if (url.pathname.startsWith(PEER_ROUTE_PREFIX)) {
+      await whenStartupReconcileSettled();
+      return await createPeerRouteHandler(peerRouteDeps(ctx))(req, res, url);
     }
 
     // Workspace API: /api/workspaces/:encodedPath/activate|deactivate|status (Spec 0090 Phase 1)

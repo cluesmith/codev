@@ -13,7 +13,8 @@
  */
 
 import { homedir } from 'node:os';
-import { loadConfig } from '../../lib/config.js';
+import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
+import { PEER_MIN_RETENTION_DAYS } from '../peer/store.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
 import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
@@ -657,10 +658,25 @@ function configuredEscalationMs(): number {
   }
 }
 
+/**
+ * The peer record retention (days) for the same prune pass (Spec 1967): Tower-global, read
+ * from the user-global config layer like `mailbox.retentionDays`, and raised to 30 by
+ * {@link resolvePeerSettings}. A malformed config falls back to 30, as the mailbox's does,
+ * so it never stops the drainer from booting; `afx peer limits` reports the error.
+ */
+function configuredPeerRecordRetentionDays(): number {
+  try {
+    return resolvePeerSettings(loadConfig(homedir())).recordRetentionDays;
+  } catch {
+    return PEER_MIN_RETENTION_DAYS;
+  }
+}
+
 function ensureDrainer(): MailboxDrainer {
   if (!drainer) {
     drainer = new MailboxDrainer({
       pruneRetentionDays: configuredRetentionDays(),
+      peerRecordRetentionDays: configuredPeerRecordRetentionDays(),
       escalationMs: configuredEscalationMs(),
     });
   }

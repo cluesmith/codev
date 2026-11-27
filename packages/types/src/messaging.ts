@@ -99,3 +99,17 @@ export interface AddressParseError {
 export type AddressParseResult =
   | { ok: true; address: AgentAddress }
   | { ok: false; error: AddressParseError };
+
+/**
+ * A Tower as commands, grants and listings name it (Spec 1940, Decision 1:
+ * `tower-ref = [ owner "@" ] tower`). Lower-case. No `owner` means one of the reader's
+ * own Towers.
+ */
+export interface TowerRef {
+  owner?: string;
+  tower: string;
+}
+
+export type TowerRefParseResult =
+  | { ok: true; ref: TowerRef }
+  | { ok: false; error: AddressParseError };

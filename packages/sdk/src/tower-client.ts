@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
@@ -418,6 +418,22 @@ function isUnknownRoute(result: { status: number; errorCode?: string }): boolean
   return result.status === 404 && result.errorCode === undefined;
 }
 
+/** A refused or unanswered call to a peer route (Spec 1967). */
+export interface PeerRouteFailure {
+  ok: false;
+  /** The HTTP status; 0 when no answer came. */
+  status: number;
+  error: string;
+  errorCode?: string;
+  /** The Tower has no peer routes: it is older than this client. */
+  unknownRoute?: true;
+  /** Nothing is listening on the Tower's port. */
+  notRunning?: true;
+}
+
+/** What a peer route call returns. */
+export type PeerRouteResult<T> = { ok: true; result: T } | PeerRouteFailure;
+
 export class TowerClient {
   private readonly baseUrl: string;
   private readonly getAuthKey: () => string | null;
@@ -718,6 +734,62 @@ export class TowerClient {
       return result.status === 0 ? { ...failure, unanswered: true } : failure;
     }
     return { ok: true, result: result.data };
+  }
+
+  // ── Peers: the remote-messaging switch and grants (Spec 1967) ──
+
+  /**
+   * One call to a `/api/peer/…` route. A refusal carries Tower's reason in `error` and its
+   * code in `errorCode` (see `PeerSwitchResponse` and its neighbours in codev-types for the
+   * codes). `unknownRoute` is set when the Tower has no peer routes at all: it is older than
+   * this client. `notRunning` is set when nothing answered on the Tower's port.
+   */
+  private async peerCall<T>(path: string, init: RequestInit = {}): Promise<PeerRouteResult<T>> {
+    const result = await this.request<T>(path, init);
+    if (result.ok && result.data !== undefined) return { ok: true, result: result.data };
+    const failure: PeerRouteFailure = { ok: false, status: result.status, error: result.error ?? `Tower answered ${result.status}` };
+    if (result.connectionRefused) return { ...failure, notRunning: true };
+    if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+    return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+  }
+
+  private peerPost<T>(path: string, method: 'POST' | 'PUT', body: unknown): Promise<PeerRouteResult<T>> {
+    return this.peerCall<T>(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** The remote-messaging switch. */
+  getPeerSwitch(): Promise<PeerRouteResult<PeerSwitchResponse>> {
+    return this.peerCall<PeerSwitchResponse>('/api/peer/switch');
+  }
+
+  /** Turn remote messaging on or off. Tower refuses `on` unless `humanApproved` is true. */
+  setPeerSwitch(request: PeerSwitchRequest): Promise<PeerRouteResult<PeerSwitchResponse>> {
+    return this.peerPost<PeerSwitchResponse>('/api/peer/switch', 'PUT', request);
+  }
+
+  /** This Tower's grants, or one peer's (named by a tower-ref). */
+  getPeerGrants(tower?: string): Promise<PeerRouteResult<PeerGrantsResponse>> {
+    const query = tower === undefined ? '' : `?${new URLSearchParams({ tower }).toString()}`;
+    return this.peerCall<PeerGrantsResponse>(`/api/peer/grants${query}`);
+  }
+
+  /** Add grants. Tower refuses unless `humanApproved` is true. */
+  addPeerGrants(request: PeerGrantRequest): Promise<PeerRouteResult<PeerGrantResponse>> {
+    return this.peerPost<PeerGrantResponse>('/api/peer/grants', 'POST', request);
+  }
+
+  /** Remove grants: those named, or every grant for the peer when none are. */
+  revokePeerGrants(request: PeerRevokeRequest): Promise<PeerRouteResult<PeerRevokeResponse>> {
+    return this.peerPost<PeerRevokeResponse>('/api/peer/grants/revoke', 'POST', request);
+  }
+
+  /** The limits this Tower enforces itself. */
+  getPeerLimits(): Promise<PeerRouteResult<PeerLimitsResponse>> {
+    return this.peerCall<PeerLimitsResponse>('/api/peer/limits');
   }
 
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {

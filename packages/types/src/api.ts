@@ -836,6 +836,143 @@ export interface AddressBookResponse {
   workspaces: AddressBookWorkspace[];
 }
 
+// --- Peers: the remote-messaging switch and grants (Spec 1967; /api/peer/…) ---
+//
+// The local routes behind `afx peer on|off|grants|grant|revoke|limits`. A refusal is the
+// usual Tower error body, `{ error, message }`. The codes: `INVALID_PARAMS` (400),
+// `HUMAN_APPROVAL_REQUIRED` (403: turning the switch on and adding a grant are a human's
+// acts), `NOT_OVER_TUNNEL` (403: neither is accepted from Codev Cloud's tunnel),
+// `NOT_AVAILABLE` (400: another owner's Tower, stage 3), `NOT_A_PEER` (400: this Tower
+// itself), `UNKNOWN_TOWER` (404), `NOT_GRANTABLE` (400: an address no grant can name),
+// `NOT_FOUND` (404: no such workspace or architect, or no grant to remove), `AMBIGUOUS`
+// (409), `CONFIG_INVALID` (500).
+
+/** The remote-messaging switch (`GET /api/peer/switch`, `PUT /api/peer/switch`). */
+export interface PeerSwitchResponse {
+  state: 'on' | 'off';
+  /** Did this request change it? Always `false` for a GET and for a request that asked for the state it was in. */
+  changed: boolean;
+  /** When a human last turned it on or off, epoch ms; `null` if never. */
+  changedAt: number | null;
+  /** This Tower's own name, the slug Codev Cloud gave it; `null` if it has never been registered. */
+  towerName: string | null;
+  /** How many grants this Tower holds. */
+  grantCount: number;
+}
+
+/** Body of `PUT /api/peer/switch`. `on` is refused unless `humanApproved` is `true`. */
+export interface PeerSwitchRequest {
+  state: 'on' | 'off';
+  humanApproved?: boolean;
+}
+
+/**
+ * What a grant covers (Spec 1940, Decision 4): a workspace's front door, resolved when mail
+ * arrives; one architect by name; every architect of a workspace; or everything here.
+ */
+export type PeerGrantScopeName = 'front-door' | 'architect' | 'architects' | 'all';
+/** What happens to mail a grant admits: delivered, or held for release by a human. */
+export type PeerGrantModeName = 'deliver' | 'hold';
+
+/** The recipients of a grant request, as `afx peer grant` names them: exactly one of the three. */
+export interface PeerGrantRecipients {
+  /** Local addresses: `<workspace>:architect:<name>` for one architect, `<workspace>:architect` for its front door. */
+  addresses?: string[];
+  /** `--workspace <name>`: every architect in that workspace. */
+  workspace?: string;
+  /** `--all`: everything on this Tower, architects and builders. */
+  all?: boolean;
+}
+
+/** Body of `POST /api/peer/grants`. Refused unless `humanApproved` is `true`. */
+export interface PeerGrantRequest extends PeerGrantRecipients {
+  /** The peer, as a tower-ref (`devvm`). */
+  tower: string;
+  /** Default `deliver`. */
+  mode?: PeerGrantModeName;
+  humanApproved?: boolean;
+}
+
+/**
+ * Body of `POST /api/peer/grants/revoke`. With none of the three recipient fields it removes
+ * every grant for that Tower. Narrowing access needs no approval.
+ */
+export interface PeerRevokeRequest extends PeerGrantRecipients {
+  tower: string;
+}
+
+/** One grant as the routes report it. */
+export interface PeerGrantView {
+  peerTowerId: string;
+  /** The peer's current name, as this Tower last listed it; `null` if it has not been listed. */
+  peerName: string | null;
+  scope: PeerGrantScopeName;
+  mode: PeerGrantModeName;
+  /** The workspace's key; `null` exactly when the scope is `all`. */
+  workspacePath: string | null;
+  /** The name the workspace is addressed by now; `null` for `all`, or when it has none. */
+  workspaceName: string | null;
+  /** The architect's name; set exactly when the scope is `architect`. */
+  architect: string | null;
+  /** What it covers, for a person: `codev:architect:local`, `codev:architect`, `every architect in codev`, `everything`. */
+  recipient: string;
+  /** For a front-door grant, the architect the front door reaches now; otherwise `null`. */
+  reaches: string | null;
+  /** Why the grant matches nothing now (its workspace or architect is gone); `null` when it applies. */
+  matchesNothing: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** `GET /api/peer/grants[?tower=<tower-ref>]`. */
+export interface PeerGrantsResponse {
+  remoteMessaging: 'on' | 'off';
+  grants: PeerGrantView[];
+}
+
+/** A peer as a grant route resolved it. */
+export interface PeerTowerNamed {
+  towerId: string;
+  name: string;
+}
+
+/** What one requested grant did. */
+export interface PeerGrantChange {
+  grant: PeerGrantView;
+  /** `added`; `mode-changed` (it existed with the other mode); `unchanged` (it existed as asked). */
+  change: 'added' | 'mode-changed' | 'unchanged';
+}
+
+/** The 200 response of `POST /api/peer/grants`. */
+export interface PeerGrantResponse {
+  tower: PeerTowerNamed;
+  changes: PeerGrantChange[];
+  remoteMessaging: 'on' | 'off';
+}
+
+/** The 200 response of `POST /api/peer/grants/revoke`. */
+export interface PeerRevokeResponse {
+  tower: PeerTowerNamed;
+  removed: PeerGrantView[];
+}
+
+/** The limits this Tower enforces itself, from the user's Codev config (`peer.limits`). */
+export interface PeerTowerLimits {
+  /** Remote messages accepted from one peer in a minute. */
+  acceptedPerPeerPerMinute: number;
+  /** Remote messages from one peer accepted here and not yet delivered. */
+  undeliveredPerPeer: number;
+  /** Messages waiting on this Tower for one peer. */
+  waitingPerPeer: number;
+}
+
+/** `GET /api/peer/limits`. */
+export interface PeerLimitsResponse {
+  tower: PeerTowerLimits;
+  /** Days this Tower keeps its record of cross-Tower attempts: the configured value, raised to 30. */
+  recordRetentionDays: number;
+}
+
 // --- Tunnel (GET /api/tunnel/status) ---
 
 export interface TunnelStatus {
