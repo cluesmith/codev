@@ -417,13 +417,26 @@ function buildTunnelWsUrl(serverUrl: string): string {
 }
 
 /**
- * The reason given for an auth response that is not JSON. It is echoed, bounded, to help
- * diagnose a proxy's error page, except when it names a session secret (Spec 1967): a
- * secret never reaches a log, even in a response that does not parse.
+ * The reason given for an auth response that is not a JSON object. Its text is never
+ * echoed, only its size (Spec 1967): a response to `auth` may carry a session secret, and
+ * one that does not parse cannot be searched for it reliably.
  */
 function unreadableAuthResponse(text: string): string {
-  if (text.includes('sessionSecret')) return 'invalid auth response (not shown: it names a session secret)';
-  return `invalid auth response: ${sanitizeRemoteDetail(text)}`;
+  return `invalid auth response (${Buffer.byteLength(text, 'utf8')} bytes, not shown: it may carry a session secret)`;
+}
+
+/** An auth response type, shown only when it has the shape of one. */
+function shownAuthType(type: unknown): string {
+  return typeof type === 'string' && /^[a-z_]{1,32}$/.test(type) ? type : '(not shown)';
+}
+
+/**
+ * What a log line says of an error thrown by code that held a verified statement, its
+ * payload or an auth response: its class, never its message, which could quote any of them.
+ */
+function errorKind(err: unknown): string {
+  if (err instanceof Error) return err.constructor.name;
+  return typeof err;
 }
 
 // ============================================================================
@@ -497,7 +510,9 @@ interface TunnelSession {
 /**
  * Step 8: if this statement id has been presented in this session in the last 10 minutes,
  * `false`. Otherwise it is used up now, `true`. Ids are forgotten as they age out of the
- * memory (they were remembered in the order they were first seen).
+ * memory (they were remembered in the order they were first seen). Pruning stops at the
+ * first id still in memory, so after the clock steps back some ids are kept longer than
+ * 10 minutes: that only refuses more, never less, and ends with the session.
  */
 function useStatementId(session: TunnelSession, statementId: string, now: number): boolean {
   for (const [id, seenAt] of session.statementIds) {
@@ -1007,12 +1022,10 @@ export class TunnelClient {
         } else if (msg.type === 'auth_error') {
           this.handleAuthError(typeof msg.reason === 'string' && msg.reason ? msg.reason : 'unknown');
         } else {
-          this.handleConnectionError(
-            new Error(`unexpected auth response type: ${sanitizeRemoteDetail(String(msg.type))}`)
-          );
+          this.handleConnectionError(new Error(`unexpected auth response type: ${shownAuthType(msg.type)}`));
         }
       } catch (err) {
-        this.handleConnectionError(new Error(`auth response not handled: ${(err as Error).message}`));
+        this.handleConnectionError(new Error(`auth response not handled (${errorKind(err)})`));
       }
     };
 
@@ -1150,17 +1163,17 @@ export class TunnelClient {
     });
     this.h2Server = h2Server;
 
-    h2Server.on('session', (session: http2.ServerHttp2Session) => {
+    h2Server.on('session', (h2Session: http2.ServerHttp2Session) => {
       // The session lands a tick later; the attempt may have been torn down since.
       if (ws !== this.ws) {
-        session.destroy();
+        h2Session.destroy();
         return;
       }
-      this.h2Session = session;
+      this.h2Session = h2Session;
       // Raise the connection-level receive window above one stream's window so a
       // large transfer can't consume the whole session window and starve a small
       // RPC on the other stream (#1677).
-      session.setLocalWindowSize(TUNNEL_H2_SESSION_WINDOW_SIZE);
+      h2Session.setLocalWindowSize(TUNNEL_H2_SESSION_WINDOW_SIZE);
       this.setState('connected', 'h2 session established');
       this.startHeartbeat(ws);
     });
@@ -1191,8 +1204,8 @@ export class TunnelClient {
 
     // The peer entry point first (Spec 1967): nothing at or under its path is ever proxied.
     if (path && isUnderPeerEntryPath(path)) {
-      this.answerPeerRequest(stream, headers, session).catch((err: Error) => {
-        console.warn(`Tunnel: peer entry point failed: ${sanitizeRemoteDetail(err.message)}`);
+      this.answerPeerRequest(stream, headers, session).catch((err: unknown) => {
+        console.warn(`Tunnel: peer entry point failed (${errorKind(err)}); the request was reset unanswered`);
         if (!stream.destroyed) stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
       });
       return;
@@ -1313,7 +1326,7 @@ export class TunnelClient {
     try {
       hook({ ...result, ...facts, at, sessionId: session.id });
     } catch (err) {
-      console.warn(`Tunnel: peer entry event not recorded: ${sanitizeRemoteDetail((err as Error).message)}`);
+      console.warn(`Tunnel: peer entry event not recorded (${errorKind(err)})`);
     }
   }
 

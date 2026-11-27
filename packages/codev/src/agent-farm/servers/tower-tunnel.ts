@@ -110,8 +110,9 @@ async function gatherMetadata(): Promise<TowerMetadata> {
 }
 
 /**
- * Start periodic metadata refresh — re-gathers metadata and pushes to codevos.ai
- * every METADATA_REFRESH_MS while the tunnel is connected.
+ * Start periodic metadata refresh: re-gathers metadata every METADATA_REFRESH_MS while
+ * the tunnel is connected, into the cache `GET /__tower/metadata` serves (nothing is
+ * pushed to the cloud since #1986).
  */
 function startMetadataRefresh(): void {
   stopMetadataRefresh();

@@ -497,3 +497,31 @@ above is struck through. A test breaks both invariants by hand and finds neither
 - Windows workflow dispatched at 4defee646 (load 1.75): probe with the three-shell `afx://`
   argv steps, plus `suites=true`.
   https://github.com/cluesmith/codev/actions/runs/45929432410
+- **Phase 5 review (iter 1): codex REQUEST_CHANGES, claude APPROVE**, both HIGH. Response:
+  `1967-phase_5-iter1-rebuttals.md`; nothing disputed. Taken (codex):
+  - no log line or state reason carries a handler's error message (it can quote the
+    statement or body): the error's class only;
+  - no state reason or log line carries an unparseable auth response (it can carry the secret
+    without the exact label): its byte count only;
+  - an unknown auth type is shown only when it looks like one;
+  - tests for both.
+
+  Taken (claude): the stale metadata comment, the `h2Session` rename (it caught the
+  window-size call reading the wrong `session`), and the clock comment on the id memory.
+  **For phase 6:** the body read shares the 5 s answer deadline. A phase 6 handler that
+  wants its failures diagnosable logs safe facts itself, because the entry point logs only
+  the error's class.
+- **Windows run 45929432410 (4defee646) was red.**
+  - Green: both probe legs (x64, ARM64), all six `afx://` argv steps (Git Bash, PowerShell,
+    cmd) byte for byte, CLI tests and install verification.
+  - Red: Unit tests. All 10 198 tests passed, but `bugfix-1871-cloud-identity` failed in
+    teardown with EBUSY unlinking its own test.db.
+  - Cause: since phase 5 each `auth_ok` reads the switch via `getGlobalDb()`, and that suite
+    (the real tower-tunnel and a real db) never closed it.
+
+  Reported to the architect before any rerun. Ruling 2026-11-27T02:50Z: close the db in that
+  suite's `afterEach` after `shutdownTunnel` and before the `afterAll` removal, give any other
+  such file the same close, and re-dispatch once.
+
+  Audited every test naming tower-tunnel; only bugfix-1871 opens a real global db through
+  `auth_ok`, so it is the only file changed.

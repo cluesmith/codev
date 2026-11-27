@@ -26,6 +26,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { WebSocketServer } from 'ws';
 import { PEER_FRESHNESS_MS, PEER_STATEMENT_ID_MEMORY_MS, type PeerSwitchState } from '@cluesmith/codev-types';
 import {
   TunnelClient,
@@ -768,8 +770,68 @@ describe('the secret never reaches a log', () => {
       await present();
       tunnel.disconnect();
     });
-    expect(lines.some((line) => line.includes('the receiver broke'))).toBe(true);
+    // The handler's failure is logged by its class, never its message.
+    expect(lines).toContain('Tunnel: peer entry point failed (Error); the request was reset unanswered');
+    expect(lines.some((line) => line.includes('the receiver broke'))).toBe(false);
     expectNoSecretInLines([...lines, ...reasons, ...events.map((event) => JSON.stringify(event))], secrets);
+  });
+
+  it('a handler error that quotes the statement and the payload is logged by its class alone', async () => {
+    await connected(newClient());
+    const body = 'a body only the receiving handler ever saw';
+    handler = async (request) => {
+      throw new TypeError(
+        `could not deliver ${request.statement.requestId} from ${request.statement.fromOwnerEmail}: ${Buffer.from(request.payload).toString('utf8')}`,
+      );
+    };
+    const requestId = '3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a';
+    const lines = await consoleLines(async () => {
+      await expect(
+        relay.forward(r.towerId, { requestId, payload: messagePayload({ sentAt: T0, to: { workspace: 'codev', kind: 'architect' }, body }) }),
+      ).rejects.toThrow(/no answer/);
+    });
+    expect(handed).toHaveLength(1);
+    expect(lines.filter((line) => line.includes('peer entry point'))).toEqual([
+      'Tunnel: peer entry point failed (TypeError); the request was reset unanswered',
+    ]);
+    for (const line of lines) {
+      for (const quoted of [requestId, 'owner@example.com', body]) expect(line).not.toContain(quoted);
+    }
+  });
+
+  it('an auth response that is not an object of a known type is reported without its text, whatever it carries', async () => {
+    // A cloud of its own, so each response to `auth` is exactly what the test says.
+    const cloud = new WebSocketServer({ host: '127.0.0.1', port: 0, path: '/tunnel' });
+    await once(cloud, 'listening');
+    let reply = '';
+    cloud.on('connection', (socket) => socket.once('message', () => socket.send(reply)));
+    const port = (cloud.address() as { port: number }).port;
+    const secret = randomBytes(32);
+    const forms = secretForms(secret);
+    try {
+      for (const [response, expected] of [
+        [`not json at all ${forms[0]}`, /^connection error: invalid auth response \(\d+ bytes, not shown: it may carry a session secret\)$/],
+        [`{"type":"auth_ok","towerId":"${r.towerId}","relay":{"protocols":[1],"SessionSecret":"${forms[0]}"`, /invalid auth response \(\d+ bytes, not shown/],
+        [`["${forms[1]}", "${forms[2]}"]`, /invalid auth response \(\d+ bytes, not shown/],
+        [`{"type":"${forms[0]}"}`, /^connection error: unexpected auth response type: \(not shown\)$/],
+      ] as const) {
+        reply = response;
+        const reasons: string[] = [];
+        const lines = await consoleLines(async () => {
+          const tunnel = newClient({ serverUrl: `http://127.0.0.1:${port}` });
+          tunnel.onStateChange((_state, _prev, reason) => reasons.push(reason ?? ''));
+          tunnel.connect();
+          expect(await waitFor(async () => reasons.some((reason) => expected.test(reason)), 10_000, 5), `${response}: ${JSON.stringify(reasons)}`).toBe(true);
+          tunnel.disconnect();
+        });
+        for (const text of [...reasons, ...lines]) {
+          for (const form of forms) expect(text).not.toContain(form);
+        }
+      }
+    } finally {
+      for (const socket of cloud.clients) socket.terminate();
+      await new Promise<void>((resolve) => cloud.close(() => resolve()));
+    }
   });
 
   it("through tower-tunnel's wiring: its logger, the stub handler, the switch re-announced on reconnect, the exposed session", async () => {
