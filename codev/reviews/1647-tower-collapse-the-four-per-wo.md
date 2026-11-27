@@ -68,8 +68,9 @@ refresh against 7 for the four calls.
       four-call variant kept. (Phase 3)
 - [x] All four concept-enumerating docs describe `overview-bundle`, and the stale "18 concepts"
       counts are corrected to 21. (Phases 2 and 4)
-- [x] Windows (Git Bash), corrected in PR round 2. The first two runs (45952952774, 45954554101)
-      were green but ran none of the script tests: both files were gated off win32. With the
+- [x] Windows (Git Bash), corrected in PR round 2. The first two runs ran none of the script
+      tests, because both files were gated off win32: 45952952774 was green, and 45954554101's
+      unit-test job ended without finishing (it was never green). With the
       gates on `jq` alone, `windows.yml -f filter=spec-1647` ran them under Git Bash. Its first run
       found a CRLF bug in the search classification, fixed in ea435efc3. The re-run
       [45956770907](https://github.com/cluesmith/codev/actions/runs/45956770907) passed: all 5
@@ -77,6 +78,12 @@ refresh against 7 for the four calls.
       design. Not pinned on Windows: the timeout kill and temp cleanup (a Windows kill delivers
       no catchable signal, as the script documents) and the hostile-string round trip.
       (Review)
+- [x] Linux CI (ubuntu, Debian dash), corrected after PR round 3. The PR's own Unit Tests check
+      had failed on every push. The "full suite green" results cited until then were local macOS
+      runs. It caught a real Linux bug: Debian's dash forks for `sh -c <path>`, so the timeout
+      signalled the shell, not the script (fixed in acd756ad3). It also caught a harness flake:
+      Ubuntu 26.04's uutils `mkdir` is not exclusive under a race (fixed in b45518125). Unit Tests
+      on b45518125 passed 8 of 8 attempts (run 45970788650); before, about 1 in 3 failed. (Review)
 - [ ] Verify-phase item, still open by design: a browser check of the Work view on the
       architect's install.
 
@@ -117,6 +124,24 @@ refresh against 7 for the four calls.
   page, plus a lock trap in the fake `gh` (see Consultation Feedback). Round 2 moved the script
   tests onto native Windows. That found and fixed a CRLF bug, and it also added the source-only
   plan resolution and the pattern-equality test.
+- **After round 3: the PR's Linux CI.** Unit Tests (ubuntu) had failed on every push, unnoticed,
+  because the evidence I cited was local. Two causes:
+  - Debian and Ubuntu's dash carries patch 0004, which disables the "exec the last command of
+    `sh -c`" optimization. Node's `exec` timeout therefore SIGTERMed only the outer dash: the
+    script's traps never ran, `gh` outlived the limit and the temp directory stayed. Reproduced
+    on macOS with dash 0.5.12 built with that patch. The POSIX `execShellString` now runs a bare
+    absolute path to an existing `.sh` as `exec '<path>'`, the counterpart of Windows' existing
+    bare-script case. This touches platform code, so Windows run 45962329341 was dispatched.
+  - The fake `gh` intermittently lost a call on Linux, about one run in three, with a different
+    op missing each time. The runner image had moved to ubuntu-26.04, whose uutils `mkdir`
+    (`rust-coreutils` 0.8 to 0.10, fixed upstream in 0.11) reports success when it loses a race
+    to create the same directory. The fake's lock, and then its replacement `mkdir call.N` claim,
+    both relied on `mkdir` being exclusive. Two guesses (a counter race, dash) were wrong first.
+    A codex consult pushed for per-process evidence. An invocation log in the failure message
+    then showed two pids both claiming `n=1`. Calls are now claimed by creating `call.N` under
+    noclobber (`O_EXCL`, done by the shell itself). A guard `gh` after the fake on PATH and
+    `CODEV_DEBUG` stay as diagnostics. A regression test with an always-succeeding `mkdir`
+    first on PATH fails against the `mkdir` claim.
 
 ## Consultation Feedback
 
@@ -297,12 +322,17 @@ re-reviewed. The owner approved the spec as written.
   read therefore goes through shell redirection.
 - **Measuring points.** Rate-limit headers were unreliable, so costs were measured with
   `rateLimit(dryRun: true)` inside the real queries.
+- **A red PR check nobody watched.** The PR's Linux Unit Tests check failed on every push from
+  the first one, while local macOS runs were reported as "the full suite". The failure was a real
+  Debian/Ubuntu bug that macOS cannot show, because its `/bin/sh` execs the last command of `-c`.
 - **Windows evidence that was not evidence.** The first two Windows runs were green, but every
   script test had skipped there. Once the tests ran under Git Bash, they found a CRLF bug in the
   search classification on the first try (see Consultation Feedback, PR round 2).
 
 ### What Would Be Done Differently
 
+- Watch the PR's own checks after every push, and cite them, not a local run, as the suite
+  result. A platform-sensitive script (signals, process trees) needs the Linux CI result too.
 - Read the test gates before citing a platform run. The first two Windows runs were green but
   skipped every Spec 1647 script test, and the PR claimed Git Bash coverage on their strength
   until the second PR review caught it.
@@ -345,13 +375,22 @@ re-reviewed. The owner approved the spec as written.
 - Routed: cold — Architecture — a POSIX script that runs on native Windows must not parse
   `jq`'s text output: `jq.exe` writes CRLF and Git Bash strips only the last line ending of a
   capture. Decide with `jq -e`, print with `-j`, and pin it with a CRLF `jq` shim.
-- Hot tier: no change. `lessons-critical.md` is at its cap of 10, and these three are narrow to
+- Routed: cold — Architecture — on Debian and Ubuntu, `sh -c '<script path>'` forks (dash patch
+  0004), so a timeout signals the shell, not the script; the POSIX dispatcher now runs a bare
+  script path as `exec '<path>'`. Watch the PR's own checks, not only the local suite.
+- Routed: cold — Testing — on Ubuntu 26.04 (uutils `rust-coreutils` before 0.11) `mkdir` is not
+  exclusive under a race; claim with a noclobber (`O_EXCL`) file. Log each process's view in the
+  failure message when a Linux-only flake survives reasoning.
+- Hot tier: no change. `lessons-critical.md` is at its cap of 10, and these are narrow to
   forge scripts and `gh`. The "issue names code that is not on main" lesson is already covered by
   the hot lessons on checking existing work and verifying claims against the actual file.
 
 ## Flaky Tests
 
-No flaky tests encountered.
+No pre-existing flaky tests encountered. This PR's own end-to-end tests failed intermittently
+on Linux CI, a different one each run. The cause was the fake `gh`'s use of `mkdir` for
+exclusion, which Ubuntu 26.04's uutils `mkdir` does not provide under a race. It is fixed, and
+the job was re-run repeatedly (see Deviations and Spec Compliance).
 
 ## Follow-up Items
 
