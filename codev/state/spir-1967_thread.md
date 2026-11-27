@@ -1226,3 +1226,19 @@ a line this phase wrote.
   through `renderRemoteMessagingLine` over each Tower's real overview instead. The inbox,
   overview and send routes all normalize. This is older behaviour in workspace routing, not
   changed here.
+- **Porch checks.** `porch done 1967`: build 16.0 s, tests 241.1 s.
+- **Phase 11 review (iter 1): codex APPROVE (HIGH), no issues; claude APPROVE (HIGH).**
+  Claude left four non-blocking notes; nothing was disputed. They are handled as phase 10's
+  iter-2 nits were:
+  - **Fix in place in phase 12's commit (claude 1):** the inbox prints a remote sender's slug
+    and owner without `printable()`, unlike the record view. Both come from a MAC-verified
+    statement, so only something that can already write `global.db` reaches this; it is
+    defence in depth. One line closes it, with a test on a hostile stored slug.
+  - **Fix in place in phase 12's commit (claude 3):** `logEntryView` and `outboxMessageView`
+    do bounded per-row lookups on CLI paths; a precomputed queue-head map removes them.
+  - **Carried into phase 12 (claude 2):** `/api/inbox` now lists held-for-release rows, which
+    `heldCount` excludes, so the dashboard's "Held group length equals the badge" invariant
+    from #1450 holds only once phase 12's three-count indicator lands. Phase 12's Playwright
+    run asserts the grouping, not only the counts.
+  - **For phase 13's walkthrough (claude 4):** one manual run of the full `afx status`
+    command, since layer B checks its line through `renderRemoteMessagingLine`.
