@@ -9,11 +9,17 @@
  * temp directory, holding the three directories and an owner marker written by exclusive create:
  * the process's pid and a random nonce. The folder and the marker's text are recorded in this
  * module's environment variables, because the config is evaluated again in every worker, which
- * inherits them. A worker (a child of the recorded pid) or the same process again reuses the
- * folder only when its marker matches. Values inherited from anyone else (a caller's shell, an
- * earlier run) are ignored and never touched: this process makes a folder of its own. Removal
- * happens only in the process that made the folder, after the marker and path checks, so a
- * folder this run did not make is never removed.
+ * inherits them.
+ *
+ * Who reuses it: the same process evaluating the config again, and a Playwright worker whose
+ * parent made it, each only when the marker matches. A worker is told apart from the main process
+ * by what Playwright gives it before the config is evaluated: an IPC channel to its parent (it is
+ * forked) and `TEST_WORKER_INDEX` (`processHost.js`, `workerMain.js`, Playwright 1.59). The main
+ * process, started from a shell, has no channel, so it never adopts a recorded run, whoever the
+ * values name as its maker: it makes a folder of its own and leaves theirs untouched. A worker
+ * that finds no run made by its parent fails rather than making one. Removal happens only in the
+ * process that made the folder, after the marker and path checks, so a folder this run did not
+ * make is never removed.
  *
  * Free of any `@playwright/test` import, so the unit test loads it on its own.
  */
@@ -45,14 +51,18 @@ export type PeersDirs = Record<PeersDirName, string>;
 
 const DIR_NAMES = Object.keys(SUBDIRS) as PeersDirName[];
 
-/** The process asking: its own pid, and its parent's (a worker's parent is the main process). */
+/** The process asking: its own pid, its parent's, and whether it is a Playwright worker (whose parent is the main process). */
 export interface PeersProcess {
   pid: number;
   ppid: number;
+  isWorker: boolean;
 }
 
 function thisProcess(): PeersProcess {
-  return { pid: process.pid, ppid: process.ppid };
+  // Forked with an IPC channel and given its index before it evaluates the config; a process
+  // started from a shell has no channel.
+  const isWorker = process.env.TEST_WORKER_INDEX !== undefined && typeof process.send === 'function';
+  return { pid: process.pid, ppid: process.ppid, isWorker };
 }
 
 /** A run as the environment records it. */
@@ -156,10 +166,10 @@ function confirmMade(run: PeersRun, tmp: string): string {
 }
 
 /**
- * The run's directories. A run recorded by this process or by its parent (a worker evaluating
- * the config again) is reused once its marker is confirmed. Otherwise, with nothing recorded or
- * with values inherited from anyone else, this process makes a new run folder and records it,
- * replacing those values and leaving whatever they name untouched.
+ * The run's directories. A run recorded by this process (the config evaluated again), or, in a
+ * Playwright worker, by its parent, is reused once its marker is confirmed; a worker that finds no
+ * run made by its parent is refused. The main process otherwise makes a new run folder and records
+ * it, replacing any values it inherited and leaving whatever they name untouched.
  */
 export function peersDirs(
   env: NodeJS.ProcessEnv = process.env,
@@ -167,7 +177,13 @@ export function peersDirs(
   proc: PeersProcess = thisProcess(),
 ): { dirs: PeersDirs; created: boolean } {
   const recorded = recordedPeersRun(env);
-  if (recorded !== null && (recorded.ownerPid === proc.pid || recorded.ownerPid === proc.ppid)) {
+  if (recorded !== null && recorded.ownerPid === proc.pid) {
+    return { dirs: dirsUnder(confirmMade(recorded, tmp)), created: false };
+  }
+  if (proc.isWorker) {
+    if (recorded === null || recorded.ownerPid !== proc.ppid) {
+      throw new Error('A Playwright worker found no Peers run made by its parent: the main process makes the run before any worker starts.');
+    }
     return { dirs: dirsUnder(confirmMade(recorded, tmp)), created: false };
   }
   const root = mkdtempSync(path.join(realpathSync(tmp), PEERS_ROOT_PREFIX));

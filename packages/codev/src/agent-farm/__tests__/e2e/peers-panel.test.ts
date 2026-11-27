@@ -201,14 +201,47 @@ test.describe('Spec 1967: the Peers panel on Tower home', () => {
     await expect(page.getByTestId('peers-empty')).toHaveText('No other Towers are on your Codev Cloud account.');
   });
 
-  test('names and recipients from the route are text, never markup', async ({ page }) => {
+  test('names, recipients and an unknown mode from the route are text, never markup', async ({ page }) => {
     const hostile = '<img src=x onerror="window.__peersXss=1">';
-    await showPanel(page, panel({ towers: [tower(hostile, { mayMessage: [grant(hostile)] })] }));
+    const unknownMode = '<b>later</b>' as unknown as PeerGrantView['mode'];
+    await showPanel(page, panel({ towers: [tower(hostile, { mayMessage: [grant(hostile), grant('codev:architect:x', unknownMode)] })] }));
 
     await expect(page.getByTestId('peer-row')).toHaveCount(1);
-    await expect(page.getByTestId('peers-panel').locator('img')).toHaveCount(0);
+    await expect(page.getByTestId('peers-panel').locator('img, b')).toHaveCount(0);
     await expect(page.getByTestId('peer-row').locator('.peer-name')).toHaveText(hostile);
+    // A mode the page does not know is shown as it is, not relabelled as deliver.
+    await expect(page.getByTestId('peer-may')).toContainText('codev:architect:x (<b>later</b>)');
     expect(await page.evaluate(() => (window as unknown as { __peersXss?: number }).__peersXss)).toBeUndefined();
+  });
+
+  test('an answer slower than the next request never replaces the newer list', async ({ page }) => {
+    let calls = 0;
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let slowAnswered: () => void = () => {};
+    const slowFulfilled = new Promise<void>((resolve) => { slowAnswered = resolve; });
+    await page.route('**/api/peer/panel', async (route) => {
+      calls += 1;
+      const call = calls;
+      if (call === 2) await released;
+      const name = call === 1 ? 'first' : call === 2 ? 'stale' : 'fresh';
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(panel({ towers: [tower(name)] })) });
+      if (call === 2) slowAnswered();
+    });
+    await showPanel(page);
+    await expect(page.getByTestId('peer-row')).toHaveAttribute('data-peer', 'first');
+
+    // Two refreshes: the first answered only after the second.
+    await page.evaluate(() => {
+      const w = window as unknown as { refreshPeers: () => Promise<void> };
+      void w.refreshPeers();
+      return w.refreshPeers();
+    });
+    await expect(page.getByTestId('peer-row')).toHaveAttribute('data-peer', 'fresh');
+    release();
+    await slowFulfilled;
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId('peer-row')).toHaveAttribute('data-peer', 'fresh');
   });
 
   test('a route failure is said as one, not shown as an empty list', async ({ page }) => {

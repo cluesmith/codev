@@ -1372,3 +1372,29 @@ a line this phase wrote.
   - Layer A: 11 010 passed, 116 skipped, 263 s.
 - **Architect's 11:49Z request, answered at phase close:** how the panel shows turning on and
   granting through the cloud, and where the screenshots are.
+- **Porch checks (iter 2).** Build 19.2 s, tests 256.3 s.
+- **Phase 12 review (iter 2): codex REQUEST_CHANGES (HIGH); claude APPROVE (HIGH).** The
+  rebuttal is `1967-phase_12-iter2-rebuttals.md`.
+  - **Codex: the main process could still adopt a validly marked folder under its parent's
+    pid.** In Playwright's main process that parent is the caller's shell.
+    - Only a real Playwright worker now reuses its parent's run, and it must find one. A worker
+      has an IPC channel and `TEST_WORKER_INDEX`, both set before the config is evaluated
+      (`processHost.js`, `workerMain.js`, 1.59).
+    - The main process reuses only a run under its own pid. It ignores anything else and never
+      touches it.
+    - The unit tests went from 18 to 19, including codex's exact case.
+  - **Claude 1, fixed:** `refreshPeers()` now numbers its requests, so a slow older answer never
+    replaces a newer list. The new Playwright case for it fails with the guard removed; that
+    negative run left `tower.html` byte-identical.
+  - **Claude 3, fixed:** an unknown grant mode is shown as itself (escaped), not as "deliver".
+  - **Claude 2, for the architect:** the Peers section shows on every Tower home page, including
+    one never connected to Codev Cloud. Hiding it when the switch is off and the Tower is not
+    connected would take one condition, but it changes what the unmocked case asserts.
+- **A slip of mine, cleaned up.** One unit run, with the old tests against the new code, left one
+  `codev-peers-e2e-*` folder in tmp. It held empty subdirectories, and its owner pid was that
+  run's vitest worker, since gone. I removed it by its exact path. A rerun of the passing suite
+  added no folder.
+- **Re-verified.**
+  - Build: 17 s.
+  - Layer C, load 1.2, port 14102: 17 of 17 in 5.5 s, nothing left, port free.
+  - Layer A: 11 011 passed, 116 skipped, 246 s.

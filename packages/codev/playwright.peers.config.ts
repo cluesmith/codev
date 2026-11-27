@@ -11,9 +11,10 @@
  *   - **Its own directories.** In Playwright's main process it makes one run folder under the
  *     system temp directory, holding an agent-farm directory (the Tower's database and key), a
  *     socket directory, a `HOME` and an owner marker (its pid and a random nonce), and passes the
- *     three to the Tower. Workers, which evaluate this file again, reuse the folder only as children
- *     of that pid with the marker matching; values inherited from anyone else are ignored and never
- *     touched (`peers-isolation.ts`).
+ *     three to the Tower. Workers, which evaluate this file again, reuse the folder only as
+ *     Playwright workers (an IPC channel and a worker index) forked by that pid, with the marker
+ *     matching. The main process never adopts recorded values, whoever they name: it ignores them
+ *     and never touches what they name (`peers-isolation.ts`).
  *   - **A check before the Tower starts.** Each must be under the system temp directory, and none
  *     may be or contain the live agent-farm directory, the default socket directory or the real home.
  *   - **Cleanup.** The global teardown, in the process that made the folder, stops the Tower and

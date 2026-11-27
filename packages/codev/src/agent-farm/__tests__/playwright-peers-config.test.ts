@@ -5,8 +5,10 @@
  *
  * What is proven: the config refuses an unset or live port before it makes anything; loaded twice
  * (as Playwright's main process and then a worker do), it finds one run folder, under the system
- * temp directory; values a caller supplies are never adopted and what they name is never removed
- * (a pre-existing folder, a forged or missing owner marker, a run recorded by another process);
+ * temp directory; values a caller supplies are never adopted by the main process and what they
+ * name is never removed (a pre-existing folder, one validly marked as made by the main process's
+ * parent, a forged or missing owner marker, a run recorded by another process); only a Playwright
+ * worker reuses its parent's run, and one that finds none is refused;
  * the path check refuses the live agent-farm directory, the default socket directory, the real
  * home, anything containing one of them, a symlink to one, and a path outside the system temp
  * directory; and the teardown's removal leaves none of the run's directories. Every directory made
@@ -14,7 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -154,37 +156,54 @@ describe('peersDirs', () => {
     expect(peersDirs(env, tmp)).toEqual({ dirs: first.dirs, created: false });
   });
 
-  it('a worker, a child of the process that made the run, finds the same folder', () => {
+  it('a Playwright worker, forked by the process that made the run, finds the same folder', () => {
     const env: NodeJS.ProcessEnv = {};
     const tmp = scratchDir();
-    const main = peersDirs(env, tmp, { pid: 4242, ppid: 1 });
-    const worker = peersDirs({ ...env }, tmp, { pid: 5151, ppid: 4242 });
+    const main = peersDirs(env, tmp, { pid: 4242, ppid: 1, isWorker: false });
+    const worker = peersDirs({ ...env }, tmp, { pid: 5151, ppid: 4242, isWorker: true });
     expect(worker).toEqual({ dirs: main.dirs, created: false });
   });
 
-  it('never adopts a folder a caller supplies, whoever it claims made it, and leaves it as it was', () => {
-    const tmp = realpathSync(tmpdir());
-    // Recorded by another process: ignored, a run of its own made.
+  it('a worker that finds no run made by its parent is refused, and makes nothing', () => {
+    const tmp = scratchDir();
+    expect(() => peersDirs({}, tmp, { pid: 5151, ppid: 4242, isWorker: true })).toThrow(/found no Peers run made by its parent/);
     const other = callersFolder(PEERS_ROOT_PREFIX);
     writeFileSync(path.join(other.root, PEERS_OWNER_FILE), `${OTHER_PID}:${NONCE}`);
-    const env: NodeJS.ProcessEnv = { [PEERS_RUN_VARS.root]: other.root, [PEERS_RUN_VARS.owner]: `${OTHER_PID}:${NONCE}` };
-    const made = peersDirs(env, tmp);
-    expect(made.created).toBe(true);
-    expect(env[PEERS_RUN_VARS.root]).not.toBe(other.root);
-    removePeersDirs(env);
-    expect(existsSync(other.keep)).toBe(true);
-    expect(existsSync(path.dirname(made.dirs.agentFarm))).toBe(false);
-
-    // Claiming this process, or its parent, without a marker, with a forged one, or outside the run prefix: refused.
+    const env = { [PEERS_RUN_VARS.root]: other.root, [PEERS_RUN_VARS.owner]: `${OTHER_PID}:${NONCE}` };
+    expect(() => peersDirs(env, tmp, { pid: 5151, ppid: 4242, isWorker: true })).toThrow(/found no Peers run made by its parent/);
+    // Its parent's pid, but no marker: refused as not made by this config.
     const unmarked = callersFolder(PEERS_ROOT_PREFIX);
-    for (const pid of [process.pid, process.ppid]) {
-      expect(() => peersDirs({ [PEERS_RUN_VARS.root]: unmarked.root, [PEERS_RUN_VARS.owner]: `${pid}:${NONCE}` }, tmp)).toThrow(/no owner marker/);
+    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: unmarked.root, [PEERS_RUN_VARS.owner]: `4242:${NONCE}` }, realpathSync(tmpdir()), { pid: 5151, ppid: 4242, isWorker: true })).toThrow(/no owner marker/);
+    expect(readdirSync(tmp)).toEqual([]);
+    for (const folder of [other, unmarked]) expect(existsSync(folder.keep)).toBe(true);
+  });
+
+  it('the main process never adopts a folder a caller supplies, even one validly marked as its parent\'s, and leaves it as it was', () => {
+    const tmp = realpathSync(tmpdir());
+    const main = { pid: process.pid, ppid: process.ppid, isWorker: false };
+    // Validly marked as made by another process, and as made by this process's parent (the
+    // caller's shell): both ignored, a run of its own made and removed, the caller's kept.
+    for (const claimed of [OTHER_PID, process.ppid]) {
+      const theirs = callersFolder(PEERS_ROOT_PREFIX);
+      writeFileSync(path.join(theirs.root, PEERS_OWNER_FILE), `${claimed}:${NONCE}`);
+      const env: NodeJS.ProcessEnv = { [PEERS_RUN_VARS.root]: theirs.root, [PEERS_RUN_VARS.owner]: `${claimed}:${NONCE}` };
+      const made = peersDirs(env, tmp, main);
+      expect(made.created).toBe(true);
+      expect(env[PEERS_RUN_VARS.root]).not.toBe(theirs.root);
+      expect(path.dirname(made.dirs.agentFarm)).not.toBe(theirs.root);
+      removePeersDirs(env);
+      expect(existsSync(theirs.keep)).toBe(true);
+      expect(existsSync(path.dirname(made.dirs.agentFarm))).toBe(false);
     }
+
+    // Claiming this very process: without a marker, with a forged one, or outside the run prefix, refused.
+    const unmarked = callersFolder(PEERS_ROOT_PREFIX);
+    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: unmarked.root, [PEERS_RUN_VARS.owner]: `${process.pid}:${NONCE}` }, tmp, main)).toThrow(/no owner marker/);
     const forged = callersFolder(PEERS_ROOT_PREFIX);
     writeFileSync(path.join(forged.root, PEERS_OWNER_FILE), `${process.pid}:${'f'.repeat(32)}`);
-    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: forged.root, [PEERS_RUN_VARS.owner]: `${process.pid}:${NONCE}` }, tmp)).toThrow(/not this run's/);
+    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: forged.root, [PEERS_RUN_VARS.owner]: `${process.pid}:${NONCE}` }, tmp, main)).toThrow(/not this run's/);
     const plain = callersFolder();
-    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: plain.root, [PEERS_RUN_VARS.owner]: `${process.pid}:${NONCE}` }, tmp)).toThrow(/not a codev-peers-e2e-\* folder/);
+    expect(() => peersDirs({ [PEERS_RUN_VARS.root]: plain.root, [PEERS_RUN_VARS.owner]: `${process.pid}:${NONCE}` }, tmp, main)).toThrow(/not a codev-peers-e2e-\* folder/);
     for (const folder of [unmarked, forged, plain]) expect(existsSync(folder.keep)).toBe(true);
   });
 

@@ -1861,17 +1861,20 @@
     // `afx peer list` keeps, so it is asked every 30 seconds rather than with each refresh.
     const PEERS_REFRESH_MS = 30000;
 
+    // Each request's number: an answer slower than the next poll is dropped when a later request
+    // has been made, so an older list never replaces a newer one.
+    let peersGeneration = 0;
+
     async function refreshPeers() {
+      const generation = ++peersGeneration;
+      let state;
       try {
         const res = await authFetch('./api/peer/panel');
-        if (!res.ok) {
-          renderPeers({ kind: 'error', why: 'Tower answered ' + res.status });
-          return;
-        }
-        renderPeers({ kind: 'ready', panel: await res.json() });
+        state = res.ok ? { kind: 'ready', panel: await res.json() } : { kind: 'error', why: 'Tower answered ' + res.status };
       } catch (err) {
-        renderPeers({ kind: 'error', why: err.message });
+        state = { kind: 'error', why: err.message };
       }
+      if (generation === peersGeneration) renderPeers(state);
     }
 
     // A time as the panel shows it: the viewer's local time, with the exact instant on hover.
@@ -1883,7 +1886,10 @@
     }
 
     function peerModeText(mode) {
-      return mode === 'hold' ? 'hold for release' : 'deliver';
+      if (mode === 'hold') return 'hold for release';
+      if (mode === 'deliver') return 'deliver';
+      // A mode this page does not know is shown as it is, never relabelled.
+      return escapeHtml(String(mode));
     }
 
     // What one Tower may message here: its grants, or nothing.
