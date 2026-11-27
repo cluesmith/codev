@@ -60,8 +60,19 @@ vi.mock('../lib/cloud-config.js', () => ({
   maskApiKey: (key: string) => `***${key.slice(-4)}`,
   DEFAULT_CLOUD_URL: 'https://cloud.codevos.ai',
 }));
-vi.mock('../db/index.js', () => ({ getGlobalDb: () => ({ stand: 'in for the global database' }) }));
-vi.mock('../peer/switch.js', () => ({ readSwitch: (db: unknown) => mockReadSwitch(db) }));
+// A real, empty global database: since plan phase 6 a verified request reaches the receiver,
+// which reads it. The switch is the mock's, for the handshake and the receiver alike.
+vi.mock('../db/index.js', async () => {
+  const { default: Database } = await import('better-sqlite3');
+  const { GLOBAL_SCHEMA } = await import('../db/schema.js');
+  const db = new Database(':memory:');
+  db.exec(GLOBAL_SCHEMA);
+  return { getGlobalDb: () => db };
+});
+vi.mock('../peer/switch.js', () => ({
+  readSwitch: (db: unknown) => mockReadSwitch(db),
+  isRemoteMessagingOn: (db: unknown) => mockReadSwitch(db).state === 'on',
+}));
 
 const { initTunnel, shutdownTunnel, getTunnelPeerSession, handleTunnelEndpoint } = await import('../servers/tower-tunnel.js');
 
@@ -1033,7 +1044,7 @@ describe('the secret never reaches a log', () => {
     }
   }, 40_000);
 
-  it("through tower-tunnel's wiring: its logger, the stub handler, the switch re-announced on reconnect, the exposed session", async () => {
+  it("through tower-tunnel's wiring: its logger, the receiver, the switch re-announced on reconnect, the exposed session", async () => {
     // tower-tunnel's client reads the real clock, so the stand-in issues statements on it too.
     clock = Date.now();
     const configDir = mkdtempSync(join(tmpdir(), 'codev-peer-entry-'));
@@ -1061,7 +1072,7 @@ describe('the secret never reaches a log', () => {
         remember();
         expect(getTunnelPeerSession()).toMatchObject({ towerId: r.towerId, slug: r.slug, relay: 'available', relayProtocols: [1] });
 
-        // A verified request is refused as remote-off by the Tower's stub handler.
+        // A verified request reaches the receiver, which refuses it at step 10: the switch is off.
         expectAnswer(await relay.forward(r.towerId), { outcome: 'refused', reason: 'remote-off' });
         expectAnswer(await relay.forward(r.towerId, { secret: randomBytes(32) }), NOT_VERIFIED);
 
@@ -1073,7 +1084,8 @@ describe('the secret never reaches a log', () => {
           await waitFor(async () => relay.sessionsOpened(r.towerId) > before && getTunnelPeerSession() !== null, 15_000, 20),
         ).toBe(true);
         remember();
-        expectAnswer(await relay.forward(r.towerId), { outcome: 'refused', reason: 'remote-off' });
+        // The receiver now reads the switch as on, and stops this one at step 11 instead.
+        expectAnswer(await relay.forward(r.towerId, { statement: { sameOwner: false } }), { outcome: 'refused', reason: 'no-grant' });
         shutdownTunnel();
       });
       expect(relay.handshakes.filter((h) => h.towerId === r.towerId).map((h) => h.peer)).toEqual([

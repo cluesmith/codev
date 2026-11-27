@@ -83,7 +83,8 @@ const MAC_BYTES = 32;
 
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/;
 const CLOUD_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** A Tower's slug as a statement carries it (`fromTowerSlug`). */
+export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const HANDLE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const STATEMENT_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;

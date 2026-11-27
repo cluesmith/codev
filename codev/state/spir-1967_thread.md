@@ -584,3 +584,60 @@ above is struck through. A test breaks both invariants by hand and finds neither
   Each new test fails with its fix removed. Not done, by ruling: the cloud's close and
   `auth_error` reasons are not echo-checked. That is recorded as a known residual in
   `codev/reviews/1967-tower-to-tower-messaging-stage.md`, started now for it.
+
+## Phase 6: receiving a message (2026-11-27)
+
+Built: the receiver (`peer/receiver.ts`, steps 9 to 16 of contract section 5), the inbound
+records and the clock surface (`peer/records.ts`), the remote frame and its normalisation
+(`utils/message-format.ts`), `KeyedSerializer.runWithin`, the 5-second answer deadline (the
+body read shares it), the drain-time recheck in `deliverAgentMail`, and eager withdrawal in the
+peer routes. `tower-tunnel.ts` now hands verified requests to the receiver and entry events to
+the record; the phase 5 stand-in refusal is gone.
+
+Decisions, for the architect's reading:
+- **The order inside step 16.** The `peer_accepted` row and the mailbox row are one
+  transaction, `peer_accepted` first. A hold grant stores `release_hold = 1` and answers `held`,
+  `held-for-release`, with no gate attempt. Otherwise the gate attempt runs within the
+  deadline, and the answer is read back from the accepted row. So the answer is always the row's
+  state, even when the attempt throws (logged ERROR with the error class; the row stays held).
+- **A query is refused `no-grant` until phase 10**, where discovery is built.
+- **R sends no `detail`.** S writes its own text from the reason.
+- **Eager withdrawal on a hold grant too.** The plan names switch-off and revoke. A hold grant
+  that now covers held mail withdraws it in the same transaction, because hold wins. Off then on
+  releases nothing.
+- **The clock surface is read from the record** (`clockSkewSince`: the last step 7 or sentAt-ahead
+  refusal within 10 minutes). No in-memory state, and it survives a restart.
+- **The frame marker is `###`** (residual in the review): neither spec spells it out.
+- **Recipient kind of a stored row** for the recheck: an architect if the workspace lists it,
+  else a builder. It gives the same coverage answer as the true kind.
+- Two earlier-phase tests changed by intent: the wiring test in `peer-entry-point.test.ts`
+  (an in-memory database, and `sameOwner: false` now answers `no-grant`) and the switch-on
+  forward in `peer-entry-point.e2e.test.ts` (same).
+
+Surprises:
+- Five test files mock `tower-messages.js` with an explicit list of real functions, so a new
+  import from it into `tower-routes.ts` broke them. `tower-routes.ts` is left as it was, and
+  the reverse lookup the receiver needs lives inside `resolveRemoteRecipient`.
+- agy is not a harness a `.builder-start.sh` can name (only claude, codex and opencode are).
+  The gate matches agy by the command's own name, so layer B's agy echo terminal runs from an
+  executable named `agy`.
+
+Tests:
+- Layer A: `peer-receiver.test.ts` (49), `peer-frame-invariant.test.ts` (4: 600 seeded cases
+  per run, 30 more seeds checked by hand, `PEER_FRAME_SEED` reproduces one), and `runWithin` in
+  `write-queue.test.ts`. 65 tests, 1.51 to 1.59 s over 8 runs. One order-dependent assertion
+  (two rows at one instant) failed once and was fixed.
+- Layer B `peer-receive.e2e.test.ts`: 6/6 in 17 s at load 2.
+  - no grant, then the replay, then the grant;
+  - an inert architect held `no-profile`;
+  - a claude echo builder delivered in the remote frame;
+  - a shell and an unknown id refused;
+  - an agy echo builder whose terminal lock an 800-line `--interrupt` holds for about 8 s:
+    answered `held busy` while the interrupt was still writing, delivered once it freed.
+
+  The first run failed in its own agy setup (the profile, above); fixed and rerun.
+  `peer-entry-point.e2e` and `two-towers-harness.e2e`: 12/12.
+
+Residual (in the review): a 48 KiB agy body of very short lines takes longer to write than C's
+15 s relay timeout, so S can see `no-answer` for a message that is delivered. S retries, and
+the duplicate reports the true state.

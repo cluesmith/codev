@@ -36,6 +36,9 @@ import {
 } from '../utils/workspace-address.js';
 import { isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import type { CrossWorkspaceOrigin, ReplyRoute } from '../utils/message-format.js';
+import type { PeerWireAddress } from '@cluesmith/codev-types';
+import type { GrantWorld } from '../peer/grants.js';
+import type { RecipientLookup } from '../peer/receiver.js';
 
 // ============================================================================
 // Spec 755 error messages — exported as constants so producer and asserter
@@ -628,6 +631,47 @@ function resolveRegistryArchitect(
 
   // The front door: 'main' first, then the first registered.
   return { workspacePath, agent: main ? DEFAULT_ARCHITECT_NAME : architects[0].name, kind: 'architect' };
+}
+
+// ============================================================================
+// Spec 1967: a message from another of my Towers
+// ============================================================================
+
+/** The world grants are read against, as this Tower is now (the peer routes build the same one). */
+export function liveGrantWorld(): GrantWorld {
+  return {
+    registered: getRegisteredWorkspaces(),
+    running: runningWorkspacePaths(),
+    architectsOf: (workspacePath) => getArchitects(workspacePath).map((a) => a.name),
+  };
+}
+
+/**
+ * Step 13 for a message from another Tower: the recipient its address names here, resolved
+ * as a send from outside the workspace would be (bare `architect` is the front door), live
+ * terminals first and then the registry, as `/api/send` does. A builder is named by its id
+ * or a tail of it; an architect by its name; a shell is never a recipient. An address that
+ * matches nothing, or several builders, is `no-such-agent`.
+ */
+export function resolveRemoteRecipient(address: PeerWireAddress): RecipientLookup {
+  const target = address as AgentAddress;
+  const live = resolveTarget(target);
+  if (!isResolveError(live)) {
+    const entry = getWorkspaceTerminals().get(live.workspacePath);
+    // A bare `architect` resolves to the agent `architect`: its name is the terminal's.
+    const architect = [...(entry?.architects ?? [])].find(([, terminalId]) => terminalId === live.terminalId)?.[0];
+    if (architect !== undefined) {
+      return { found: true, recipient: { workspacePath: live.workspacePath, kind: 'architect', name: architect } };
+    }
+    if (entry?.builders.get(live.agent) === live.terminalId) {
+      return { found: true, recipient: { workspacePath: live.workspacePath, kind: 'builder', name: live.agent } };
+    }
+    return { found: false, reason: 'not-addressable' };
+  }
+  if (live.code !== 'NOT_FOUND') return { found: false, reason: 'no-such-agent' };
+  const registered = resolveAgentInRegistry(target);
+  if (isResolveError(registered)) return { found: false, reason: 'no-such-agent' };
+  return { found: true, recipient: { workspacePath: registered.workspacePath, kind: registered.kind, name: registered.agent } };
 }
 
 // ============================================================================

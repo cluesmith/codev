@@ -6,7 +6,7 @@
  * neither wedges the key nor leaks the caller's rejection.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KeyedSerializer } from '../servers/write-queue.js';
 
 /** A deferred with a manual resolve, for driving overlap deterministically. */
@@ -118,5 +118,98 @@ describe('KeyedSerializer', () => {
     expect(s.isActive('k')).toBe(true);
     d.resolve();
     await p;
+  });
+});
+
+/**
+ * `runWithin` (Spec 1967, plan phase 6): the receiver's deadline on the per-agent wait. On
+ * fake timers, so "in time" and "too late" are exact, never raced against a real clock.
+ */
+describe('KeyedSerializer.runWithin', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('a turn that comes in time runs, and resolves with its result', async () => {
+    const s = new KeyedSerializer();
+    const hold = deferred();
+    const first = s.run('k', () => hold.promise);
+    const within = s.runWithin('k', 5_000, async () => 'ran');
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    hold.resolve();
+    await first;
+    await expect(within).resolves.toEqual({ started: true, value: 'ran' });
+  });
+
+  it('an idle key starts at once, whatever the deadline', async () => {
+    const s = new KeyedSerializer();
+    await expect(s.runWithin('k', 0, async () => 7)).resolves.toEqual({ started: true, value: 7 });
+  });
+
+  it('a turn that does not come in time resolves as not started, and its function is never called', async () => {
+    const s = new KeyedSerializer();
+    const hold = deferred();
+    const first = s.run('k', () => hold.promise);
+    let called = false;
+    const within = s.runWithin('k', 5_000, async () => {
+      called = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(within).resolves.toEqual({ started: false });
+
+    // The predecessor frees the key after the deadline: the skipped turn still never runs.
+    hold.resolve();
+    await first;
+    await vi.runAllTimersAsync();
+    expect(called).toBe(false);
+  });
+
+  it('a skipped turn keeps the order: its successor runs only after the predecessor, and then runs', async () => {
+    const s = new KeyedSerializer();
+    const hold = deferred();
+    const events: string[] = [];
+    const first = s.run('k', async () => {
+      await hold.promise;
+      events.push('first');
+    });
+    const skipped = s.runWithin('k', 1_000, async () => {
+      events.push('skipped');
+    });
+    const after = s.run('k', async () => {
+      events.push('after');
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(skipped).resolves.toEqual({ started: false });
+    expect(events).toEqual([]);
+    hold.resolve();
+    await first;
+    await after;
+    expect(events).toEqual(['first', 'after']);
+  });
+
+  it('a rejected predecessor does not wedge the key', async () => {
+    const s = new KeyedSerializer();
+    const failing = s.run('k', async () => {
+      throw new Error('predecessor failed');
+    });
+    const within = s.runWithin('k', 1_000, async () => 'still runs');
+    await expect(failing).rejects.toThrow('predecessor failed');
+    await expect(within).resolves.toEqual({ started: true, value: 'still runs' });
+  });
+
+  it('a started function that rejects rejects the caller, and the key moves on', async () => {
+    const s = new KeyedSerializer();
+    await expect(
+      s.runWithin('k', 1_000, async () => {
+        throw new Error('pass failed');
+      }),
+    ).rejects.toThrow('pass failed');
+    await expect(s.run('k', async () => 'next')).resolves.toBe('next');
   });
 });

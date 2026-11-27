@@ -685,21 +685,29 @@ export function getAccepted(db: Database.Database, peerTowerId: string, messageI
 }
 
 /**
- * What a second arrival of an accepted message is told (contract section 5, step 9, same
- * payload hash): the first message's current state, from this row alone, so it holds after
- * the mailbox row has been pruned. A dismissed message is refused as `dismissed`.
+ * An accepted message's current state as an answer, from this row alone, so it holds after
+ * the mailbox row has been pruned. A dismissed message is refused as `dismissed`. The first
+ * arrival is answered with it once its gate attempt is over.
  */
-export function duplicateAnswer(row: PeerAcceptedRow): ReceiverAnswer {
+export function currentAnswer(row: PeerAcceptedRow): Extract<ReceiverAnswer, { outcome: 'delivered' | 'held' }> | { outcome: 'refused'; reason: 'dismissed' } {
   switch (row.state) {
     case 'delivered':
-      return { outcome: 'delivered', duplicate: true };
+      return { outcome: 'delivered' };
     case 'held':
       // checkedState refuses a held row without a reason on write and on read.
       if (row.reason === null) throw new Error(`peer store: accepted message ${row.messageId} is held with no reason`);
-      return { outcome: 'held', reason: row.reason, duplicate: true };
+      return { outcome: 'held', reason: row.reason };
     case 'dismissed':
-      return { outcome: 'refused', reason: 'dismissed', duplicate: true };
+      return { outcome: 'refused', reason: 'dismissed' };
   }
+}
+
+/**
+ * What a second arrival of an accepted message is told (contract section 5, step 9, same
+ * payload hash): the first message's {@link currentAnswer}, marked as a duplicate.
+ */
+export function duplicateAnswer(row: PeerAcceptedRow): ReceiverAnswer {
+  return { ...currentAnswer(row), duplicate: true };
 }
 
 /** Messages from one peer accepted here and not yet delivered or dismissed (the receiver's per-peer cap). */

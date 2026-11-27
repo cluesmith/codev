@@ -396,6 +396,20 @@ export function release(db: Database.Database, id: string, now: number = Date.no
   })();
 }
 
+/**
+ * Held remote rows a delivery could still pick (`release_hold = 0`), oldest first; one peer's
+ * when `peerTowerId` is given. What a withdrawal re-evaluates when the switch goes off or a
+ * grant changes (Spec 1967).
+ */
+export function listHeldRemote(db: Database.Database, peerTowerId?: string): DbMailbox[] {
+  const where = "status = 'held' AND release_hold = 0 AND remote_tower_id IS NOT NULL";
+  return (
+    peerTowerId === undefined
+      ? db.prepare(`SELECT * FROM mailbox WHERE ${where} ORDER BY created_at ASC, id ASC`).all()
+      : db.prepare(`SELECT * FROM mailbox WHERE ${where} AND remote_tower_id = ? ORDER BY created_at ASC, id ASC`).all(peerTowerId)
+  ) as DbMailbox[];
+}
+
 /** Fetch a single row by id, or null if it does not exist. */
 export function getById(db: Database.Database, id: string): DbMailbox | null {
   const row = db.prepare('SELECT * FROM mailbox WHERE id = ?').get(id) as DbMailbox | undefined;

@@ -48,6 +48,7 @@ import {
   type OwnTower,
 } from '../peer/grants.js';
 import { HUMAN_APPROVAL_FLAG, readSwitch, setSwitch } from '../peer/switch.js';
+import { withdrawRemoteMail } from '../peer/receiver.js';
 import {
   listGrants,
   listTowerNames,
@@ -217,6 +218,10 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     };
   };
 
+  function logWithdrawn(count: number): void {
+    if (count > 0) deps.log('INFO', `Peer: ${count} held remote message(s) moved to held for release`);
+  }
+
   async function putSwitch(req: http.IncomingMessage): Promise<PeerSwitchResponse> {
     const body = await readObject(req);
     const state = body.state;
@@ -227,8 +232,16 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
       if (isOverTunnel(req)) refuseOverTunnel('Turning remote messaging on');
       requireHuman(optionalBoolean(body, 'humanApproved'), 'Turning remote messaging on', 'afx peer on');
     }
-    const change = setSwitch(deps.db(), state, deps.now());
+    // Switching off withdraws, in the same transaction, every held remote message: it moves to
+    // held for release. Switching on releases nothing; a human releases held mail.
+    const db = deps.db();
+    const now = deps.now();
+    const { change, withdrawn } = db.transaction(() => {
+      const change = setSwitch(db, state, now);
+      return { change, withdrawn: state === 'off' ? withdrawRemoteMail(db, deps.world(), now) : 0 };
+    })();
     if (change.changed) deps.log('INFO', `Peer: remote messaging turned ${state}`);
+    logWithdrawn(withdrawn);
     return switchResponse(change.changed);
   }
 
@@ -249,19 +262,22 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
 
     const db = deps.db();
     const now = deps.now();
-    const written = db.transaction(() =>
-      (targets.targets ?? []).map((target) => {
+    // A hold grant now covering held mail withdraws it (hold wins), in the same transaction.
+    const { written, withdrawn } = db.transaction(() => {
+      const written = (targets.targets ?? []).map((target) => {
         const before = listGrants(db, peer.towerId).find((g) => grantHasTarget(g, target));
         if (before && before.mode === mode) return { grant: before, change: 'unchanged' as const };
         const grant = putGrant(db, { peerTowerId: peer.towerId, ...target, mode }, now);
         return { grant, change: before ? ('mode-changed' as const) : ('added' as const) };
-      }),
-    )();
+      });
+      return { written, withdrawn: withdrawRemoteMail(db, deps.world(), now, peer.towerId) };
+    })();
     const views = viewsOf(written.map((w) => w.grant));
     const changes: PeerGrantChange[] = written.map((w, i) => ({ grant: views[i], change: w.change }));
     for (const c of changes) {
       if (c.change !== 'unchanged') deps.log('INFO', `Peer: grant ${c.change} for ${peer.name}: ${c.grant.recipient} (${c.grant.mode})`);
     }
+    logWithdrawn(withdrawn);
     return { tower: { towerId: peer.towerId, name: peer.name }, changes, remoteMessaging: readSwitch(db).state };
   }
 
@@ -287,10 +303,13 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
       );
     }
     const removed = viewsOf(chosen);
-    db.transaction(() => {
+    // Held mail the remaining grants no longer admit is withdrawn, in the same transaction.
+    const withdrawn = db.transaction(() => {
       for (const grant of chosen) removeGrant(db, grant);
+      return withdrawRemoteMail(db, deps.world(), deps.now(), peer.towerId);
     })();
     for (const view of removed) deps.log('INFO', `Peer: grant removed for ${peer.name}: ${view.recipient}`);
+    logWithdrawn(withdrawn);
     return { tower: { towerId: peer.towerId, name: peer.name }, removed };
   }
 

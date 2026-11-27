@@ -7,9 +7,9 @@
  *   again on a reconnect after a human turns it on;
  * - `POST /__tower/peer` on Tower's local port, with the local key and the tunnel marker,
  *   reaches no handler: the path exists only inside the tunnel client;
- * - a forward down the real tunnel is verified by the Tower and handed to its handler
- *   (phase 5's, which refuses as `remote-off`); a replay, one from an earlier session and a
- *   `/t/`-style request are not verified;
+ * - a forward down the real tunnel is verified by the Tower and handed to its receiver
+ *   (phase 6's, which refuses it as `remote-off` while the switch is off); a replay, one from
+ *   an earlier session and a `/t/`-style request are not verified;
  * - the session secret appears nowhere in either Tower's output.
  *
  * On demand, after `pnpm build`, never in porch's tests check (a `*.e2e.test.ts` is
@@ -135,8 +135,12 @@ describe('Spec 1967 phase 5: the peer entry point on real Towers', () => {
       remoteMessaging: 'on',
     });
     expect((await relay.replay(before, a.towerId)).json).toEqual({ v: 1, outcome: 'not-verified' });
-    // The handler is still phase 5's, which refuses every verified request.
-    expect((await relay.forward(a.towerId)).json).toEqual({ v: 1, outcome: 'refused', reason: 'remote-off' });
+    // The receiver reads the switch as on now, and stops this one at step 11 instead.
+    expect((await relay.forward(a.towerId, { statement: { sameOwner: false } })).json).toEqual({
+      v: 1,
+      outcome: 'refused',
+      reason: 'no-grant',
+    });
   }, 60_000);
 
   it("the session secret appears nowhere in either Tower's output", () => {

@@ -23,8 +23,12 @@ import {
 } from '../lib/tunnel-client.js';
 import type { PeerSwitchState } from '@cluesmith/codev-types';
 import { getGlobalDb } from '../db/index.js';
-import { encodeReceiverAnswer, type EncodedAnswer } from '../peer/contract.js';
 import { readSwitch } from '../peer/switch.js';
+import { createReceiver } from '../peer/receiver.js';
+import { recordEntryEvent } from '../peer/records.js';
+import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
+import { liveGrantWorld, resolveRemoteRecipient } from './tower-messages.js';
+import { deliverRemoteWithin, notifyHeldStateChanged } from './mailbox-wiring.js';
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -139,14 +143,6 @@ function stopMetadataRefresh(): void {
   }
 }
 
-/**
- * What a verified peer request is handed to until the receiver exists (Spec 1967, plan
- * phase 6): every one is refused as `remote-off`, so no remote message is accepted.
- */
-async function refuseVerifiedPeerRequest(): Promise<EncodedAnswer> {
-  return encodeReceiverAnswer({ outcome: 'refused', reason: 'remote-off' });
-}
-
 /** Whether the last read of the switch for `auth` failed, so its ERROR is logged once per failing run. */
 let switchReadFailing = false;
 
@@ -181,14 +177,31 @@ function readSwitchForAuth(): PeerSwitchState {
 
 /**
  * The tunnel's peer entry point, as this Tower supplies it (Spec 1967). The switch is read
- * from the database for every `auth`, so a reconnect states it as it stands. The audit hook
- * is a no-op until plan phase 6 wires it to the record and the clock-skew surface.
+ * from the database for every `auth`, so a reconnect states it as it stands. A verified
+ * request goes to the receiver (steps 9 to 16), which stores mail in the mailbox and makes
+ * one gate attempt; every request at the entry point is written to the inbound record,
+ * which is also what the clock surface reads.
  */
 const PEER_OPTIONS: TunnelPeerOptions = {
   remoteMessaging: readSwitchForAuth,
-  onVerifiedRequest: refuseVerifiedPeerRequest,
-  onEntryEvent: () => {},
+  onVerifiedRequest: createReceiver({
+    db: getGlobalDb,
+    now: Date.now,
+    world: liveGrantWorld,
+    // Tower-global, from the user-global layer, as the mailbox settings are read.
+    limits: () => resolvePeerSettings(loadConfig(os.homedir())).limits,
+    resolveRecipient: resolveRemoteRecipient,
+    deliverWithin: (workspacePath, toAgent, ms) => deliverRemoteWithin(logToTower, workspacePath, toAgent, ms),
+    onHeldChanged: notifyHeldStateChanged,
+    log: logToTower,
+  }),
+  onEntryEvent: (event) => recordEntryEvent(getGlobalDb(), event),
 };
+
+/** The Tower log, once the orchestrator has wired it. */
+function logToTower(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
+  _deps?.log(level, message);
+}
 
 /** What each `auth_ok` let this Tower take of the cloud's relay, for the log. Never the secret. */
 function logRelay(config: CloudConfig, identity: TunnelIdentity): void {

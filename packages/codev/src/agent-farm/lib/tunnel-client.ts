@@ -27,6 +27,7 @@ import {
   TOWER_KEY_HEADER,
   LEGACY_WEB_KEY_HEADER,
   PEER_MAX_PAYLOAD_BYTES,
+  PEER_RECEIVER_ANSWER_MS,
   PEER_STATEMENT_ID_MEMORY_MS,
   type PeerRequestKind,
   type PeerStatement,
@@ -100,6 +101,11 @@ export interface VerifiedPeerRequest {
   sessionId: string;
   /** This Tower's clock when the body had been read, the time steps 7 and 8 used. */
   receivedAt: number;
+  /**
+   * This Tower's clock by which the answer is due: {@link PEER_RECEIVER_ANSWER_MS} after the
+   * request arrived, a deadline the body read has already spent part of.
+   */
+  answerBy: number;
   statement: PeerStatement;
   /** The forwarded body exactly as received: the bytes `payloadSha256` covers. */
   payload: Uint8Array;
@@ -568,19 +574,26 @@ interface ReadBody {
   overCap: boolean;
 }
 
+/** Why a body was not read: the stream died first, or the body did not end within the deadline. */
+type UnreadBody = 'stream-died' | 'deadline';
+
 /**
  * Read a request body until it ends, or until it passes `cap` by at least a byte, when
- * reading stops (contract section 5, step 1). `null` when the stream dies first.
+ * reading stops (contract section 5, step 1). Gives up after `deadlineMs`: the body read
+ * spends the answer's deadline, so a body that has not ended by then is never answered late.
  */
-function readCappedBody(stream: http2.ServerHttp2Stream, cap: number): Promise<ReadBody | null> {
+function readCappedBody(stream: http2.ServerHttp2Stream, cap: number, deadlineMs: number): Promise<ReadBody | UnreadBody> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let length = 0;
     let settled = false;
-    const settle = (body: ReadBody | null) => {
+    const timer = setTimeout(() => settle('deadline'), Math.max(0, deadlineMs));
+    const settle = (body: ReadBody | UnreadBody) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       stream.removeListener('data', onData);
+      if (body === 'deadline') stream.pause();
       resolve(body);
     };
     const onData = (chunk: Buffer) => {
@@ -593,8 +606,8 @@ function readCappedBody(stream: http2.ServerHttp2Stream, cap: number): Promise<R
     };
     stream.on('data', onData);
     stream.once('end', () => settle({ bytes: Buffer.concat(chunks), overCap: false }));
-    stream.once('aborted', () => settle(null));
-    stream.once('close', () => settle(null));
+    stream.once('aborted', () => settle('stream-died'));
+    stream.once('close', () => settle('stream-died'));
   });
 }
 
@@ -1331,11 +1344,20 @@ export class TunnelClient {
       return;
     }
 
-    const body = await readCappedBody(stream, PEER_MAX_PAYLOAD_BYTES);
+    // The answer is due PEER_RECEIVER_ANSWER_MS after the request arrived, and the body read
+    // spends that time too (contract section 5).
+    const answerBy = now() + PEER_RECEIVER_ANSWER_MS;
+    const body = await readCappedBody(stream, PEER_MAX_PAYLOAD_BYTES, PEER_RECEIVER_ANSWER_MS);
     const receivedAt = now();
-    if (body === null) {
+    if (body === 'stream-died') {
       // The stream died before its body ended: there is nothing to answer on.
       this.emitEntryEvent(session, { outcome: 'not-verified', step: 1 }, NO_FACTS, receivedAt);
+      return;
+    }
+    if (body === 'deadline') {
+      // Step 1 never completed: no whole body arrived in time to verify.
+      this.emitEntryEvent(session, { outcome: 'not-verified', step: 1 }, NO_FACTS, receivedAt);
+      sendPeerAnswer(stream, notVerified(), true);
       return;
     }
 
@@ -1369,6 +1391,7 @@ export class TunnelClient {
     const answer = await peer!.onVerifiedRequest({
       sessionId: session.id,
       receivedAt,
+      answerBy,
       statement,
       payload: body.bytes,
     });

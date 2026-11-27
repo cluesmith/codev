@@ -18,7 +18,8 @@ import { PEER_MIN_RETENTION_DAYS } from '../peer/store.js';
 import { terminalDeliverySignals, type PtySession } from '../../terminal/pty-session.js';
 import type { SessionScreen } from '../../terminal/session-screen.js';
 import { getWorkspaceTerminals, getTerminalManager } from './tower-terminals.js';
-import { broadcastMessage, resolveAgentInRegistry, isResolveError } from './tower-messages.js';
+import { broadcastMessage, resolveAgentInRegistry, isResolveError, liveGrantWorld } from './tower-messages.js';
+import { remoteMailAllowed } from '../peer/receiver.js';
 import { submitMessagePaced } from './message-write.js';
 import {
   bufferLines,
@@ -51,6 +52,7 @@ import {
   type EscalationInfo,
   type LivenessInfo,
   type HeldOwnerNoticeInfo,
+  deliverAgentMailSerializedWithin,
 } from './mailbox-delivery.js';
 import type { MailboxEscalationPayload } from '@cluesmith/codev-types';
 
@@ -355,6 +357,8 @@ export function makeDeliveryPorts(log: LogFn): DeliveryPorts {
     onUnverifiedDelivery: (info) => surfaceUnverifiedDelivery(info),
     escalateHeldToOwner: (info) => escalateHeldToOwner(info, log),
     clearHeldOwnerNotice: (ws, agent) => clearHeldOwnerNotice(ws, agent),
+    // Spec 1967: the switch and the grants as they are at the instant of the write.
+    remoteDeliveryAllowed: (row) => remoteMailAllowed(getGlobalDb(), liveGrantWorld(), row),
     log: (m, level) => log(level ?? 'INFO', m),
     now: () => Date.now(),
   };
@@ -740,4 +744,25 @@ export function stopMailboxDrainer(): void {
 /** The live drainer (liveness-telemetry streaks; Phase 7 surfaces them). */
 export function getMailboxDrainer(): MailboxDrainer {
   return ensureDrainer();
+}
+
+/** The held set changed outside a delivery pass (Spec 1967: a remote message was stored). */
+export function notifyHeldStateChanged(): void {
+  broadcastHeldStateChange();
+}
+
+/**
+ * One gate attempt for a remote message's agent, as `/api/send` makes for a local one, if
+ * the agent's turn on the per-agent serializer comes within `ms` (Spec 1967). A pass that
+ * ran hands its outcome to the drainer, so a hold on recent input arms the same re-drain.
+ */
+export async function deliverRemoteWithin(
+  log: LogFn,
+  workspacePath: string,
+  toAgent: string,
+  ms: number,
+): Promise<{ started: boolean }> {
+  const result = await deliverAgentMailSerializedWithin(makeDeliveryPorts(log), getGlobalDb(), workspacePath, toAgent, ms);
+  if (result.started) getMailboxDrainer().noteOutcome(workspacePath, toAgent, result.value);
+  return { started: result.started };
 }
