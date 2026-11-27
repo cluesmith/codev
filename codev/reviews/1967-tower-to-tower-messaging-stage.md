@@ -23,6 +23,10 @@ it.*
 Porch closes a plan phase at its 3-iteration ceiling when the last round still has a
 REQUEST_CHANGES. The fix for that round then gets no consult review before the next phase.
 
+- **Phase 5 (the tunnel's peer entry point).** The iteration 3 fix, `c21f5b932`, had no consult
+  round. The architect ran the codex review (APPROVE) and the claude review (COMMENT) of it
+  themselves (main, 2026-11-27T03:31Z and 03:36Z), and asked for one small follow-up commit
+  with no review round: `e05573ba2`.
 - **Phase 7 (peer listing and the cloud client).** The iteration 3 fix, `3cd856ef1`, was not
   re-reviewed by consult. The architect read its source diff, ran the three test files it
   touches (86 passed) and found nothing to change (main, 2026-11-27T06:36Z).

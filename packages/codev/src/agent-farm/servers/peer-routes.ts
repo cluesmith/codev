@@ -1,5 +1,5 @@
 /**
- * The local Tower routes behind `afx peer on|off|list|grants|grant|revoke|limits` (Spec 1967).
+ * The local Tower routes behind `afx peer on|off|list|grants|grant|revoke|limits|show` (Spec 1967).
  *
  * Reached only through `handleRequest`'s key check, like every other route. Most are the
  * receiving Tower's own decisions about who may message whom, made by its owner:
@@ -11,6 +11,7 @@
  *   POST /api/peer/grants         add grants (a human's act)
  *   POST /api/peer/grants/revoke  remove grants
  *   GET  /api/peer/limits         the limits this Tower enforces itself, and Codev Cloud's
+ *   GET  /api/peer/show           what a peer lets this Tower message ?tower=<tower-ref>, asked of it
  *
  * Turning the switch on and adding a grant widen who may put text into an agent's prompt,
  * so each requires `humanApproved: true`, which the CLI sends only for
@@ -25,19 +26,21 @@
 
 import type http from 'node:http';
 import type Database from 'better-sqlite3';
-import type {
-  PeerCloudRelay,
-  PeerGrantChange,
-  PeerGrantModeName,
-  PeerGrantResponse,
-  PeerGrantsResponse,
-  PeerGrantView,
-  PeerLimitsResponse,
-  PeerRevokeResponse,
-  PeerSwitchReport,
-  PeerSwitchResponse,
-  PeerSwitchState,
-  PeerTowersResponse,
+import {
+  REMOTE_REFUSED_ERROR,
+  type PeerCloudRelay,
+  type PeerGrantChange,
+  type PeerGrantModeName,
+  type PeerGrantResponse,
+  type PeerGrantsResponse,
+  type PeerGrantView,
+  type PeerLimitsResponse,
+  type PeerRevokeResponse,
+  type PeerShowResponse,
+  type PeerSwitchReport,
+  type PeerSwitchResponse,
+  type PeerSwitchState,
+  type PeerTowersResponse,
 } from '@cluesmith/codev-types';
 import type { ResolvedPeerSettings } from '../../lib/config.js';
 import { parseJsonBody } from '../utils/server-utils.js';
@@ -55,6 +58,7 @@ import {
 import { HUMAN_APPROVAL_FLAG, readSwitch, setSwitch } from '../peer/switch.js';
 import { withdrawRemoteMail } from '../peer/receiver.js';
 import type { PeerListRefresh } from '../peer/peer-list.js';
+import type { PeerShowResult } from '../peer/sender.js';
 import {
   listGrants,
   listTowerNames,
@@ -85,6 +89,8 @@ export interface PeerCloudRouteDeps {
   tunnelUp(): boolean;
   /** Look at held mail now: the switch has just turned on, which may let it leave. */
   wakeOutbox(): void;
+  /** Ask a peer what it lets this Tower message (`afx peer show`): one discovery query, never held. */
+  show(tower: string): Promise<PeerShowResult>;
 }
 
 /** What the handlers read. Each is called per request, so a test can change the world between calls. */
@@ -400,6 +406,32 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     };
   }
 
+  /**
+   * `afx peer show`: the peer's answer, or its refusal as a send's is (`403 REMOTE_REFUSED`,
+   * the words in `message`). A query is never held, so there is nothing in between.
+   */
+  async function getShow(url: URL, res: http.ServerResponse): Promise<void> {
+    const tower = url.searchParams.get('tower');
+    if (tower === null) throw new RequestError(400, 'INVALID_PARAMS', "'tower' is required.");
+    const shown = await deps.cloud().show(tower);
+    if (shown.outcome === 'answered') {
+      const body: PeerShowResponse = {
+        tower: { towerId: shown.peer.towerId, name: shown.peer.name },
+        addresses: shown.addresses,
+        truncated: shown.truncated,
+      };
+      return sendJson(res, 200, body);
+    }
+    return sendJson(res, 403, {
+      error: REMOTE_REFUSED_ERROR,
+      message: printable(shown.message),
+      refusedBy: shown.by,
+      reason: shown.reason,
+      retryAfterSec: shown.retryAfterSec,
+      peer: shown.peer?.name ?? null,
+    });
+  }
+
   function getLimits(): PeerLimitsResponse {
     let settings: ResolvedPeerSettings;
     try {
@@ -435,6 +467,9 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
           break;
         case 'limits':
           if (method === 'GET') return sendJson(res, 200, getLimits());
+          break;
+        case 'show':
+          if (method === 'GET') return await getShow(url, res);
           break;
         default:
           return sendJson(res, 404, { error: 'NOT_FOUND', message: `No peer route ${url.pathname}` });

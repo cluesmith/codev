@@ -11,7 +11,7 @@
  * - the receiver ({@link recordInbound}), once for every request it was handed.
  *
  * At the sending Tower, one ({@link recordOutbound}): every relay call it makes, each retry
- * included, and every send it refuses before calling.
+ * and each discovery query included, and every send or query it refuses before calling.
  *
  * One row per attempt, except floods: requests that are not verified (at the receiver) and
  * attempts refused as rate limited (at either end) are counted, one row per sender, outcome,
@@ -24,6 +24,7 @@ import type Database from 'better-sqlite3';
 import type { PeerOutcome, PeerRequestKind } from '@cluesmith/codev-types';
 import type { PeerEntryEvent } from '../lib/tunnel-client.js';
 import type { ReceiverAnswer } from './contract.js';
+import type { DiscoveryAnswer } from './discovery.js';
 import { countAggregate, insertRecord } from './store.js';
 
 /** What the receiver knows of a request it was handed, at the point it answered. */
@@ -41,10 +42,10 @@ export interface InboundFacts {
 }
 
 /**
- * Record one answer the receiver gave. A `rate-limited` refusal is a flood and is counted
- * against the sending Tower; every other answer is its own row.
+ * Record one answer the receiver gave, to a message or a query. A `rate-limited` refusal is
+ * a flood and is counted against the sending Tower; every other answer is its own row.
  */
-export function recordInbound(db: Database.Database, facts: InboundFacts, answer: ReceiverAnswer): void {
+export function recordInbound(db: Database.Database, facts: InboundFacts, answer: ReceiverAnswer | DiscoveryAnswer): void {
   const reason = 'reason' in answer ? answer.reason : null;
   if (answer.outcome === 'refused' && answer.reason === 'rate-limited') {
     countAggregate(db, {
@@ -142,22 +143,25 @@ export function recordEntryEvent(db: Database.Database, event: PeerEntryEvent): 
 /** What the sending Tower knows of one outbound attempt. */
 export interface OutboundFacts {
   at: number;
+  /** A message, or a discovery query (`afx peer show`). */
+  kind: PeerRequestKind;
   /** The recipient Tower, once its name has resolved; `null` for a send refused before that. */
   peerTowerId: string | null;
   /** The recipient Tower as the address names it. */
   peerSlug: string;
-  /** Set once the message has been persisted. */
+  /** Set once the message has been persisted; a query's id once it is made. */
   messageId: string | null;
-  /** The sender as this Tower writes it; `null` when it has no address. */
+  /** The sender as this Tower writes it; `null` when it has no address, and for a query. */
   fromAddress: string | null;
-  toAddress: string;
+  /** The recipient's full address; `null` for a query, which names a Tower only. */
+  toAddress: string | null;
   /** The payload's size in bytes, once it has been built. */
   payloadSize: number | null;
 }
 
 /**
- * Record one outbound attempt: a relay call and its answer, or a send this Tower refused
- * before calling. An attempt refused as rate limited, by the cloud, by the receiving Tower
+ * Record one outbound attempt: a relay call and its answer, or a send or a query this Tower
+ * refused before calling. An attempt refused as rate limited, by the cloud, by the receiving Tower
  * or by this Tower's own cap on mail waiting for the peer, is a flood and is counted against
  * the peer; every other attempt is its own row.
  */
@@ -169,7 +173,7 @@ export function recordOutbound(db: Database.Database, facts: OutboundFacts, outc
   insertRecord(db, {
     direction: 'outbound',
     at: facts.at,
-    kind: 'message',
+    kind: facts.kind,
     peerTowerId: facts.peerTowerId,
     peerSlug: facts.peerSlug,
     tunnelSession: null,

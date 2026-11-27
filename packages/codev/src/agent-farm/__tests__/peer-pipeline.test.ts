@@ -142,6 +142,7 @@ class Pipeline {
       registration: () => this.registration,
       list: this.list,
       outbox: this.outbox,
+      client: this.client,
       limits: () => ({ waitingPerPeer: 50 }),
       log,
     });
@@ -160,6 +161,7 @@ class Pipeline {
         address.workspace === 'codev' && address.kind === 'architect' && (address.name ?? 'main') === 'main'
           ? { found: true, recipient: { workspacePath: CODEV, kind: 'architect', name: 'main' } }
           : { found: false, reason: 'no-such-agent' },
+      discoverable: () => [{ workspacePath: CODEV, addressName: 'codev', seats: [{ kind: 'architect', name: 'main', live: true }] }],
       deliverWithin: async (workspacePath, toAgent) => {
         if (!this.rDelivers) return { started: false };
         for (const row of mailbox.findHeldForAgent(this.dbR, workspacePath, toAgent, this.clock.now)) {

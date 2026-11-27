@@ -123,6 +123,7 @@ function peerSending(): { outbox: Outbox; sender: Sender } {
     registration: ownRegistration,
     list,
     outbox,
+    client,
     // Tower-global, from the user-global layer, as the mailbox settings are read.
     limits: () => resolvePeerSettings(loadConfig(os.homedir())).limits,
     log: (level, message) => log(level, message),
@@ -212,5 +213,6 @@ export function peerCloudRouteDeps(): PeerCloudRouteDeps {
     reportSwitch: reportSwitchChange,
     tunnelUp: () => tunnelSession() !== null,
     wakeOutbox: wakePeerOutbox,
+    show: (tower) => peerSender().show(tower),
   };
 }

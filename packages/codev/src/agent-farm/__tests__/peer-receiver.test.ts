@@ -43,7 +43,7 @@ import { PASTE_BEGIN, PASTE_END, submitMessagePaced } from '../servers/message-w
 import { isSubmissionInFlight, resetSubmissionChains, submitToSession } from '../servers/session-submit.js';
 import type { GateProfile, GateVerdict } from '../servers/render-gate.js';
 import type { PeerEntryEvent, VerifiedPeerRequest } from '../lib/tunnel-client.js';
-import { messagePayload } from './helpers/stand-in-relay.js';
+import { messagePayload, queryPayload } from './helpers/stand-in-relay.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 /** The walkthrough's moment (Spec 1940, stage 2). */
@@ -165,6 +165,16 @@ class Fixture {
     world: () => this.world,
     limits: () => this.limits,
     resolveRecipient: (address) => this.lookup(address),
+    discoverable: () => [
+      {
+        workspacePath: CODEV,
+        addressName: 'codev',
+        seats: [
+          ...this.world.architectsOf(CODEV).map((name) => ({ kind: 'architect' as const, name, live: true })),
+          { kind: 'builder' as const, name: BUILDER, live: true },
+        ],
+      },
+    ],
     deliverWithin: (workspacePath, toAgent, ms) => this.deliverWithin(workspacePath, toAgent, ms),
     onHeldChanged: () => {},
     log: (level, message) => this.logs.push(`${level} ${message}`),
@@ -503,9 +513,15 @@ describe('refusals before the persist', () => {
     });
   }
 
-  it('refuses a query until discovery exists (plan phase 10)', async () => {
-    expect(await f.receive(f.arrival({ statement: { kind: 'query' } }))).toEqual({ v: 1, outcome: 'refused', reason: 'no-grant' });
+  it('hands a query to discovery (plan phase 10): answered from the grants, with nothing stored', async () => {
+    expect(await f.receive(f.arrival({ statement: { kind: 'query' }, payload: queryPayload(f.clock.now) }))).toEqual({
+      v: 1,
+      outcome: 'answered',
+      truncated: false,
+      addresses: [{ address: { workspace: 'codev', kind: 'architect', name: 'main' }, live: true }],
+    });
     expectNothingStored();
+    expect(f.attempts).toEqual([]);
   });
 
   it('accepts a retry under a new statement once the missing grant is added', async () => {
@@ -718,6 +734,9 @@ describe('eager withdrawal through the peer routes', () => {
         reportSwitch: () => 'not-connected',
         tunnelUp: () => false,
         wakeOutbox: () => {},
+        show: async () => {
+          throw new Error('these routes ask no peer');
+        },
       }),
       log: () => {},
     };

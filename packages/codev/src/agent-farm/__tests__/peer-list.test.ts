@@ -445,6 +445,9 @@ describe("walkthrough step 1: 'afx peer list' on mbp, with the switch off", () =
         },
         tunnelUp: () => true,
         wakeOutbox: () => {},
+        show: async () => {
+          throw new Error('these routes ask no peer');
+        },
       }),
       log: (level, message) => logged.push(`${level} ${message}`),
     });

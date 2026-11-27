@@ -89,6 +89,11 @@ class Fixture {
           return this.first(row);
         },
       },
+      client: {
+        relay: async () => {
+          throw new Error('a send makes no relay call of its own: the outbox does');
+        },
+      },
       limits: () => ({ waitingPerPeer: this.waitingPerPeer }),
       log: (level, message) => this.logs.push(`${level} ${message}`),
     });

@@ -17,6 +17,8 @@
  * never writes a terminal: delivery is the mailbox's, through the render gate under the
  * per-agent then per-terminal locks. A body is never logged or recorded.
  *
+ * A query (discovery, Decision 6) is handed to `discovery.ts`, which stores nothing.
+ *
  * Also here: whether held remote mail may still be delivered, asked at the delivery instant
  * and when the switch or a grant changes ({@link remoteMailAllowed}, {@link withdrawRemoteMail}).
  */
@@ -28,7 +30,8 @@ import type { PeerRequestHandler, VerifiedPeerRequest } from '../lib/tunnel-clie
 import { enqueueRemote, holdForRelease, listHeldRemote } from '../db/mailbox.js';
 import type { DbMailbox } from '../db/types.js';
 import { formatRemoteMessage, normalizeRemoteFrameBody, remoteReplyRoute, type RemoteOrigin } from '../utils/message-format.js';
-import { encodeReceiverAnswer, readMessagePayload, type EncodedAnswer, type ReceiverAnswer } from './contract.js';
+import { encodeDiscoveryAnswer, encodeReceiverAnswer, readMessagePayload, type EncodedAnswer, type ReceiverAnswer } from './contract.js';
+import { answerQuery, QueryLimit, type DiscoveryAnswer, type DiscoveryWorkspace } from './discovery.js';
 import { matchGrant, type GrantRecipient, type GrantWorld } from './grants.js';
 import { recordInbound, recordUnanswered, type InboundFacts } from './records.js';
 import { countUndeliveredAccepted, currentAnswer, duplicateAnswer, getAccepted, listGrants, type PeerAcceptedRow } from './store.js';
@@ -56,6 +59,8 @@ export interface ReceiverDeps {
   /** Throws when the configured limits are invalid, which fails the request rather than guessing. */
   limits(): ReceiverLimits;
   resolveRecipient(address: PeerWireAddress): RecipientLookup;
+  /** This Tower's workspaces and the agents discovery may list (plan phase 10). */
+  discoverable(): readonly DiscoveryWorkspace[];
   /**
    * One gate attempt for the agent, as a local send makes, if its turn on the per-agent
    * serializer comes within `ms`. Not started: the row stays held for the backstop.
@@ -68,10 +73,14 @@ export interface ReceiverDeps {
 
 const MINUTE_MS = 60_000;
 
-/** The receiver as the entry point's handler. */
+/** The receiver as the entry point's handler. Its query limit lasts as long as it does. */
 export function createReceiver(deps: ReceiverDeps): PeerRequestHandler {
-  return (request) => receive(deps, request);
+  const queryLimit = new QueryLimit();
+  return (request) => receive(deps, queryLimit, request);
 }
+
+/** What the receiver answers: a message's answer, a refusal of a query, or discovery's answer. */
+type Answer = ReceiverAnswer | DiscoveryAnswer;
 
 /** What the record and the log may say of a request: never its body. */
 interface Known {
@@ -80,7 +89,7 @@ interface Known {
   label: string;
 }
 
-async function receive(deps: ReceiverDeps, request: VerifiedPeerRequest): Promise<EncodedAnswer> {
+async function receive(deps: ReceiverDeps, queryLimit: QueryLimit, request: VerifiedPeerRequest): Promise<EncodedAnswer> {
   const { statement } = request;
   const known: Known = {
     facts: {
@@ -95,9 +104,22 @@ async function receive(deps: ReceiverDeps, request: VerifiedPeerRequest): Promis
     },
     label: `${statement.kind} ${statement.requestId} from ${statement.fromTowerSlug}`,
   };
-  let answer: ReceiverAnswer;
+  let answer: Answer;
   try {
-    answer = await decide(deps, request, known);
+    answer =
+      statement.kind === 'query'
+        ? answerQuery(
+            {
+              db: deps.db,
+              now: deps.now,
+              world: deps.world,
+              workspaces: deps.discoverable,
+              resolveRecipient: deps.resolveRecipient,
+              limit: queryLimit,
+            },
+            request,
+          )
+        : await decide(deps, request, known);
   } catch (err) {
     // The tunnel client resets the stream, and the cloud tells the sender `no-answer`; the
     // sender holds the message and retries, and step 9 answers the retry if it was stored.
@@ -107,7 +129,7 @@ async function receive(deps: ReceiverDeps, request: VerifiedPeerRequest): Promis
   }
   guarded(deps, known, () => recordInbound(deps.db(), known.facts, answer));
   deps.log('INFO', `Peer: ${known.label}${known.facts.toAddress ? ` → ${known.facts.toAddress}` : ''}: ${describe(answer)}`);
-  return encodeReceiverAnswer(answer);
+  return answer.outcome === 'answered' ? encodeDiscoveryAnswer(answer.addresses) : encodeReceiverAnswer(answer);
 }
 
 /** Steps 9 to 16. Everything up to the persist is synchronous, so two arrivals never interleave there. */
@@ -115,9 +137,6 @@ async function decide(deps: ReceiverDeps, request: VerifiedPeerRequest, known: K
   const { statement } = request;
   const db = deps.db();
   const peer = statement.fromTowerId;
-
-  // Discovery is plan phase 10's, which replaces this branch; no build ships without it.
-  if (statement.kind === 'query') return { outcome: 'refused', reason: 'no-grant' };
 
   // 9. Accepted once. A row past its 30-day lifetime is one the prune has yet to remove: a
   // message that old is refused as expired at step 12, whether or not the prune has run.
@@ -223,7 +242,8 @@ function remoteAddressText(towerSlug: string, sender: PeerWireSenderAddress | nu
   return formatted.ok ? formatted.text : null;
 }
 
-function describe(answer: ReceiverAnswer): string {
+function describe(answer: Answer): string {
+  if (answer.outcome === 'answered') return `answered, ${answer.addresses.length} address${answer.addresses.length === 1 ? '' : 'es'}`;
   const parts: string[] = [answer.outcome];
   if ('reason' in answer) parts.push(answer.reason);
   if ('duplicate' in answer && answer.duplicate) parts.push('duplicate');

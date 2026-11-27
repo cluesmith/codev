@@ -995,6 +995,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('-p, --port <port>', 'Tower port (default: 4100)')
     .action((options) => runPeer((peer) => peer.peerLimits({ port: portOf(options) })));
 
+  peerCmd
+    .command('show <tower>')
+    .description('Ask another of your Towers what runs there that this Tower may message, as addresses')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((tower, options) => runPeer((peer) => peer.peerShow({ tower, port: portOf(options) })));
+
   // Inbox commands (Spec 1313) — list/dismiss held (undelivered) mailbox messages
   const inboxCmd = program
     .command('inbox')

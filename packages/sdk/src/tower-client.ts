@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR, MAX_REQUEST_BODY_BYTES } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, PeerShowResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR, MAX_REQUEST_BODY_BYTES } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { isRemoteAddress, parseAddress } from './address.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
@@ -33,6 +33,13 @@ const REQUEST_TIMEOUT_MS = 10000;
  * this one, each bounded by its own 20-second timeout; the margin covers the rest.
  */
 const REMOTE_SEND_TIMEOUT_MS = 65_000;
+
+/**
+ * How long `afx peer show` may take to answer (Spec 1967): the sending Tower may fetch its
+ * peer list to resolve the name, then makes one relay call, each bounded by its own
+ * 20-second timeout; the margin covers the rest. A query never waits behind messages.
+ */
+const PEER_SHOW_TIMEOUT_MS = 45_000;
 
 /** `POST /api/send`'s code for a refused send to another Tower; the value itself, as the SDK carries no runtime import. */
 const REMOTE_REFUSED: typeof REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
@@ -835,7 +842,11 @@ export class TowerClient {
    * this client. `notRunning` is set when nothing answered on the Tower's port.
    */
   private async peerCall<T>(path: string, init: RequestInit = {}): Promise<PeerRouteResult<T>> {
-    const result = await this.request<T>(path, init);
+    return this.peerResult(await this.request<T>(path, init));
+  }
+
+  /** A peer route's answer as {@link peerCall} returns it. */
+  private peerResult<T>(result: TowerRequestResult<T>): PeerRouteResult<T> {
     if (result.ok && result.data !== undefined) return { ok: true, result: result.data };
     const failure: PeerRouteFailure = { ok: false, status: result.status, error: result.error ?? `Tower answered ${result.status}` };
     if (result.connectionRefused) return { ...failure, notRunning: true };
@@ -885,6 +896,23 @@ export class TowerClient {
   /** My other Towers: Tower asks Codev Cloud, within its call budget, and answers from its cache otherwise. */
   getPeerTowers(): Promise<PeerRouteResult<PeerTowersResponse>> {
     return this.peerCall<PeerTowersResponse>('/api/peer/towers');
+  }
+
+  /**
+   * What one of my other Towers (a tower-ref) lets this Tower message, as it answered a
+   * discovery query. Every other outcome, an offline peer included, is a refusal with
+   * `errorCode` `REMOTE_REFUSED` and the words in `error`: a query is never held.
+   */
+  async getPeerShow(tower: string): Promise<PeerRouteResult<PeerShowResponse>> {
+    const path = `/api/peer/show?${new URLSearchParams({ tower }).toString()}`;
+    const timeoutMs = Math.max(PEER_SHOW_TIMEOUT_MS, this.requestTimeoutMs);
+    const result = await this.request<PeerShowResponse>(path, {}, timeoutMs);
+    // A refusal's words as Tower wrote them, as a refused send's are, with no code after them.
+    const message = result.errorBody?.message;
+    if (!result.ok && result.errorCode === REMOTE_REFUSED && typeof message === 'string') {
+      return { ok: false, status: result.status, error: message, errorCode: result.errorCode };
+    }
+    return this.peerResult(result);
   }
 
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {

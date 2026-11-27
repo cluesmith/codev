@@ -1,8 +1,10 @@
 /**
- * `afx peer on|off|list|grants|grant|revoke|limits` (Spec 1967; approved spec Decision 9).
+ * `afx peer on|off|list|grants|grant|revoke|limits|show` (Spec 1967; approved spec Decisions 6
+ * and 9).
  *
- * The receiving Tower's own decisions about who may message whom, and the list of my other
- * Towers. Tower holds the switch, the grants and the peer list and makes every check; these
+ * The receiving Tower's own decisions about who may message whom, the list of my other
+ * Towers, and what one of them lets this Tower message (`show`, which asks that Tower).
+ * Tower holds the switch, the grants and the peer list and makes every check; these
  * commands only ask it, and print what it answered.
  *
  * Two of them widen trust and are a human's: `afx peer on` and `afx peer grant` take
@@ -20,6 +22,7 @@ import type {
   PeerGrantModeName,
   PeerGrantView,
   PeerListedTowerView,
+  PeerShownAddress,
   PeerSwitchReport,
   PeerSwitchResponse,
   PeerTowersResponse,
@@ -33,7 +36,14 @@ import { HUMAN_APPROVAL_FLAG } from '../peer/switch.js';
 /** The Tower calls these commands make. */
 export type PeerClient = Pick<
   SdkTowerClient,
-  'getPeerSwitch' | 'setPeerSwitch' | 'getPeerGrants' | 'addPeerGrants' | 'revokePeerGrants' | 'getPeerLimits' | 'getPeerTowers'
+  | 'getPeerSwitch'
+  | 'setPeerSwitch'
+  | 'getPeerGrants'
+  | 'addPeerGrants'
+  | 'revokePeerGrants'
+  | 'getPeerLimits'
+  | 'getPeerTowers'
+  | 'getPeerShow'
 >;
 
 /** Where the commands print. */
@@ -384,4 +394,36 @@ export async function peerLimits(options: PeerPortOption, deps: PeerDeps = defau
   deps.out.line(`  Messages from this Tower          ${cloud.limits.messagesPerTowerPerMinute} a minute`);
   deps.out.line(`  Messages to one Tower             ${cloud.limits.messagesPerPairPerMinute} a minute`);
   deps.out.line(`  Discovery queries to one Tower    ${cloud.limits.queriesPerPairPerMinute} a minute`);
+}
+
+// ===========================================================================
+// afx peer show
+// ===========================================================================
+
+export interface PeerShowOptions extends PeerPortOption {
+  tower: string;
+}
+
+/** One address a line, ready to paste, then whether its agent has a live terminal. */
+export function shownLines(addresses: readonly PeerShownAddress[]): string[] {
+  const width = Math.max(...addresses.map((a) => a.address.length));
+  return addresses.map((a) => `${a.address.padEnd(width)}  ${a.live ? 'live' : 'not live'}`);
+}
+
+/**
+ * `afx peer show <tower>`: what runs on one of my other Towers that this Tower may message,
+ * as that Tower answered from its grants (Decision 6). A refusal, an offline peer or an
+ * unreachable cloud included, is thrown with its words: a query is never held.
+ */
+export async function peerShow(options: PeerShowOptions, deps: PeerDeps = defaultDeps(options)): Promise<void> {
+  const answer = answerOf(await deps.client.getPeerShow(options.tower), 'cannot ask another Tower what runs there');
+  const tower = answer.tower.name;
+  if (answer.addresses.length === 0) {
+    deps.out.line(`Nothing on ${tower} that this Tower may message now.`);
+  } else {
+    for (const line of shownLines(answer.addresses)) deps.out.line(line);
+  }
+  if (answer.truncated) {
+    deps.out.info(`${tower} trimmed its answer to fit the 65 536-byte limit: some addresses there are not shown.`);
+  }
 }

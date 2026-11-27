@@ -135,6 +135,9 @@ beforeEach(async () => {
       wakeOutbox: () => {
         cloud.wakes++;
       },
+      show: async () => {
+        throw new Error('peer-discovery.test.ts drives afx peer show');
+      },
     }),
     log: (level, message) => logged.push(`${level} ${message}`),
   };

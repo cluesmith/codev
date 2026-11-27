@@ -29,6 +29,7 @@ import { recordEntryEvent } from '../peer/records.js';
 import { onTunnelAuthOk, setTunnelSessionSource, shutdownPeerCloud, startPeerOutbox } from '../peer/cloud-wiring.js';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import { liveGrantWorld, resolveRemoteRecipient } from './tower-messages.js';
+import { discoverableWorkspaces } from './tower-address-book.js';
 import { deliverRemoteWithin, notifyHeldStateChanged } from './mailbox-wiring.js';
 import {
   readCloudConfig,
@@ -180,7 +181,8 @@ function readSwitchForAuth(): PeerSwitchState {
  * The tunnel's peer entry point, as this Tower supplies it (Spec 1967). The switch is read
  * from the database for every `auth`, so a reconnect states it as it stands. A verified
  * request goes to the receiver (steps 9 to 16), which stores mail in the mailbox and makes
- * one gate attempt; every request at the entry point is written to the inbound record,
+ * one gate attempt, or answers a discovery query from the grants; every request at the
+ * entry point is written to the inbound record,
  * which is also what the clock surface reads.
  */
 const PEER_OPTIONS: TunnelPeerOptions = {
@@ -192,6 +194,7 @@ const PEER_OPTIONS: TunnelPeerOptions = {
     // Tower-global, from the user-global layer, as the mailbox settings are read.
     limits: () => resolvePeerSettings(loadConfig(os.homedir())).limits,
     resolveRecipient: resolveRemoteRecipient,
+    discoverable: discoverableWorkspaces,
     deliverWithin: (workspacePath, toAgent, ms) => deliverRemoteWithin(logToTower, workspacePath, toAgent, ms),
     onHeldChanged: notifyHeldStateChanged,
     log: logToTower,

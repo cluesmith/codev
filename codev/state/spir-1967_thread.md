@@ -1032,3 +1032,62 @@ Surprises:
   7's and phase 9's, are now in the review document (phase 7's was only here before).
 - **Carried to phase 11 (the architect's reminder).** The held-on-fault words send the sender
   to `afx inbox`, so by phase 11 `afx inbox` must list and dismiss an outbox row.
+
+## Phase 10: discovery across Towers (2026-11-28)
+
+Built: discovery at R (`peer/discovery.ts`), which the receiver now hands every query to (the
+placeholder `no-grant` is gone). `afx peer show <tower>` at S: `Sender.show`, the cloud
+wiring's `show`, `GET /api/peer/show`, the SDK's `getPeerShow` and the CLI command. Records
+carry `kind`, so a query is recorded at both ends as a message is, without addresses.
+`discoverableWorkspaces()` in the address book feeds discovery with each workspace's agents.
+
+Readings, for the architect (neither spec spells these out):
+- **A front-door grant lists the architect it reaches now, by name.** It is not a bare
+  `codev:architect` entry, so what is printed is the agent a message would reach. When the
+  front door moves, the answer moves with it.
+- **Which workspaces: running ones only.** Spec 1940 has a full grant show "every active
+  workspace". Step 13 agrees: Spec 1940's address book resolves a name only to a running
+  workspace, so mail to a stopped one is refused `no-such-agent`. An agent of a running
+  workspace that has no live terminal is listed `not live`, because mail for it is accepted
+  and held. A workspace with no address name lists nothing.
+  - **How I got this wrong first.** I first read it as "stopped workspaces too, as not live"
+    and gave `discoverableWorkspaces` a registry branch for them. Layer B caught it. The
+    drift guard had dropped every address that branch produced: a message there was refused,
+    so it was dead code, and it is gone. Layer B now asserts that a stopped workspace is not
+    listed and that a message there is refused.
+- **No drift between the listing and the receiver.** Each listed address is read back
+  through step 13 and must resolve to that very agent. Step 14's matcher must also admit it.
+  So an address in the answer is one a message gets past both steps.
+- **No grants vs. grants that cover nothing.** A peer with no grant at all is refused
+  `no-grant`, and S prints the C8 command (`On devvm: afx peer grant mbp <recipients>`). A
+  peer whose grants cover nothing now is answered with an empty list ("Nothing on devvm that
+  this Tower may message now."). A hold grant counts as a grant.
+- **R's limit** counts answered queries only, in fixed minute windows, in memory. A restart
+  resets it, and C's per-pair limit stands in front of it. It is checked after the grant
+  check, as a message's limit is. `retryAfterSec` is the seconds left in the minute.
+- **S composes the words** for every refusal, from the reason and who decided (the status).
+  Every refusal says a query is never held, where that is not obvious. A key the cloud
+  rejects (401) reads as a removed registration.
+- **An answer under a changed registration** is refused `registration-changed`, as with the
+  listing.
+- **`afx peer show` of this Tower's own name** is refused, pointing at
+  `afx workspace list`. So is an owner-qualified name, which is stage 3.
+- **The route.** A refusal is a 403 `REMOTE_REFUSED`, as `/api/send`'s is. The SDK returns
+  its words with no code appended, as a refused send's are. The SDK waits up to 45 s for
+  show. The cloud's relay window is 30 s, plus margin.
+- **Not queued behind messages.** `Sender.show` calls `CloudClient.relay` itself, never
+  through the outbox. Layer A shows this with the real outbox and a message call held open.
+  Layer B shows it with the stand-in holding a message's answer.
+- **Tests.** Layer A: `peer-discovery.test.ts` (49 tests). It covers each grant scope,
+  overlap and hold, the drift guard, the refusals, the limit on an injected clock, the trim at
+  65 536 bytes, `Sender.show` against every answer, "not queued behind messages" on the real
+  outbox, and the route, SDK and CLI over HTTP. The fixtures of six older test files gained
+  the new `client`, `discoverable` and `show` dependencies. The receiver test that pinned
+  the placeholder `no-grant` for a query now checks that discovery answers it. Layer B:
+  `peer-discovery.e2e.test.ts` (10 tests).
+- **Verified.** Layer A 10 937 passed, 116 skipped, 240.8 s. Layer B discovery 10 of 10 in
+  27.1 s at load 1.6. Its first run had 2 reds, both in tests this phase wrote; diagnosed,
+  fixed and rerun. One was the reading above. The other counted outbox rows the earlier
+  `--all` case had left.
+  As a regression check on the receiver's message path, phase 9's `peer-send.e2e.test.ts`:
+  20 of 20 in 59.2 s at load 2.9.

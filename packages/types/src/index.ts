@@ -172,6 +172,8 @@ export {
   type PeerCloudRelay,
   type PeerListedTowerView,
   type PeerTowersResponse,
+  type PeerShownAddress,
+  type PeerShowResponse,
   type TunnelStatus,
   type TowerVersionInfo,
   type ProtocolStats,

@@ -529,6 +529,7 @@ export class Outbox {
         db,
         {
           at,
+          kind: 'message',
           peerTowerId: row.peerTowerId,
           peerSlug: towerOf(row),
           messageId: row.messageId,

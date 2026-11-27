@@ -29,6 +29,9 @@
  *
  * Every refusal from check 1 on, and every relay call, is recorded (`records.ts`); check 0's
  * refusals are stage 1's and record nothing. No body is ever logged or recorded.
+ *
+ * Also here, `afx peer show` ({@link Sender.show}, plan phase 10): a discovery query, made
+ * through the same checks where they apply, as one relay call of its own, and never held.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -38,12 +41,21 @@ import {
   type AgentAddress,
   type PeerCloudRelay,
   type PeerHeldReason,
+  type PeerShownAddress,
   type PeerWireAddress,
   type PeerWireSenderAddress,
 } from '@cluesmith/codev-types';
-import { formatAddress, tryFormatAddress } from '@cluesmith/codev-sdk/address';
+import { formatAddress, parseTowerRef, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import { crossWorkspaceBuilderErrorMessage } from '../utils/agent-names.js';
-import { encodeMessagePayload, prepareRemoteBody, printableDetail, type ClassifiedAnswer, type SenderCheck } from './contract.js';
+import type { CloudClient } from './cloud-client.js';
+import {
+  encodeMessagePayload,
+  encodeQueryPayload,
+  prepareRemoteBody,
+  printableDetail,
+  type ClassifiedAnswer,
+  type SenderCheck,
+} from './contract.js';
 import { OutboxStoppedError, type FirstAnswer, type Outbox } from './outbox.js';
 import type { OwnRegistration, PeerList } from './peer-list.js';
 import { recordOutbound, type OutboundFacts } from './records.js';
@@ -150,6 +162,30 @@ export type PeerSendResult =
       ahead: number;
     };
 
+/**
+ * What `afx peer show` came to (Decision 6): the peer's own answer, or a refusal with the
+ * reason. A query is never held, so there is no third outcome: an offline peer, an
+ * unreachable cloud and an answer that did not verify each refuse it.
+ */
+export type PeerShowResult =
+  | {
+      outcome: 'answered';
+      peer: PeerNamed;
+      /** As this Tower writes them, `afx://<peer>/<address>`, in the order the peer gave them. */
+      addresses: PeerShownAddress[];
+      truncated: boolean;
+    }
+  | {
+      outcome: 'refused';
+      /** Who refused: this Tower (its own checks, or nothing that speaks the contract answered), Codev Cloud, or the peer. */
+      by: 'this-tower' | 'cloud' | 'peer';
+      reason: string;
+      /** For a person: what happened and, where this Tower knows it, what fixes it. */
+      message: string;
+      retryAfterSec: number | null;
+      peer: PeerNamed | null;
+    };
+
 export interface SenderDeps {
   db(): Database.Database;
   now(): number;
@@ -157,9 +193,11 @@ export interface SenderDeps {
   registration(): OwnRegistration | null;
   list: Pick<PeerList, 'relay' | 'resolve'>;
   outbox: Pick<Outbox, 'enqueue'>;
+  /** The relay call a discovery query makes itself: it is not queued behind messages (contract section 4). */
+  client: Pick<CloudClient, 'relay'>;
   /** The configured cap on mail waiting here for one peer; throws when it is invalid. */
   limits(): { waitingPerPeer: number };
-  /** Default: a random UUID in canonical lower-case form. */
+  /** A message's or a query's id. Default: a random UUID in canonical lower-case form. */
   newMessageId?: () => string;
   log(level: 'INFO' | 'WARN' | 'ERROR', message: string): void;
 }
@@ -169,6 +207,9 @@ interface Refusal {
   reason: SenderRefusalReason;
   message: string;
 }
+
+const NOT_CONNECTED_MESSAGE =
+  'This Tower has never connected to Codev Cloud, so it cannot send to another Tower. Connect it with: afx tower connect';
 
 const NOT_REGISTERED_MESSAGE =
   "This Tower's registration was removed from Codev Cloud, so it cannot send to another Tower. " +
@@ -239,6 +280,7 @@ export class Sender {
     const fromText = senderText(request.from.address);
     const facts = (peerTowerId: string | null): OutboundFacts => ({
       at: this.deps.now(),
+      kind: 'message',
       peerTowerId,
       peerSlug: tower,
       messageId: null,
@@ -343,6 +385,116 @@ export class Sender {
     return this.answered(first, row.messageId, body.bytes, words);
   }
 
+  /**
+   * `afx peer show <tower>`: one discovery query, answered by the peer from its grants
+   * (Decision 6). The message checks that apply come first, in their order: the name as
+   * text (an owner is stage 3; this Tower's own name is not a peer), this Tower's own state
+   * (1 to 4), and the name against the peer list (7). Then one relay call of kind `query`,
+   * made here and not through the outbox, so it never waits behind messages for that peer.
+   * Every answer but `answered` refuses it, with the reason: it is never held. Every query
+   * from check 1 on is recorded, as a send is.
+   */
+  async show(text: string): Promise<PeerShowResult> {
+    // 0. The name as text: refusals of stage 1's kind, recorded nowhere.
+    const parsed = parseTowerRef(text);
+    if (!parsed.ok) {
+      return this.showRefused({ reason: 'address', message: `Cannot ask that Tower: ${parsed.error.message}. Expected ${parsed.error.expected}.` });
+    }
+    const { owner, tower } = parsed.ref;
+    if (owner !== undefined) {
+      return this.showRefused({
+        reason: 'address',
+        message: `Another owner's Tower (${owner}@${tower}) is not available in this version. Name one of your own Towers alone, as in: afx peer show ${tower}`,
+      });
+    }
+    const self = (): PeerShowResult =>
+      this.showRefused({ reason: 'address', message: `'${tower}' is this Tower. What runs here: afx workspace list` });
+    if (this.deps.registration()?.towerName === tower) return self();
+
+    const refuse = (refusal: Refusal, peer: PeerNamed | null = null): PeerShowResult => {
+      this.recordQuery(peer?.towerId ?? null, tower, null, 'refused', refusal.reason);
+      return this.showRefused(refusal, peer);
+    };
+
+    // 1 to 4.
+    const state = this.stateRefusal();
+    if (state !== null) return refuse(state);
+
+    // 7.
+    const resolved = await this.deps.list.resolve(tower);
+    if (!resolved.ok) {
+      if (resolved.reason === 'self') return self();
+      return refuse({ reason: 'unknown-tower', message: resolved.message });
+    }
+    const peer: PeerNamed = { towerId: resolved.tower.towerId, name: resolved.tower.slug };
+    const again = this.stateRefusal();
+    if (again !== null) return refuse(again, peer);
+
+    const asked = this.deps.registration();
+    const payload = encodeQueryPayload(this.deps.now());
+    if (!payload.ok) throw new Error(`sender: the query payload could not be built (${payload.reason})`);
+    const queryId = this.newMessageId();
+    const call = await this.deps.client.relay({ kind: 'query', toTowerId: peer.towerId, requestId: queryId, payload: payload.bytes });
+    if (!call.called) {
+      const refusal: Refusal =
+        call.reason === 'insecure'
+          ? { reason: 'no-relay', message: noRelayMessage({ state: 'none', why: 'insecure' }) }
+          : { reason: 'not-connected', message: NOT_CONNECTED_MESSAGE };
+      return refuse(refusal, peer);
+    }
+    const answer = call.answer;
+    this.recordQuery(peer.towerId, peer.name, queryId, answer.outcome, answer.reason);
+
+    // An answer under a registration since replaced came through the cloud this Tower has left.
+    const current = this.deps.registration();
+    if (asked === null || current === null || current.towerId !== asked.towerId || current.serverUrl !== asked.serverUrl) {
+      return this.showRefused(
+        {
+          reason: 'registration-changed',
+          message: `This Tower's Codev Cloud registration changed while ${peer.name} was asked. Ask again: afx peer show ${peer.name}`,
+        },
+        peer,
+      );
+    }
+
+    if (answer.outcome === 'answered' && answer.answer !== null && answer.answer.outcome === 'answered') {
+      // Every address fits the wire's rules; one too long to write with the Tower in front
+      // could not be sent to, so it is left out, and the log says so.
+      const addresses: PeerShownAddress[] = [];
+      let unwritable = 0;
+      for (const entry of answer.answer.addresses) {
+        const text = tryFormatAddress({ ...(entry.address as AgentAddress), tower: peer.name });
+        if (text.ok) addresses.push({ address: text.text, live: entry.live });
+        else unwritable++;
+      }
+      if (unwritable > 0) {
+        this.deps.log('WARN', `Peer: ${unwritable} address(es) in ${peer.name}'s answer to query ${queryId} cannot be written with its name in front; left out`);
+      }
+      return { outcome: 'answered', peer, addresses, truncated: answer.answer.truncated };
+    }
+    const own = this.deps.registration()?.towerName ?? 'this Tower';
+    return queryRefusal(answer, own, peer);
+  }
+
+  /** A query this Tower refused: a check of its own, or an answer under a registration since replaced. */
+  private showRefused(refusal: { reason: SenderRefusalReason | 'registration-changed'; message: string }, peer: PeerNamed | null = null): PeerShowResult {
+    return { outcome: 'refused', by: 'this-tower', reason: refusal.reason, message: refusal.message, retryAfterSec: null, peer };
+  }
+
+  /** A query in the record: refused here, or its relay call and the answer. Its failure never changes the answer. */
+  private recordQuery(peerTowerId: string | null, peerSlug: string, queryId: string | null, outcome: ClassifiedAnswer['outcome'], reason: string | null): void {
+    try {
+      recordOutbound(
+        this.deps.db(),
+        { at: this.deps.now(), kind: 'query', peerTowerId, peerSlug, messageId: queryId, fromAddress: null, toAddress: null, payloadSize: null },
+        outcome,
+        reason,
+      );
+    } catch (err) {
+      this.deps.log('WARN', `Peer: a query to ${peerSlug} was not recorded (${err instanceof Error ? err.constructor.name : typeof err})`);
+    }
+  }
+
   /** Checks 1 to 4: this Tower's own state, read now. */
   private stateRefusal(): Refusal | null {
     const registration = this.deps.registration();
@@ -350,12 +502,7 @@ export class Sender {
       const name = registration?.towerName ? ` (${registration.towerName})` : '';
       return { reason: 'remote-off', message: `Remote messaging is off on this Tower${name}. A human turns it on with: afx peer on` };
     }
-    if (registration === null) {
-      return {
-        reason: 'not-connected',
-        message: 'This Tower has never connected to Codev Cloud, so it cannot send to another Tower. Connect it with: afx tower connect',
-      };
-    }
+    if (registration === null) return { reason: 'not-connected', message: NOT_CONNECTED_MESSAGE };
     if (registration.deregistered) return { reason: 'not-registered', message: NOT_REGISTERED_MESSAGE };
     const relay = this.deps.list.relay();
     if (relay.state === 'none') return { reason: 'no-relay', message: noRelayMessage(relay) };
@@ -521,5 +668,78 @@ function fromAnswer(answer: ClassifiedAnswer, messageId: string, bytes: number, 
     case 'unavailable':
     case 'answered':
       throw new Error(`sender: an answer of ${answer.outcome} does not resolve a message`);
+  }
+}
+
+/**
+ * A query's answer other than `answered`, as the refusal `afx peer show` prints (contract
+ * section 6, "A discovery query is never held"). Who refused is read from the status, as for
+ * a message: the peer (a 200), Codev Cloud (its own answers), or this Tower when nothing that
+ * speaks the contract answered.
+ */
+function queryRefusal(answer: ClassifiedAnswer, own: string, peer: PeerNamed): PeerShowResult {
+  const body = answer.answer;
+  const retryAfterSec = body !== null && 'retryAfterSec' in body && body.retryAfterSec !== undefined ? body.retryAfterSec : null;
+  const by: 'this-tower' | 'cloud' | 'peer' = answer.decidedBy === 'receiver' ? 'peer' : answer.decidedBy === 'cloud' ? 'cloud' : 'this-tower';
+  const reason = answer.outcome === 'not-verified' ? 'not-verified' : (answer.reason ?? answer.outcome);
+  const refused = (message: string, as: string = reason): PeerShowResult => ({
+    outcome: 'refused',
+    by,
+    reason: as,
+    message,
+    retryAfterSec,
+    peer,
+  });
+  const never = 'A query is never held: ask again';
+  const name = peer.name;
+
+  // A key the cloud rejects refuses as a deregistered registration does (C12).
+  if (reason === 'unauthenticated') return refused(NOT_REGISTERED_MESSAGE, 'not-registered');
+  if (reason === 'no-relay') return refused(noRelayMessage({ state: 'none', why: 'old-cloud' }));
+  if (by === 'peer') {
+    switch (reason) {
+      case 'remote-off':
+        return refused(`Refused by ${name}: remote messaging is off there.`);
+      case 'no-grant':
+        return refused(`Refused by ${name}: ${own} has no grant there. On ${name}: afx peer grant ${own} <recipients>`);
+      case 'rate-limited':
+        return refused(`Refused by ${name}: ${own} has asked it too often this minute${retryIn(retryAfterSec)}.`);
+      case 'clock-skew':
+        return refused(
+          `Refused by ${name}: the clocks differ by more than 5 minutes (${name}'s, this Tower's or Codev Cloud's). Check the time on both machines.`,
+        );
+      case 'unsupported-version':
+        return refused(`Refused by ${name}: it does not speak this Tower's version of remote messaging.`);
+      case 'malformed':
+        return refused(`Refused by ${name}: it could not read the query.`);
+      case 'not-verified':
+        return refused(`${name} could not verify the query, which happens when a connection to Codev Cloud was just replaced. ${never}.`);
+      default:
+        return refused(`Refused by ${name}: ${reason}.`);
+    }
+  }
+  switch (reason) {
+    case 'tower-offline':
+      return refused(`${name} is offline: it has no connection to Codev Cloud now. ${never} when it is online.`);
+    case 'cloud-unreachable':
+      return refused(`Codev Cloud is unreachable, so ${name} was not asked. ${never} later.`);
+    case 'no-answer':
+      return refused(`${name} did not answer in time. ${never}.`);
+    case 'tower-error':
+      return refused(`${name}'s answer did not arrive in the expected form. ${never}.`);
+    case 'cloud-error':
+      return refused(`Codev Cloud could not relay the query (cloud-error). ${never} later.`);
+    case 'unknown-tower':
+      return refused(`Refused by Codev Cloud: ${name} is not one of your Towers there.`);
+    case 'peer-unsupported':
+      return refused(`Refused by Codev Cloud: ${name} does not speak remote messaging. Upgrade Codev on ${name}.`);
+    case 'rate-limited':
+      return refused(`Refused by Codev Cloud: too many queries from this Tower to ${name}${retryIn(retryAfterSec)}.`);
+    case 'malformed':
+      return refused("Refused by Codev Cloud: it could not read this Tower's call.");
+    case 'unsupported-version':
+      return refused("Refused by Codev Cloud: it does not relay this Tower's version of remote messaging.");
+    default:
+      return refused(`Refused by Codev Cloud: ${reason}.`);
   }
 }

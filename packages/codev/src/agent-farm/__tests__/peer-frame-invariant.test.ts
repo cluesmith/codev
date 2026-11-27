@@ -218,6 +218,8 @@ function receivingTower() {
     world: () => ({ registered: [{ workspacePath: CODEV, explicitName: null }], running: [CODEV], architectsOf: () => ['main'] }),
     limits: () => ({ acceptedPerPeerPerMinute: 1_000_000, undeliveredPerPeer: 1_000_000 }),
     resolveRecipient: lookup,
+    // A query stores nothing and writes no frame, whatever discovery would list.
+    discoverable: () => [{ workspacePath: CODEV, addressName: 'codev', seats: [{ kind: 'architect', name: 'main', live: true }] }],
     // Only what is stored matters here: the gate is the mailbox's, and it writes the stored frame.
     deliverWithin: async () => ({ started: false }),
     onHeldChanged: () => {},

@@ -1047,6 +1047,26 @@ export interface PeerListedTowerView {
   mayMessage: PeerGrantView[];
 }
 
+/** One address a peer answered a discovery query with, as this Tower writes it: `afx://<tower>/<address>`. */
+export interface PeerShownAddress {
+  address: string;
+  /** Whether the agent has a live terminal there. */
+  live: boolean;
+}
+
+/**
+ * `GET /api/peer/show?tower=<tower-ref>` (Spec 1967, Decision 6): what runs on one of my other
+ * Towers that this Tower may message, as that Tower answered. Only an answer is a 200; every
+ * other outcome, an offline peer included, is a refusal (`REMOTE_REFUSED`), and nothing is held.
+ */
+export interface PeerShowResponse {
+  tower: PeerTowerNamed;
+  /** In the order the peer gave them. */
+  addresses: PeerShownAddress[];
+  /** The peer trimmed its list to fit the answer cap: some addresses are not shown. */
+  truncated: boolean;
+}
+
 /** `GET /api/peer/towers`: my other Towers, fetched from Codev Cloud within the call budget, else cached. */
 export interface PeerTowersResponse {
   remoteMessaging: 'on' | 'off';
