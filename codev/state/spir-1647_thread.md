@@ -240,3 +240,34 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - PR round 3: claude APPROVE after re-verifying the round-2 fixes. Codex asked only for `main`,
   10 commits ahead (AIR #1977). The merge was clean (963ba5d97) and touched no forge or
   overview file. Root build and the full suite were green on it: 10,149 passed.
+
+## PR CI correction (after review round 3, 2026-11-27)
+
+- PR #2004's own Unit Tests check (ubuntu) had failed on every push since the PR opened.
+  I had reported "suite green" from local macOS runs and not watched the PR's checks.
+  The architect asked what was blocking the merge; I told them it was blocked, and why.
+- Real bug (timeout test, deterministic on Linux): Debian/Ubuntu's dash carries patch 0004,
+  which disables the "exec the last command of `sh -c`" optimization. Node's exec timeout
+  therefore SIGTERMs only the outer dash; overview-bundle.sh's traps never run, gh outlives
+  the limit and the temp directory stays. Reproduced on macOS by building dash 0.5.12 with
+  that one patch; same signature as CI. Fix: posix `execShellString`/`Sync` run a bare absolute
+  path to an existing `.sh` as `exec '<path>'` (Windows already special-cases bare script
+  paths). Pins: a mocked string-form test, a real-process test file (a path with a space and a
+  quote; a TERM trap plus a dead child on timeout), exit 143 asserted in the timeout test, and
+  the forge-launcher POSIX pin updated. All three new tests fail with the fix disabled.
+- Harness flake (parity/override e2e tests, intermittent on Linux): the fake gh's locked count
+  file lost a call. The missing op varied between runs. It did not reproduce locally under
+  either dash, even with 16 concurrent calls, so the root cause is unconfirmed. Calls are now
+  numbered by atomic `mkdir call.N` claims, which rest on mkdir alone. If Linux still loses a
+  call, the cause is a call never made, not the counter.
+- Also corrected: Windows run 45954554101 was never green; its unit-test job ended unfinished.
+
+- Root cause of the harness flake found (2026-11-27): the runner is now ubuntu-26.04, whose
+  uutils `mkdir` (rust-coreutils 0.8/0.10; fixed in upstream 0.11) reports success when it
+  loses a race to create the same directory. Both my lock and my mkdir-claim schemes relied
+  on mkdir's exclusivity. Proof came from an invocation log in the failure message: two pids
+  both logged a successful claim of n=1. The diagnosis was helped by a codex consult
+  (`consult -m codex --prompt-file`), which pushed for per-process evidence. Fix: claim
+  numbers by creating files under noclobber (O_EXCL), with no external binary involved. A
+  regression test puts an always-succeeding `mkdir` first on PATH; it fails against the
+  mkdir claim and passes now. The guard gh and CODEV_DEBUG diagnostics stay.

@@ -36,23 +36,21 @@ export const scriptTestTimeoutMs = process.platform === 'win32' ? 120_000 : 30_0
 
 const FAKE_GH = `#!/bin/sh
 dir="$(dirname "$0")"
-printf '%s\\n' "start pid=$$ args=$1 $2" >> "$dir/log"
 # The overview cache runs several gh processes at once. Each call claims the lowest free
-# number by creating its directory: mkdir is atomic, so no two calls share a number and the
-# numbers have no gaps. (A lock around a read-modify-write of a count file lost a call
-# under load on Linux CI.)
+# number by creating the empty file call.$n under noclobber, which the shell opens with
+# O_EXCL: no two calls share a number, and the numbers have no gaps. Not mkdir: Ubuntu
+# 26.04's uutils mkdir (rust-coreutils before 0.11) reports success when it loses a race
+# to create the same directory, so two concurrent calls both "claimed" one number on CI.
 n=1
-until mkdir "$dir/call.$n" 2>/dev/null; do
+until (set -C; : > "$dir/call.$n") 2>/dev/null; do
   n=$((n + 1))
   if [ "$n" -gt 1000 ]; then
     printf '%s\\n' "no call number could be claimed" >> "$dir/violations"
     exit 97
   fi
 done
-printf '%s\\000' "$@" > "$dir/call.$n/argv"
-echo "$$" > "$dir/call.$n/pid"
-# One appended line per invocation, for a failed call-count assertion's message.
-printf '%s\\n' "claimed pid=$$ n=$n 0=$0" >> "$dir/log"
+printf '%s\\000' "$@" > "$dir/call.$n.argv"
+echo "$$" > "$dir/call.$n.pid"
 key=
 case "$1 $2" in
   'pr list') key=pr-list; for a in "$@"; do [ "$a" = merged ] && key=recently-merged; done ;;
@@ -132,10 +130,8 @@ export class FakeGh {
 
   /** What a failed call-count assertion needs: violations and the calls recorded so far. */
   diagnosis(extra: Record<string, unknown> = {}): string {
-    const calls = fs.readdirSync(this.dir).filter(name => name.startsWith('call.')).sort();
-    const logFile = path.join(this.dir, 'log');
-    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8').trim().split('\n') : [];
-    return JSON.stringify({ ...extra, violations: this.violations(), calls, log });
+    const calls = fs.readdirSync(this.dir).filter(name => /^call\.\d+$/.test(name)).sort();
+    return JSON.stringify({ ...extra, violations: this.violations(), calls });
   }
 
   route(key: string, r: Route): void {
@@ -151,13 +147,13 @@ export class FakeGh {
   calls(): string[][] {
     const out: string[][] = [];
     for (let n = 1; fs.existsSync(path.join(this.dir, `call.${n}`)); n++) {
-      out.push(fs.readFileSync(path.join(this.dir, `call.${n}`, 'argv'), 'utf-8').split('\0').slice(0, -1));
+      out.push(fs.readFileSync(path.join(this.dir, `call.${n}.argv`), 'utf-8').split('\0').slice(0, -1));
     }
     return out;
   }
 
   pid(call: number): number {
-    return Number(fs.readFileSync(path.join(this.dir, `call.${call}`, 'pid'), 'utf-8').trim());
+    return Number(fs.readFileSync(path.join(this.dir, `call.${call}.pid`), 'utf-8').trim());
   }
 
   violations(): string[] {

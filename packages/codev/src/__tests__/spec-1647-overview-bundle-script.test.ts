@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -195,6 +195,26 @@ describe.skipIf(!withJq)('Spec 1647 — the github overview-bundle script', { ti
   };
 
   const ops = () => fake.calls().map(operation);
+
+  // -------------------------------------------------------------------------------------------
+  // The harness itself. Ubuntu 26.04's uutils mkdir (rust-coreutils before 0.11) reports
+  // success when it loses a race to create a directory, and a fake that numbered its calls
+  // with mkdir lost calls on CI. A mkdir that always succeeds makes that failure certain.
+  it('the fake gh numbers concurrent calls exactly, whatever mkdir reports', async () => {
+    const shimDir = path.join(root, 'shim');
+    fs.mkdirSync(shimDir);
+    fs.writeFileSync(path.join(shimDir, 'mkdir'), '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(path.join(shimDir, 'mkdir'), 0o755);
+    pathPrefix = `${shimDir}${path.delimiter}`;
+    fake.route('pr-list', { body: [] });
+    const run = () => new Promise<void>((resolve, reject) => {
+      execFile('sh', [path.join(fake.dir, 'gh'), 'pr', 'list'], { cwd: work, env: { ...process.env, ...env() } },
+        err => (err ? reject(err) : resolve()));
+    });
+    await Promise.all(Array.from({ length: 8 }, run));
+    expect(fake.calls(), fake.diagnosis()).toHaveLength(8);
+    expect(new Set(Array.from({ length: 8 }, (_, i) => fake.pid(i + 1))).size).toBe(8);
+  });
 
   // -------------------------------------------------------------------------------------------
   describe('parity with the four sibling scripts on a recorded state', () => {
