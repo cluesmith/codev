@@ -324,7 +324,7 @@ describe('executeForgeCommandSync', () => {
 // =============================================================================
 
 describe('getKnownConcepts', () => {
-  it('returns all 20 known concept names', () => {
+  it('returns all 21 known concept names', () => {
     const concepts = getKnownConcepts();
     expect(concepts).toContain('issue-view');
     expect(concepts).toContain('pr-list');
@@ -346,7 +346,8 @@ describe('getKnownConcepts', () => {
     expect(concepts).toContain('repo-archive');
     expect(concepts).toContain('commit-checks');
     expect(concepts).toContain('workflow-runs');
-    expect(concepts.length).toBe(20);
+    expect(concepts).toContain('overview-bundle');
+    expect(concepts.length).toBe(21);
   });
 });
 
@@ -543,12 +544,14 @@ describe('provider presets', () => {
 
   it('linear provider leaves no concept unresolvable (hybrid model guard)', () => {
     // Class-level guard for spec 719: issue concepts resolve to linear scripts,
-    // every other concept falls through to gh. Only the two concepts linear
-    // genuinely cannot serve are disabled. This fails loudly if anyone disables
-    // a PR concept again, rather than only catching pr-create by name.
+    // every other concept falls through to gh. Only the concepts linear
+    // genuinely cannot serve are disabled: the two team concepts, and the
+    // overview bundle (Spec 1995), which would read the backlog from GitHub.
+    // This fails loudly if anyone disables a PR concept again, rather than only
+    // catching pr-create by name.
     const resolutions = resolveAllConcepts({ provider: 'linear' });
     const disabled = resolutions.filter(r => r.source === 'disabled').map(r => r.concept);
-    expect(disabled.sort()).toEqual(['on-it-timestamps', 'team-activity']);
+    expect(disabled.sort()).toEqual(['on-it-timestamps', 'overview-bundle', 'team-activity']);
     expect(resolutions.every(r => r.command !== null)).toBe(false); // the two above
     expect(resolutions.filter(r => r.source !== 'disabled').every(r => r.executable !== null)).toBe(true);
   });
@@ -591,7 +594,7 @@ describe('provider presets', () => {
   it('jira provider leaves no concept unresolvable (hybrid model guard)', () => {
     const resolutions = resolveAllConcepts({ provider: 'jira' });
     const disabled = resolutions.filter(r => r.source === 'disabled').map(r => r.concept);
-    expect(disabled.sort()).toEqual(['on-it-timestamps', 'team-activity']);
+    expect(disabled.sort()).toEqual(['on-it-timestamps', 'overview-bundle', 'team-activity']);
     const preset = resolutions.filter(r => r.source === 'preset').map(r => r.concept);
     expect(preset.sort()).toEqual([...JIRA_ISSUE_CONCEPTS].sort());
   });
@@ -676,9 +679,9 @@ describe('graceful degradation when command not found', () => {
 // =============================================================================
 
 describe('resolveAllConcepts', () => {
-  it('returns all 20 concepts with default source when no config', () => {
+  it('returns all 21 concepts with default source when no config', () => {
     const resolutions = resolveAllConcepts();
-    expect(resolutions).toHaveLength(20);
+    expect(resolutions).toHaveLength(21);
     expect(resolutions.every(r => r.source === 'default')).toBe(true);
     expect(resolutions.every(r => r.executable !== null)).toBe(true);
   });

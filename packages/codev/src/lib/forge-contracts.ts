@@ -151,6 +151,33 @@ export interface MergedPrItem {
 /** Output of the `recently-merged` concept command. */
 export type RecentlyMergedResult = MergedPrItem[];
 
+/**
+ * Output of the `overview-bundle` concept command (Spec 1995): everything
+ * Tower's overview reads, from one forge call.
+ *
+ * Inputs: `CODEV_INCLUDE_WINDOWS=1` requests the two 24 h windows, with
+ * `CODEV_SINCE_DATE` as their cutoff. Without it the call returns the open
+ * lists only.
+ *
+ * Conformance (anything else is a failed call):
+ * - `prs` and `issues` are always arrays;
+ * - when the windows were requested, exactly one of these is present: both
+ *   `recentlyClosed` and `recentlyMerged`, or a non-empty `windowsError`;
+ * - every item conforms to its section's contract (`PrListItem`,
+ *   `IssueListItem`, `IssueListItem`, `MergedPrItem`), and the window items
+ *   carry a parseable `closedAt` / `mergedAt`.
+ *
+ * `windowsError` reports an error confined to the window searches: the open
+ * lists are delivered, and only the windows count as failed.
+ */
+export interface OverviewBundleResult {
+  prs: PrListItem[];
+  issues: IssueListItem[];
+  recentlyClosed?: IssueListItem[];
+  recentlyMerged?: MergedPrItem[];
+  windowsError?: string;
+}
+
 /** Single item in `pr-search` concept output. */
 export interface PrSearchItem {
   number: number;

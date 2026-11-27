@@ -133,3 +133,51 @@ human decision, so the gate stayed held. The owner approved the plan as written 
 behaviour, so a failed invalidation-driven refresh keeps serving the still-fresh open lists. I
 ran `porch approve 1995 plan-approval --a-human-explicitly-approved-this`. Entering implement,
 Phase 1 Step 0 (cost gate) first.
+
+## 2026-11-27 — implement Phase 1, Step 0: cost gate PASSED
+Measured the exact request text the shipped `overview-bundle.sh` sends, captured verbatim through
+a pass-through `gh` wrapper and re-sent with a free `rateLimit { cost }` sibling field (gh 2.102.0,
+this repo; 8 open PRs, 424 open issues):
+
+| request | points | ceiling |
+|---|---|---|
+| main, open-only (`windows: false`) | 2 | ≤ 2 ✓ |
+| main, with both 24 h windows | 3 | ≤ 3 ✓ |
+| issues follow-up page (100) | 2 | (modelled 2) |
+| window follow-up page (100) | 1 | — |
+
+Recomputed model from these costs (matches the spec): small repo ≈47 pts/h idle / ≈128 churn
+(today 72 / 192); codev ≈87 / ≈248 (today 112 / 312). Paging verified on a 90-day window:
+130 closed + 143 merged, no duplicates. Found while building: GraphQL rejects a query defining an
+unused fragment, so each query carries exactly the fragments it spreads.
+
+## 2026-11-27 — implement Phase 1, Step 1: real-gh checks
+- **Parity, field by field and by item set** (shipped pr-list / issue-list / recently-closed /
+  recently-merged against the bundle, same cutoff): exact match (same set, same order, 0 field
+  diffs) on codev (24 h and a 10-day window), cli/cli, microsoft/vscode (83 merged in 24 h,
+  app/dependabot PR author, empty reviewDecision) and grafana/grafana (92 merged; 3 null
+  requestedReviewers, dropped by both paths).
+- **Surprise: gh renders a null (deleted-account) author as `{"is_bot":true,"login":"app/"}`**
+  (cli/cli #14558; raw GraphQL `author: null`). The bundle reproduces `{login: "app/"}`, because
+  the overview shows `author.login`, and parity is the contract.
+- **Base repo:** a scratch repo with origin=cluesmith/codev + upstream=cli/cli → gh pr list and
+  the bundle agree in all 4 layouts (no default → cli/cli; set-default either way; origin only).
+- **Plan assumption corrected:** an unsubstituted `repo:{owner}/{repo}` is NOT a loud search
+  error. GitHub silently returns 0 results. But gh source (api.go, read at trunk and at
+  v1.0/1.2/1.5/2.0) shows every `-F` value goes through one `fillPlaceholders`
+  (`ReplaceAllStringFunc`, whole-string), and `{owner}` joined that same function by v2.0.0. So
+  the in-string search substitution cannot fail while `-F owner='{owner}'` succeeds, and with no
+  substitution the call fails loudly (verified: "Could not resolve to a Repository with the name
+  '{owner}/{repo}'", exit 1, no stdout). Minimum gh: 2.0.0.
+- **Errors:** `first: 101` on a search, and on pullRequests, is rejected at validation (no data,
+  no path) → whole-call failure, exit 1, gh's `gh: <msg>` passed through on stderr. A genuine
+  execution-time error confined to a window path could not be provoked on demand (GitHub search
+  accepts malformed dates and over-long strings). The salvage fixtures use the partial-error
+  shape measured in specify (exit 1, stdout {data, errors[].path}, stderr `gh: <msg>`).
+- **Reviewers, from gh's source** (`api/export_pr.go` at trunk; gh 2.102.0's sent query read via
+  `GH_DEBUG=api`): gh fetches `...on Bot{login}` (for Copilot) but its `reviewRequests` export
+  keeps only `User` (login) and `Team` (name/slug, no login) entries, and pr-list.sh keeps the
+  logins. So only user reviewers survive. The bundle mirrors that switch
+  (`select(.__typename == "User")`); an early draft also took Bot and Mannequin logins, which
+  would have diverged on a Copilot review request. No sampled repo had one, so parity runs alone
+  would not have caught it.
