@@ -97,15 +97,42 @@ Run on demand on the finished branch, after merging `origin/main` (`9f2048c78`, 
   left in the temp directory.
 - **Layer C**, `playwright.peers.config.ts` on port 14102: 17 passed in 5.5 s, at a load of 2.0.
   No run folder was left, and the port was free afterwards.
-- **Layer D**, the Windows workflow on `63624ca42`
-  ([run 46006429938](https://github.com/cluesmith/codev/actions/runs/46006429938)): both probes
-  (the three-shell `afx://` check on windows-latest and windows-11-arm), CLI tests and install
-  verification passed. Unit tests failed 6 of 11 138, in two of this spec's files on their first
-  Windows run. This went to the architect before any rerun:
-  - `peer-inbox.test.ts`, 5 failures. The test's workspace is a POSIX literal, `/work/codev`, which
-    a Windows Tower normalizes to a drive-letter path, so the stored rows never match it.
-  - `peer-pipeline.test.ts`, 1 failure. The test timed out at 30 s; the whole file took 172 s on
-    Windows against 1.9 s here.
+- **Layer D**, the Windows workflow, twice:
+  - **First run**, on `63624ca42`
+    ([46006429938](https://github.com/cluesmith/codev/actions/runs/46006429938)):
+    - Passed: both probes (the three-shell `afx://` check on windows-latest and windows-11-arm),
+      the CLI tests and the install verification.
+    - Failed: 6 of 11 138 unit tests, in two of this spec's files on their first Windows run.
+      This went to the architect before any rerun.
+    - `peer-inbox.test.ts`, 5 failures. Its workspace was the POSIX literal `/work/codev`. On
+      Windows `/api/inbox` normalizes that to a drive-letter path, so the rows stored under the
+      literal never matched. Fixed in the test (`b5123888d`, through `resolve()`). The architect
+      confirmed that production rows are stored canonical.
+    - `peer-pipeline.test.ts`, 1 failure. A 50-message backlog passed its 30 s limit; the whole
+      file took 172 s on Windows against 1.9 s here.
+  - **Second run**, on `914765b38`
+    ([46009240887](https://github.com/cluesmith/codev/actions/runs/46009240887)): every job
+    passed. Unit tests: 10 712 passed, 426 skipped, none failed. `peer-inbox` passed 24/24, and
+    `peer-pipeline` passed 15/15 in 145 s under a Windows-only limit of 120 s per test
+    (`47e830c3a`).
+  - **Where the pipeline's time goes on Windows.** Measured by temporary test-side timing in
+    `47e830c3a`, and removed afterwards. Totals for one 50-message backlog against C's per-pair
+    limit. The backlog against R's own limit was 4 to 17% higher on each number but its
+    set-up, which was shorter (2.3 s).
+    - 50 sends: 2.3 s, so 46 ms each.
+    - 51 drain relay calls: 6.6 s over HTTP, so 129 ms each. Of that, R's receiver took 6.35 s
+      (124 ms a call), and nearly all of the receiver's time was its SQLite writes (6.26 s).
+    - S's SQLite writes: 3.6 s, so 71 ms a message.
+    - Set-up: 3.1 s.
+    - The stand-in's own loopback HTTP: about 5 ms a call.
+    - Locally the same relay call is about 3.8 ms, of which R's receiver is about 1.5 ms.
+    - **So the cost is SQLite commits.** Each transaction waits on a sync to disk, which is slow
+      on the Windows runner. It is made dearer by the test's own databases: they use SQLite's
+      default rollback journal, while production's `global.db` runs WAL with
+      `synchronous = FULL`.
+    - Per message that is about 0.25 s, with R's part about 0.12 s against its 5 s deadline,
+      well under the second a message the architect set as the point at which it would be a
+      product matter on Windows. The Windows limit stays, and the timing is gone.
 
 ## Scenarios and their tests
 
