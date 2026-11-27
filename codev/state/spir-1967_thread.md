@@ -638,6 +638,21 @@ Tests:
   The first run failed in its own agy setup (the profile, above); fixed and rerun.
   `peer-entry-point.e2e` and `two-towers-harness.e2e`: 12/12.
 
-Residual (in the review): a 48 KiB agy body of very short lines takes longer to write than C's
-15 s relay timeout, so S can see `no-answer` for a message that is delivered. S retries, and
-the duplicate reports the true state.
+(The agy residual first recorded here, a long write outlasting C's relay timeout, was fixed in
+the review round below.)
+
+- **Phase 6 review (iter 1): codex REQUEST_CHANGES, claude REQUEST_CHANGES**, both HIGH.
+  Response: `1967-phase_6-iter1-rebuttals.md`; both taken, nothing disputed.
+  - codex: R did not answer by its 5 s deadline once a pass had started. The spec says R
+    answers within 5 seconds and never makes C wait past its deadline, which outranks the plan's
+    "Started: the answer is that pass's outcome". The receiver now races the attempt against the
+    deadline. A late one is answered with the row's state then (`held`, `busy`) and runs on to
+    deliver.
+  - claude: a release could never deliver, because the drain-time recheck held a released row
+    for release again (under its hold grant, after a revoke, or with the switch off). Fixed with
+    `mailbox.released_at`, added to v21, which no shipped build has run. A released row is the
+    owner's decision (spec 1940, Withdrawal), so neither the recheck nor a later withdrawal takes
+    it back; the owner dismisses it to stop it. This rule is my choice, for the architect to rule
+    on. Phase 11's `afx inbox release` only calls `release()`.
+  - Added: the 1,000-in-a-minute flood test, and a review residual for NBSP-led marker lines.
+  - Each new test fails with its fix removed.

@@ -305,7 +305,8 @@ export interface DeliveryPorts {
    * Spec 1967: may this REMOTE row be delivered now? Asked at the delivery instant of every
    * row from another Tower, because the switch and the grants can change while it is held.
    * False when the switch is off or no grant admits the delivery any longer (or a grant now
-   * holds it), and the row then moves to held for release instead of being written.
+   * holds it), and the row then moves to held for release instead of being written. Always
+   * true for a row its owner released (`released_at`): that is the owner's decision.
    */
   remoteDeliveryAllowed(row: DbMailbox): boolean;
   /**
@@ -1015,8 +1016,9 @@ export async function deliverAgentMail(
     return { delivered: [], reason: null };
   }
   // Spec 1967: a row from another Tower is delivered only while the switch and a grant still
-  // allow it, asked now, at the instant of the write. Otherwise it is held for release: a
-  // human decides what happens to mail whose permission was withdrawn while it waited.
+  // allow it, or its owner released it, asked now, at the instant of the write. Otherwise it is
+  // held for release: a human decides what happens to mail whose permission was withdrawn
+  // while it waited.
   if (current.remote_tower_id !== null && !ports.remoteDeliveryAllowed(current)) {
     holdForRelease(db, current.id, ports.now());
     ports.onHeldStateChange();

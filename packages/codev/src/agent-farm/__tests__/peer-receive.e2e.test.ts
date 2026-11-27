@@ -11,7 +11,9 @@
  *   composer renders clean is delivered, in the remote frame; a shell is refused;
  * - with the terminal lock held by an `--interrupt` still writing, the answer is `held`,
  *   `busy` within 5 seconds, while the interrupt is still on the wire; the message is
- *   delivered once the lock frees and the composer renders clean.
+ *   delivered once the lock frees and the composer renders clean;
+ * - a write that starts at once but outlasts the deadline (a long body to agy, paced line by
+ *   line) is answered `held`, `busy` at the deadline, and runs on to deliver.
  *
  * The live terminals are echo terminals (`stty raw -echo; exec cat`): what is written to one
  * is what it renders, so a test draws the exact composer the gate classifies, as
@@ -263,6 +265,26 @@ describe('Spec 1967 phase 6: receiving a message on a real Tower', () => {
     await render(agyTerminal, AGY_CLEAN);
     const delivered = await waitFor(async () => mailFor(sent.requestId)[0]?.status === 'delivered', 30_000, 200);
     expect(delivered, JSON.stringify(mailFor(sent.requestId))).toBe(true);
+  }, 90_000);
+
+  it('answers by the deadline while a long write is still on the wire, which runs on and delivers', async () => {
+    await render(agyTerminal, AGY_CLEAN);
+    // agy is paced line by line: an 800-line body is about 8 s on the wire, past R's 5 s.
+    const long = Array.from({ length: 800 }, (_, i) => `line ${i}`).join('\n');
+    const payload = to({ workspace: 'codev', kind: 'id', name: AGY_BUILDER }, long);
+    const asked = Date.now();
+    const sent = await forward(payload);
+    const waited = Date.now() - asked;
+    expect(sent.answer).toEqual({ v: 1, outcome: 'held', reason: 'busy' });
+    // The deadline, not the end of the write: R answered at about 5 s.
+    expect(waited).toBeGreaterThan(4_000);
+    expect(waited).toBeLessThan(6_500);
+    expect(mailFor(sent.requestId)).toMatchObject([{ status: 'held' }]);
+
+    const delivered = await waitFor(async () => mailFor(sent.requestId)[0]?.status === 'delivered', 30_000, 200);
+    expect(delivered, JSON.stringify(mailFor(sent.requestId).map((r) => r.status))).toBe(true);
+    // A retry is told the truth.
+    expect((await forward(payload, sent.requestId)).answer).toEqual({ v: 1, outcome: 'delivered', duplicate: true });
   }, 90_000);
 
   it('records every answer without its body', () => {

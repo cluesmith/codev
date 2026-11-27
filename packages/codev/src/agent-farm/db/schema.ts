@@ -416,7 +416,8 @@ CREATE TABLE IF NOT EXISTS mailbox (
   remote_message_id TEXT,                 -- the message id (the statement's requestId)
   remote_sender TEXT,                     -- JSON MailboxRemoteSender: Tower id and slug, and the stated sending address
   remote_owner_email TEXT,                -- the sending Tower's owner, from the statement
-  release_hold INTEGER NOT NULL DEFAULT 0 -- 1 = held for release: never drained, escalated or counted as waiting; only with status 'held'
+  release_hold INTEGER NOT NULL DEFAULT 0, -- 1 = held for release: never drained, escalated or counted as waiting; only with status 'held'
+  released_at INTEGER                     -- epoch ms the owner released it (afx inbox release); NULL if never released
 );
 
 CREATE INDEX IF NOT EXISTS idx_mailbox_workspace_status ON mailbox(workspace_path, status);

@@ -8,6 +8,10 @@
  * 13. The recipient. 14. A grant (hold wins).   15. This Tower's limits.
  * 16. Persist, then one gate attempt as a local send makes, answered within the deadline.
  *
+ * The deadline is the contract's: R answers within 5 seconds of receiving the body and never
+ * makes C wait past it. An attempt that has not finished by then is answered with the
+ * message's state at that moment (`held`, `busy` while it waits or writes) and runs on.
+ *
  * Mailbox first (Spec 1313): the message is stored, with its accepted-once row, in one
  * transaction before any wait, so a missed deadline answers `held` and never loses mail. It
  * never writes a terminal: delivery is the mailbox's, through the render gate under the
@@ -177,14 +181,21 @@ async function decide(deps: ReceiverDeps, request: VerifiedPeerRequest, known: K
   deps.onHeldChanged();
   if (releaseHold) return { outcome: 'held', reason: 'held-for-release' };
 
-  // One gate attempt, if the agent's turn comes within what is left of the deadline. A pass
-  // that starts runs to its end and is answered with its outcome; one that fails leaves the
-  // row held, as a local send's does.
-  try {
-    const attempt = await deps.deliverWithin(recipient.workspacePath, recipient.name, Math.max(0, request.answerBy - deps.now()));
-    if (!attempt.started) deps.log('INFO', `Peer: ${known.label}: the agent was busy past the deadline; held for the backstop`);
-  } catch (err) {
-    deps.log('ERROR', `Peer: ${known.label}: the delivery attempt failed (${errorKind(err)}); the message stays held`);
+  // One gate attempt, if the agent's turn comes within what is left of the deadline. The
+  // answer is that attempt's outcome if it finishes by the deadline. If not (it is still
+  // writing, or its turn never came), the answer is the message's state at the deadline and the
+  // attempt runs on. One that fails leaves the row held, as a local send's does.
+  const msLeft = Math.max(0, request.answerBy - deps.now());
+  const attempt = deps.deliverWithin(recipient.workspacePath, recipient.name, msLeft).then(
+    (outcome) => {
+      if (!outcome.started) deps.log('INFO', `Peer: ${known.label}: the agent was busy past the deadline; held for the backstop`);
+    },
+    (err: unknown) => {
+      deps.log('ERROR', `Peer: ${known.label}: the delivery attempt failed (${errorKind(err)}); the message stays held`);
+    },
+  );
+  if (!(await settlesWithin(attempt, msLeft))) {
+    deps.log('INFO', `Peer: ${known.label}: the delivery was still running at the deadline; answered with its state then`);
   }
   const current = getAccepted(db, peer, statement.requestId);
   if (current === null) throw new Error('receiver: an accepted message has no accepted-once row');
@@ -228,6 +239,19 @@ function guarded(deps: ReceiverDeps, known: Known, write: () => void): void {
   }
 }
 
+/** Whether `work` settles within `ms`: false at the deadline, with `work` left running. */
+async function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([work.then(() => true as const), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** An error as a log line may name it: its class only, since a message could quote a value. */
 function errorKind(err: unknown): string {
   return err instanceof Error ? err.constructor.name : typeof err;
@@ -238,8 +262,10 @@ function errorKind(err: unknown): string {
 // ===========================================================================
 
 /**
- * May this remote row be delivered now? Only while the switch is on and a grant for its
- * sending Tower covers its recipient in `deliver` mode: hold wins, so a covering hold grant
+ * May this remote row be delivered now? Yes if its owner released it: what the owner does with
+ * a message already in the mailbox is their own decision, which the switch and the grants do
+ * not take back (spec 1940, Withdrawal). Otherwise only while the switch is on and a grant for
+ * its sending Tower covers its recipient in `deliver` mode: hold wins, so a covering hold grant
  * makes the answer no. The recipient's kind is read from the world: a name among the
  * workspace's architects is an architect; anything else is a builder, which only an `all`
  * grant covers, and that is also the answer for an architect since removed.
@@ -247,9 +273,10 @@ function errorKind(err: unknown): string {
 export function remoteMailAllowed(
   db: Database.Database,
   world: GrantWorld,
-  mail: Pick<DbMailbox, 'workspace_path' | 'to_agent' | 'remote_tower_id'>,
+  mail: Pick<DbMailbox, 'workspace_path' | 'to_agent' | 'remote_tower_id' | 'released_at'>,
 ): boolean {
   if (mail.remote_tower_id === null) throw new Error('receiver: a local row has no remote permission to check');
+  if (mail.released_at !== null) return true;
   if (!isRemoteMessagingOn(db)) return false;
   const recipient: GrantRecipient = {
     workspacePath: mail.workspace_path,
@@ -264,7 +291,8 @@ export function remoteMailAllowed(
  * Withdrawal (eager, by the owner's ruling): move every held remote row that may no longer
  * be delivered to held for release, one peer's when `peerTowerId` is given. Called in the
  * transaction that turns the switch off or changes a grant. Turning the switch on again
- * releases nothing: a human releases mail held for release. Returns how many rows moved.
+ * releases nothing: a human releases mail held for release. A row the owner released is never
+ * moved back ({@link remoteMailAllowed}). Returns how many rows moved.
  */
 export function withdrawRemoteMail(db: Database.Database, world: GrantWorld, now: number, peerTowerId?: string): number {
   let moved = 0;

@@ -188,6 +188,12 @@ export interface DbMailbox {
   remote_sender: string | null;       // JSON MailboxRemoteSender; read it with readRemoteSender
   remote_owner_email: string | null;  // the sending Tower's owner, from the statement
   release_hold: number;               // 0 | 1 — held for release; only ever 1 with status 'held'
+  /**
+   * When the owner released it from held for release (`afx inbox release`), or null. A released
+   * row is the owner's decision: the switch and the grants no longer govern it (spec 1940,
+   * Withdrawal: "what I do with a message already there is my own decision").
+   */
+  released_at: number | null;
 }
 
 /**

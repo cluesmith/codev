@@ -88,12 +88,12 @@ const INSERT_SQL = `
     id, workspace_path, to_agent, terminal_id, from_agent, from_workspace,
     body, formatted_message, no_enter, status, reason, detail, supersede_key,
     escalated, not_before, created_at, updated_at, resolved_at,
-    remote_tower_id, remote_message_id, remote_sender, remote_owner_email, release_hold
+    remote_tower_id, remote_message_id, remote_sender, remote_owner_email, release_hold, released_at
   ) VALUES (
     @id, @workspace_path, @to_agent, @terminal_id, @from_agent, @from_workspace,
     @body, @formatted_message, @no_enter, @status, @reason, @detail, @supersede_key,
     @escalated, @not_before, @created_at, @updated_at, @resolved_at,
-    @remote_tower_id, @remote_message_id, @remote_sender, @remote_owner_email, @release_hold
+    @remote_tower_id, @remote_message_id, @remote_sender, @remote_owner_email, @release_hold, @released_at
   )
 `;
 
@@ -126,6 +126,7 @@ function buildRow(input: EnqueueInput, now: number): DbMailbox {
     remote_sender: null,
     remote_owner_email: null,
     release_hold: 0,
+    released_at: null,
   };
 }
 
@@ -380,17 +381,20 @@ export function holdForRelease(db: Database.Database, id: string, now: number = 
 
 /**
  * Release a row held for release (`afx inbox release`, phase 11): it becomes ordinary held
- * mail, which the gate then drains, and reports its own reason again. Returns true if the
- * row moved, mirroring the reason into its accepted-once row in the same transaction.
+ * mail, which the gate then drains, and reports its own reason again. `released_at` records
+ * the owner's decision, so the switch and the grants no longer take it back: neither the
+ * check at the delivery instant nor a withdrawal holds it for release again (spec 1940,
+ * Withdrawal). Returns true if the row moved, mirroring the reason into its accepted-once row
+ * in the same transaction.
  */
 export function release(db: Database.Database, id: string, now: number = Date.now()): boolean {
   return db.transaction(() => {
     const changed = db
       .prepare(
-        `UPDATE mailbox SET release_hold = 0, updated_at = ?
+        `UPDATE mailbox SET release_hold = 0, released_at = ?, updated_at = ?
          WHERE id = ? AND status = 'held' AND release_hold = 1 AND remote_tower_id IS NOT NULL ${RETURNING_CHANGED}`
       )
-      .all(now, id) as ChangedRow[];
+      .all(now, now, id) as ChangedRow[];
     mirrorChanged(db, changed, now);
     return changed.length > 0;
   })();

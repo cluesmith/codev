@@ -640,6 +640,55 @@ describe('held for release', () => {
   });
 });
 
+describe("a row the owner released (spec 1940: 'what I do with a message already there is my own decision')", () => {
+  const frontDoor = { peerTowerId: MBP, scope: 'front-door' as const, workspacePath: CODEV, architect: null };
+
+  it('is delivered through the gate under the hold grant that held it', async () => {
+    f.grant({ scope: 'front-door', workspacePath: CODEV, architect: null }, 'hold');
+    expect(await f.receive(f.arrival())).toEqual({ v: 1, outcome: 'held', reason: 'held-for-release' });
+    const [row] = f.rows();
+    expect(await f.drain()).toEqual({ delivered: [], reason: null });
+
+    expect(mailbox.release(f.db, row.id, f.clock.now)).toBe(true);
+    expect((await f.drain()).delivered).toEqual([row.id]);
+    expect(f.terminals.get('main')!.submitted).toEqual([row.formatted_message]);
+  });
+
+  it('is delivered after a revocation and with the switch still off; the unreleased one waits', async () => {
+    f.verdict = DRAFT;
+    await f.receive(f.arrival());
+    f.clock.now += 1;
+    await f.receive(f.arrival());
+    store.removeGrant(f.db, frontDoor);
+    expect(withdrawRemoteMail(f.db, f.world, f.clock.now)).toBe(2);
+    setSwitch(f.db, 'off', f.clock.now);
+    const [first, second] = f.rows();
+
+    expect(mailbox.release(f.db, first.id, f.clock.now)).toBe(true);
+    f.verdict = CLEAN;
+    expect((await f.drain()).delivered).toEqual([first.id]);
+    expect(f.rows().find((r) => r.id === second.id)).toMatchObject({ status: 'held', release_hold: 1 });
+  });
+
+  it('is not taken back by a later withdrawal while it waits for a clean composer', async () => {
+    f.grant({ scope: 'front-door', workspacePath: CODEV, architect: null }, 'hold');
+    await f.receive(f.arrival());
+    const [row] = f.rows();
+    expect(mailbox.release(f.db, row.id, f.clock.now)).toBe(true);
+    f.verdict = DRAFT;
+    expect((await f.drain()).delivered).toEqual([]);
+
+    setSwitch(f.db, 'off', f.clock.now);
+    expect(withdrawRemoteMail(f.db, f.world, f.clock.now)).toBe(0);
+    store.removeGrant(f.db, { ...frontDoor });
+    expect(withdrawRemoteMail(f.db, f.world, f.clock.now, MBP)).toBe(0);
+    expect(f.rows()[0]).toMatchObject({ status: 'held', release_hold: 0, released_at: f.clock.now });
+
+    f.verdict = CLEAN;
+    expect((await f.drain()).delivered).toEqual([row.id]);
+  });
+});
+
 describe('eager withdrawal through the peer routes', () => {
   let server: http.Server;
   let port: number;
@@ -801,6 +850,57 @@ describe('delivery under contention', () => {
     expect((await backstop).delivered).toEqual([remote.id]);
   });
 
+  it('an attempt that starts in time but is still writing at the deadline is answered with the state then, and runs on', async () => {
+    vi.useFakeTimers({ now: T0 });
+    f.clock.now = T0;
+    // A write that takes 8 seconds, as agy's line-by-line pacing does for a long body.
+    const write = f.ports.writeMessage;
+    let writes = 0;
+    f.ports.writeMessage = async (...args: Parameters<DeliveryPorts['writeMessage']>) => {
+      writes++;
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      return write(...args);
+    };
+    const request = f.arrival();
+    let answered: Answer | null = null;
+    const answer = f.receive(request).then((a) => (answered = a));
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(writes).toBe(1);
+    expect(answered).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await answer;
+    expect(answered).toEqual({ v: 1, outcome: 'held', reason: 'busy' });
+    expect(f.rows()[0].status).toBe('held');
+    expect(f.logs.some((line) => line.startsWith('INFO') && line.includes('still running at the deadline'))).toBe(true);
+
+    // The attempt runs on and delivers; a retry is then told so.
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.runAllTimersAsync();
+    expect(f.rows()[0].status).toBe('delivered');
+    expect(f.terminals.get('main')!.submitted).toHaveLength(1);
+    expect(await f.receive(f.arrival({ requestId: request.statement.requestId, payload: request.payload }))).toEqual({
+      v: 1,
+      outcome: 'delivered',
+      duplicate: true,
+    });
+  });
+
+  it('an attempt that fails after the deadline is logged, and its message stays held', async () => {
+    vi.useFakeTimers({ now: T0 });
+    f.clock.now = T0;
+    f.ports.writeMessage = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      throw new TypeError('the terminal went away');
+    };
+    const answer = f.receive(f.arrival());
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await answer).toEqual({ v: 1, outcome: 'held', reason: 'busy' });
+    await vi.runAllTimersAsync();
+    expect(f.logs.some((line) => line.startsWith('ERROR') && line.includes('TypeError'))).toBe(true);
+    expect(f.logs.join('\n')).not.toContain('the terminal went away');
+    expect(f.rows()[0].status).toBe('held');
+  });
+
   it('takes the per-agent serializer before the terminal lock: a pass queued behind the agent never touches the terminal', async () => {
     const term = f.terminals.get('main')!;
     let release!: (v: GateVerdict) => void;
@@ -839,6 +939,12 @@ describe('the inbound record and the clock surface', () => {
       ['tunnel-session-1', null, 2, 'not-verified', true],
       ['tunnel-session-1', null, 1, 'not-verified', true],
     ]);
+  });
+
+  it('1 000 requests not verified in one minute add one row, with a count of 1 000', () => {
+    const minute = Date.UTC(2026, 10, 21, 3, 35, 0);
+    for (let i = 0; i < 1_000; i++) recordEntryEvent(f.db, event({ step: 2, at: minute + i * 50 }));
+    expect(f.records().map((r) => [r.tunnelSession, r.count, r.aggregate])).toEqual([['tunnel-session-1', 1_000, true]]);
   });
 
   it('counts requests that fail after step 2 against the verified sending Tower', () => {

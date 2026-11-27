@@ -321,6 +321,7 @@ describe('migration v21 on a database at today\'s schema', () => {
         remote_sender: null,
         remote_owner_email: null,
         release_hold: 0,
+        released_at: null,
       });
     }
 
@@ -677,7 +678,7 @@ describe('mirror: release', () => {
     const row = addRemote(db, { releaseHold: true });
     mailbox.setHeldVerdict(db, row.id, 'no-live-pty', null, T0 + 1);
     expect(mailbox.release(db, row.id, T0 + 6)).toBe(true);
-    expect(mailboxRow(db, row.id)).toMatchObject({ status: 'held', release_hold: 0, reason: 'no-live-pty' });
+    expect(mailboxRow(db, row.id)).toMatchObject({ status: 'held', release_hold: 0, released_at: T0 + 6, reason: 'no-live-pty' });
     expect(acceptedOf(db, row)).toMatchObject({ state: 'held', reason: 'no-live-pty', updatedAt: T0 + 6 });
     expect(mailbox.findHeldForAgent(db, WS, 'main', T0 + 6).map((r) => r.id)).toEqual([row.id]);
   });

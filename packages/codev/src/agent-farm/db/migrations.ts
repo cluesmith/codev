@@ -622,7 +622,8 @@ export function runGlobalMigrations(
 
   // Migration v21: Tower-to-Tower messaging storage (Spec 1967).
   // Additive only, so held mail is never copied or rebuilt. `mailbox` gains the nullable
-  // remote-provenance columns and `release_hold` (1 = held for release), none with a CHECK
+  // remote-provenance columns, `release_hold` (1 = held for release) and `released_at` (when the
+  // owner released it), none with a CHECK
   // for v18's reason; the new tables come from PEER_SCHEMA, the same text GLOBAL_SCHEMA
   // embeds, so a fresh install and an upgraded one cannot diverge. Each ADD COLUMN is gated
   // on PRAGMA table_info, as v16 to v20 are; the whole step is one transaction, so a failure
@@ -656,4 +657,5 @@ const V21_MAILBOX_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> =
   ['remote_sender', 'TEXT'],
   ['remote_owner_email', 'TEXT'],
   ['release_hold', 'INTEGER NOT NULL DEFAULT 0'],
+  ['released_at', 'INTEGER'],
 ];
