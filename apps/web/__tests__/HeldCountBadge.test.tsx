@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
-import type { HeldMessage } from '@cluesmith/codev-types';
+import type { HeldMessage, PeerOutboxMessage, PeerOutboxResponse } from '@cluesmith/codev-types';
 import { HeldCountBadge } from '../src/components/HeldCountBadge.js';
 
 afterEach(cleanup);
@@ -503,5 +503,213 @@ describe('HeldCountBadge', () => {
     const text = (await screen.findByTestId('held-row')).textContent!;
     expect(text).toContain('scheduled');
     expect(text).not.toContain('user-text');
+  });
+});
+
+// ------------------------------------------------------------------ Spec 1967: three counts
+
+/** Mail from devvm held for a human's release, as `GET /api/inbox` lists it. */
+function forRelease(over: Partial<HeldMessage> = {}): HeldMessage {
+  return row({
+    id: 'rel-1',
+    toAgent: 'architect:local',
+    fromAgent: null,
+    reason: 'held-for-release',
+    remoteSender: 'afx://devvm/codev:architect:main',
+    remoteOwnerEmail: 'ana@example.com',
+    ...over,
+  });
+}
+
+/** A message from this workspace waiting here for devvm, as `GET /api/peer/outbox` lists it. */
+function forPeer(over: Partial<PeerOutboxMessage> = {}): PeerOutboxMessage {
+  const sentAt = Date.now() - 120_000; // 2m ago
+  return {
+    id: 'out-1',
+    to: 'afx://devvm/codev:architect:local',
+    peerTowerId: '01JDEVVM0000000000000000AA',
+    peerName: 'devvm',
+    fromAgent: 'architect:main',
+    workspacePath: '/ws',
+    sentAt,
+    expiresAt: sentAt + 30 * 24 * 60 * 60_000,
+    state: 'held',
+    reason: 'tower-offline',
+    lastOutcome: 'unavailable',
+    attempts: 3,
+    nextAttemptAt: null,
+    inFlight: false,
+    resolvedAt: null,
+    ...over,
+  };
+}
+
+function outbox(messages: PeerOutboxMessage[], paused: PeerOutboxResponse['paused'] = null): () => Promise<PeerOutboxResponse> {
+  return () => Promise.resolve({ paused, messages });
+}
+
+describe('HeldCountBadge — Spec 1967 three counts', () => {
+  it('renders nothing while all three counts are 0', () => {
+    const { container } = render(
+      <HeldCountBadge count={0} heldForReleaseCount={0} waitingForPeerCount={0} escalated={false} loadMessages={noMessages} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('shows each count that is not zero, in order: held, for release, for a peer', () => {
+    render(<HeldCountBadge count={3} heldForReleaseCount={1} waitingForPeerCount={2} escalated={false} loadMessages={noMessages} />);
+    expect(screen.getByTestId('held-count-held').textContent).toBe('3 held');
+    expect(screen.getByTestId('held-count-release').textContent).toContain('1 for release');
+    expect(screen.getByTestId('held-count-peer').textContent).toContain('2 for a peer');
+    const order = [...screen.getByTestId('held-badge').querySelectorAll('[data-testid^="held-count-"]')].map((el) => el.getAttribute('data-testid'));
+    expect(order).toEqual(['held-count-held', 'held-count-release', 'held-count-peer']);
+  });
+
+  it('leaves out a count that is zero', () => {
+    render(<HeldCountBadge count={0} heldForReleaseCount={0} waitingForPeerCount={2} escalated={false} loadMessages={noMessages} />);
+    expect(screen.queryByTestId('held-count-held')).toBeNull();
+    expect(screen.queryByTestId('held-count-release')).toBeNull();
+    expect(screen.getByTestId('held-count-peer').textContent).toContain('2 for a peer');
+  });
+
+  it('enters the attention state for mail held for release, with nothing escalated', () => {
+    render(<HeldCountBadge count={0} heldForReleaseCount={1} waitingForPeerCount={0} escalated={false} loadMessages={noMessages} />);
+    const badge = screen.getByTestId('held-badge');
+    expect(badge.className).toContain('held-badge--attention');
+    expect(badge.querySelector('.held-dot--attention')).toBeTruthy();
+  });
+
+  it('does not enter the attention state for mail waiting for a peer, however much', () => {
+    render(<HeldCountBadge count={2} heldForReleaseCount={0} waitingForPeerCount={40} escalated={false} loadMessages={noMessages} />);
+    const badge = screen.getByTestId('held-badge');
+    expect(badge.className).not.toContain('held-badge--attention');
+    expect(badge.querySelector('.held-dot--attention')).toBeNull();
+  });
+
+  it('names each kind in its title', () => {
+    render(<HeldCountBadge count={1} heldForReleaseCount={2} waitingForPeerCount={3} escalated={false} loadMessages={noMessages} />);
+    const title = screen.getByTestId('held-badge').getAttribute('title')!;
+    expect(title).toContain('1 held message awaiting a clear prompt');
+    expect(title).toContain("2 messages from another Tower held for a human's release");
+    expect(title).toContain('3 messages waiting here for another Tower');
+  });
+
+  it('lists each kind in its own group, and only there; each group is as long as its count', async () => {
+    const now = Date.now();
+    const messages = [
+      row({ id: 'local-1', toAgent: 'spir-1' }),
+      row({ id: 'sched-1', notBefore: now + 30_000 }),
+      forRelease({ id: 'rel-1' }),
+      forRelease({ id: 'rel-2', toAgent: 'architect:main' }),
+    ];
+    render(
+      <HeldCountBadge
+        count={1}
+        heldForReleaseCount={2}
+        waitingForPeerCount={1}
+        escalated={false}
+        loadMessages={() => Promise.resolve(messages)}
+        loadWaitingForPeer={outbox([forPeer()])}
+      />,
+    );
+    await open();
+    const heldGroup = await screen.findByTestId('held-group-held');
+    const release = screen.getByTestId('held-group-release');
+    const peer = screen.getByTestId('held-group-peer');
+    const scheduled = screen.getByTestId('held-group-scheduled');
+
+    // Each group's length is the count the badge shows for it (the scheduled row is never counted).
+    expect(heldGroup.querySelectorAll('[data-testid="held-row"]')).toHaveLength(1);
+    expect(release.querySelectorAll('[data-testid="held-row"]')).toHaveLength(2);
+    expect(peer.querySelectorAll('[data-testid="held-row"]')).toHaveLength(1);
+    expect(scheduled.querySelectorAll('[data-testid="held-row"]')).toHaveLength(1);
+
+    // Mail held for release names its sender's full address, and is not in the Held group.
+    expect(release.textContent).toContain('afx://devvm/codev:architect:main → architect:local');
+    expect(release.textContent).toContain('held for release');
+    expect(heldGroup.textContent).not.toContain('afx://devvm');
+
+    // Mail waiting for a peer names the full address it goes to, and why it waits.
+    expect(peer.textContent).toContain('architect:main → afx://devvm/codev:architect:local');
+    expect(peer.textContent).toContain('2m · tower-offline');
+    expect(screen.getByText('Held for release (2)')).toBeTruthy();
+    expect(screen.getByText('Waiting for a peer (1)')).toBeTruthy();
+    expect(screen.queryByTestId('held-empty')).toBeNull();
+  });
+
+  it('says why mail for a peer does not leave while the queues are paused', async () => {
+    render(
+      <HeldCountBadge
+        count={0}
+        waitingForPeerCount={1}
+        escalated={false}
+        loadMessages={noMessages}
+        loadWaitingForPeer={outbox([forPeer()], 'remote-off')}
+      />,
+    );
+    await open();
+    expect((await screen.findByTestId('held-peer-note')).textContent).toContain('remote messaging is off');
+  });
+
+  it('shows a message whose relay call is in flight as being sent', async () => {
+    render(
+      <HeldCountBadge
+        count={0}
+        waitingForPeerCount={1}
+        escalated={false}
+        loadMessages={noMessages}
+        loadWaitingForPeer={outbox([forPeer({ inFlight: true })])}
+      />,
+    );
+    await open();
+    expect((await screen.findByTestId('held-group-peer')).textContent).toContain('sending now');
+  });
+
+  it('has no peer group without a peer loader, or from a Tower that lists none', async () => {
+    const { rerender } = render(<HeldCountBadge count={1} escalated={false} loadMessages={() => Promise.resolve([row()])} />);
+    await open();
+    await screen.findByTestId('held-group-held');
+    expect(screen.queryByTestId('held-group-peer')).toBeNull();
+
+    rerender(
+      <HeldCountBadge count={1} escalated={false} loadMessages={() => Promise.resolve([row()])} loadWaitingForPeer={() => Promise.resolve(null)} />,
+    );
+    fireEvent.click(screen.getByTestId('held-badge')); // close
+    await open();
+    await screen.findByTestId('held-group-held');
+    expect(screen.queryByTestId('held-group-peer')).toBeNull();
+  });
+
+  it('shows the error state when the peer list fails, rather than leave its group silently out', async () => {
+    render(
+      <HeldCountBadge
+        count={1}
+        waitingForPeerCount={1}
+        escalated={false}
+        loadMessages={() => Promise.resolve([row()])}
+        loadWaitingForPeer={() => Promise.reject(new Error('Failed to fetch mail waiting for a peer: 500'))}
+      />,
+    );
+    await open();
+    expect((await screen.findByTestId('held-error')).textContent).toContain('waiting for a peer: 500');
+  });
+
+  it('refetches when the count held for release changes while the panel is open', async () => {
+    const loadMessages = vi.fn(() => Promise.resolve([forRelease()]));
+    const { rerender } = render(<HeldCountBadge count={0} heldForReleaseCount={1} escalated={false} loadMessages={loadMessages} />);
+    await open();
+    await waitFor(() => expect(loadMessages).toHaveBeenCalledTimes(1));
+    rerender(<HeldCountBadge count={0} heldForReleaseCount={2} escalated={false} loadMessages={loadMessages} />);
+    await waitFor(() => expect(loadMessages).toHaveBeenCalledTimes(2));
+  });
+
+  it('says held mail cleared once every kind has drained while the panel is open', async () => {
+    const { rerender } = render(
+      <HeldCountBadge count={0} heldForReleaseCount={1} escalated={false} loadMessages={() => Promise.resolve([])} />,
+    );
+    await open();
+    rerender(<HeldCountBadge count={0} heldForReleaseCount={0} escalated={false} loadMessages={() => Promise.resolve([])} />);
+    expect((await screen.findByTestId('held-empty')).textContent).toContain('Held mail cleared');
+    expect(screen.getByTestId('held-badge').textContent).toContain('0 held');
   });
 });

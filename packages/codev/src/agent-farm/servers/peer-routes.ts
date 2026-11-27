@@ -7,6 +7,7 @@
  *   GET  /api/peer/switch         the remote-messaging switch
  *   PUT  /api/peer/switch         turn it on (a human's act) or off; the change is reported to Codev Cloud
  *   GET  /api/peer/towers         my other Towers, from Codev Cloud within its call budget, else cached
+ *   GET  /api/peer/panel          the same, for the Peers panel on Tower's home page, and whether it came through the cloud
  *   GET  /api/peer/grants         this Tower's grants [?tower=<tower-ref>]
  *   POST /api/peer/grants         add grants (a human's act)
  *   POST /api/peer/grants/revoke  remove grants
@@ -40,6 +41,7 @@ import {
   type PeerLimitsResponse,
   type PeerLogResponse,
   type PeerOutboxResponse,
+  type PeerPanelResponse,
   type PeerRevokeResponse,
   type PeerShowResponse,
   type PeerStatusResponse,
@@ -67,7 +69,7 @@ import type { PeerListRefresh } from '../peer/peer-list.js';
 import type { PeerShowResult } from '../peer/sender.js';
 import type { Outbox } from '../peer/outbox.js';
 import { clockSkewSince } from '../peer/records.js';
-import { heldOutboxForWorkspace, marksByPeer, outboxMessageView, peerNamer, readLog } from '../peer/surfaces.js';
+import { heldOutboxForWorkspace, marksByPeer, outboxMessageView, peerNamer, queueHeads, readLog } from '../peer/surfaces.js';
 import { countReleasedWaiting } from '../db/mailbox.js';
 import {
   listGrants,
@@ -426,6 +428,16 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     };
   }
 
+  /**
+   * The read-only Peers panel on Tower's home page: what `afx peer list` shows, and whether the
+   * page came through Codev Cloud, by the same test that refuses turning the switch on and adding
+   * a grant there. The panel asks every 30 seconds, and the list is fetched within the call
+   * budget `afx peer list` keeps, so an open page adds no calls beyond it.
+   */
+  async function getPanel(req: http.IncomingMessage): Promise<PeerPanelResponse> {
+    return { ...(await getTowers()), viaTunnel: isOverTunnel(req) };
+  }
+
   /** Remote messaging at a glance (`afx status`, `afx tower status`): the cached list only, never a call to the cloud. */
   function getStatus(): PeerStatusResponse {
     const db = deps.db();
@@ -449,9 +461,10 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     const db = deps.db();
     const queue = deps.cloud().outbox();
     const nameOf = peerNamer(db);
+    const heads = queueHeads(db);
     return {
       paused: queue.pausedBecause(),
-      messages: heldOutboxForWorkspace(db, workspace).map((row) => outboxMessageView(db, row, queue, nameOf)),
+      messages: heldOutboxForWorkspace(db, workspace).map((row) => outboxMessageView(db, row, queue, nameOf, heads)),
     };
   }
 
@@ -527,6 +540,9 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
           break;
         case 'towers':
           if (method === 'GET') return sendJson(res, 200, await getTowers());
+          break;
+        case 'panel':
+          if (method === 'GET') return sendJson(res, 200, await getPanel(req));
           break;
         case 'grants':
           if (method === 'GET') return sendJson(res, 200, await getGrants(url));

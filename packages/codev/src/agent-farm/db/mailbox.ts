@@ -37,7 +37,7 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { PeerHeldReason } from '@cluesmith/codev-types';
-import { readWireSenderAddress } from '../peer/contract.js';
+import { readWireSenderAddress, SLUG_PATTERN, STATEMENT_FIELD_RULES } from '../peer/contract.js';
 import {
   getAccepted,
   insertAccepted,
@@ -230,8 +230,10 @@ function checkRemoteSender(value: unknown): MailboxRemoteSender {
   if (typeof v.towerId !== 'string' || v.towerId.length === 0) {
     throw new Error('mailbox: a remote sender needs the sending Tower id');
   }
-  if (typeof v.towerSlug !== 'string' || v.towerSlug.length === 0) {
-    throw new Error('mailbox: a remote sender needs the sending Tower slug');
+  // The slug rule the statement was verified by, and the frame's formatter checks: a stored
+  // name that does not fit it is refused here too, rather than printed by `afx inbox`.
+  if (typeof v.towerSlug !== 'string' || !SLUG_PATTERN.test(v.towerSlug)) {
+    throw new Error('mailbox: a remote sender needs a sending Tower slug that fits the slug rule');
   }
   let address: MailboxRemoteSender['address'] = null;
   if (v.address !== null) {
@@ -254,6 +256,24 @@ export function readRemoteSender(row: Pick<DbMailbox, 'remote_sender'>): Mailbox
     throw new Error('mailbox: a stored remote sender is not valid JSON');
   }
   return checkRemoteSender(parsed);
+}
+
+/**
+ * The sending Tower's owner as stored: `null`, or an email that fits the rule the statement's
+ * `fromOwnerEmail` was verified by (no excluded code point, at most 254 bytes). Checked as it is
+ * written and as it is read, so `afx inbox` never prints one nothing checked.
+ */
+function checkRemoteOwnerEmail(value: unknown): string | null {
+  if (value === null) return null;
+  if (!STATEMENT_FIELD_RULES.fromOwnerEmail(value)) {
+    throw new Error("mailbox: a remote owner email must fit the statement's email rule, or be null");
+  }
+  return value as string;
+}
+
+/** The owner of a remote row's sending Tower, read back and checked; `null` for a local row or none. */
+export function readRemoteOwnerEmail(row: Pick<DbMailbox, 'remote_owner_email'>): string | null {
+  return checkRemoteOwnerEmail(row.remote_owner_email);
 }
 
 /** A message from another Tower, verified and ready to persist (phase 6's receiver builds it). */
@@ -312,9 +332,7 @@ export function enqueueRemote(
   if (typeof input.remote.messageId !== 'string' || input.remote.messageId.length === 0) {
     throw new Error('mailbox: a remote row needs its message id');
   }
-  if (input.remote.ownerEmail !== null && (typeof input.remote.ownerEmail !== 'string' || input.remote.ownerEmail.length === 0)) {
-    throw new Error('mailbox: a remote owner email must be a non-empty string or null');
-  }
+  const ownerEmail = checkRemoteOwnerEmail(input.remote.ownerEmail);
   const row: DbMailbox = {
     ...buildRow(
       {
@@ -332,7 +350,7 @@ export function enqueueRemote(
     remote_tower_id: sender.towerId,
     remote_message_id: input.remote.messageId,
     remote_sender: JSON.stringify(sender),
-    remote_owner_email: input.remote.ownerEmail,
+    remote_owner_email: ownerEmail,
     release_hold: input.releaseHold ? 1 : 0,
   };
   return db.transaction((): RemoteEnqueueResult => {

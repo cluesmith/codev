@@ -21,7 +21,7 @@ import { readMessagePayload } from './contract.js';
 import { peerNameOf } from './grants.js';
 import { outboxHoldReason, readPeerMarks, type Outbox, type PeerMark } from './outbox.js';
 import {
-  getOutbox,
+  getOutboxMany,
   listHeldOutbox,
   listRecords,
   listTowerNames,
@@ -77,14 +77,31 @@ function outboxReason(row: PeerOutboxRow): string {
   return row.state;
 }
 
-/** One message waiting for (or once waiting for) a peer, as `afx inbox` and `afx inbox show` report it. */
+/**
+ * The message at the head of each peer's queue: the one its queue sends next. Read once for a
+ * view of many rows. Every peer's held rows come in acceptance order, as each peer's own do, so
+ * the first row seen for a peer is the head of its queue.
+ */
+export function queueHeads(db: Database.Database): ReadonlySet<string> {
+  const heads = new Map<string, string>();
+  for (const row of listHeldOutbox(db)) {
+    if (!heads.has(row.peerTowerId)) heads.set(row.peerTowerId, row.messageId);
+  }
+  return new Set(heads.values());
+}
+
+/**
+ * One message waiting for (or once waiting for) a peer, as `afx inbox` and `afx inbox show`
+ * report it. A view of many rows reads the names and the queue heads once and passes them in.
+ */
 export function outboxMessageView(
   db: Database.Database,
   row: PeerOutboxRow,
   queue: OutboxQueueView,
   nameOf: PeerNamer = peerNamer(db),
+  heads: ReadonlySet<string> = queueHeads(db),
 ): PeerOutboxMessage {
-  const next = row.state === 'held' && listHeldOutbox(db, row.peerTowerId)[0]?.messageId === row.messageId;
+  const next = row.state === 'held' && heads.has(row.messageId);
   return {
     id: row.messageId,
     to: row.toAddress,
@@ -148,16 +165,22 @@ function printable(text: string | null): string | null {
   return text === null ? null : text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '?');
 }
 
+/** Does this record row name a message this Tower sent, whose own state the log shows beside it? */
+function namesSentMessage(record: PeerRecordRow): record is PeerRecordRow & { messageId: string } {
+  return record.direction === 'outbound' && record.kind === 'message' && record.messageId !== null;
+}
+
 /**
  * One row of the record as `afx peer log` shows it. An outbound message also carries its own
  * state here now, so an answer the outbox did not use (a registration that changed while it
- * was sent) shows beside what the message did.
+ * was sent) shows beside what the message did. `sent` holds those messages, read once for
+ * the whole view.
  */
-export function logEntryView(db: Database.Database, record: PeerRecordRow, nameOf: PeerNamer): PeerLogEntry {
+export function logEntryView(record: PeerRecordRow, nameOf: PeerNamer, sent: ReadonlyMap<string, PeerOutboxRow>): PeerLogEntry {
   let message: PeerLogEntry['message'] = null;
-  if (record.direction === 'outbound' && record.kind === 'message' && record.messageId !== null) {
-    const row = getOutbox(db, record.messageId);
-    if (row !== null) message = { state: row.state, reason: outboxReason(row) };
+  if (namesSentMessage(record)) {
+    const row = sent.get(record.messageId);
+    if (row !== undefined) message = { state: row.state, reason: outboxReason(row) };
   }
   const peer = record.peerTowerId === null ? record.peerSlug : (nameOf(record.peerTowerId) ?? record.peerSlug ?? record.peerTowerId);
   return {
@@ -188,5 +211,6 @@ export function readLog(
   const records = listRecords(db, { peerTowerId: options.peerTowerId, limit: options.limit + 1 });
   const nameOf = peerNamer(db);
   const shown = records.slice(0, options.limit);
-  return { entries: shown.map((record) => logEntryView(db, record, nameOf)), truncated: records.length > options.limit };
+  const sent = getOutboxMany(db, [...new Set(shown.filter(namesSentMessage).map((record) => record.messageId))]);
+  return { entries: shown.map((record) => logEntryView(record, nameOf, sent)), truncated: records.length > options.limit };
 }

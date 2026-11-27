@@ -4,7 +4,7 @@ import { useTabs, type Tab } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import { useOverview } from '../hooks/useOverview.js';
 import { MOBILE_BREAKPOINT } from '../lib/constants.js';
-import { getTerminalWsPath, createFileTab, fetchInbox, removeArchitect as removeArchitectApi } from '../lib/api.js';
+import { getTerminalWsPath, createFileTab, fetchInbox, fetchWaitingForPeer, removeArchitect as removeArchitectApi } from '../lib/api.js';
 import { readActiveArchitect, writeActiveArchitect } from '../lib/architectPersistence.js';
 import { SplitPane } from './SplitPane.js';
 import { TabBar } from './TabBar.js';
@@ -36,7 +36,8 @@ export function App() {
   const { state, refresh } = useBuilderStatus();
   // Spec 1313 Phase 8: workspace held-mail count for the header indicator. useOverview
   // is a self-contained SSE hook (shared EventSource) that refetches on overview-changed,
-  // so heldCount / mailboxEscalated stay live without extra wiring.
+  // so heldCount / mailboxEscalated stay live without extra wiring. Spec 1967 adds the two
+  // counts of mail from and for other Towers, from the same overview.
   const { data: overview } = useOverview();
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
@@ -366,8 +367,11 @@ export function App() {
         <div className="header-controls">
           <HeldCountBadge
             count={overview?.heldCount ?? 0}
+            heldForReleaseCount={overview?.heldForReleaseCount ?? 0}
+            waitingForPeerCount={overview?.waitingForPeerCount ?? 0}
             escalated={overview?.mailboxEscalated ?? false}
             loadMessages={fetchInbox}
+            loadWaitingForPeer={fetchWaitingForPeer}
           />
           {state?.version && <span className="header-version">v{state.version}</span>}
         </div>

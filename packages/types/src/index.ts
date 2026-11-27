@@ -172,6 +172,7 @@ export {
   type PeerCloudRelay,
   type PeerListedTowerView,
   type PeerTowersResponse,
+  type PeerPanelResponse,
   type PeerShownAddress,
   type PeerShowResponse,
   type PeerMarkName,

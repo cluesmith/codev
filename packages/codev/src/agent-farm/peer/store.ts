@@ -546,6 +546,17 @@ export function getOutbox(db: Database.Database, messageId: string): PeerOutboxR
   return row ? toOutbox(row) : null;
 }
 
+/** Several messages by id at once, for a view of many rows; an id with no message is left out. */
+export function getOutboxMany(db: Database.Database, messageIds: readonly string[]): Map<string, PeerOutboxRow> {
+  const found = new Map<string, PeerOutboxRow>();
+  if (messageIds.length === 0) return found;
+  const rows = db
+    .prepare('SELECT * FROM peer_outbox WHERE message_id IN (SELECT value FROM json_each(?))')
+    .all(JSON.stringify(messageIds)) as DbPeerOutbox[];
+  for (const row of rows) found.set(row.message_id, toOutbox(row));
+  return found;
+}
+
 /** Held rows, a peer's or every peer's, in acceptance order. */
 export function listHeldOutbox(db: Database.Database, peerTowerId?: string): PeerOutboxRow[] {
   const rows = (

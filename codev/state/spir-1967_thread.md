@@ -1242,3 +1242,98 @@ a line this phase wrote.
     run asserts the grouping, not only the counts.
   - **For phase 13's walkthrough (claude 4):** one manual run of the full `afx status`
     command, since layer B checks its line through `renderRemoteMessagingLine`.
+
+## 2026-11-27 — phase 12: Peers panel and three-count indicator
+
+- **Delivered.**
+  - **Peers panel** on Tower's home page (`templates/tower.html`), read-only, with no control
+    of any kind. It shows what `afx peer list` shows: the switch, each of my other Towers with
+    the online hint, its own switch and what it may message here, the three marks on their own
+    peer's row (not verifying, clock out of range, cloud error), this Tower's own clock note, and
+    why a list is not a fresh one (not connected, unreachable, no relay, own tunnel down). Every
+    text from the route is escaped. Through Codev Cloud it says that turning remote messaging on
+    and granting a peer are done at this Tower's own machine, and offers neither (the
+    architect's 02:01Z consequence for phase 12).
+  - **`GET /api/peer/panel`** (`peer-routes.ts`): `GET /api/peer/towers`'s answer plus
+    `viaTunnel`, decided by the same `isOverTunnel` test that refuses `on` and `grant` there.
+    Type `PeerPanelResponse` in codev-types.
+  - **Three-count held-mail indicator** (`apps/web`): `HeldCountBadge` shows each count that is
+    not zero (`N held · N for release · N for a peer`) and renders nothing while all three are
+    zero. The popover lists Held, Scheduled, Held for release and Waiting for a peer, each in its
+    own group and only there, each group as long as its count; remote senders by full address.
+    `heldMail.ts` gains `groupHeldMail`, `isHeldForRelease`, `heldSenderOf`, `peerPauseText`;
+    `api.ts` gains `fetchWaitingForPeer`; `App.tsx` passes the two new counts. The popover is
+    taller (min(480px, 100vh - 80px)) for four groups, and the dotted underline moved onto each
+    count's text so it no longer runs under the dots.
+  - **`playwright.peers.config.ts`** (new) and `playwright.config.ts` (`testIgnore` is now
+    `[DECISIONS_SUITE, ...PEERS_SUITE]`). The config refuses `TOWER_TEST_PORT` unset, 4100 or not
+    a port before it makes anything; makes its agent-farm, socket and HOME directories under the
+    system temp directory in the main process and records them for the workers
+    (`e2e/peers-isolation.ts`); checks each by realpath (under tmp; not, and not containing, the
+    live agent-farm dir, the default socket dir or the real home); passes them to a fresh Tower
+    (`reuseExistingServer: false`, `CODEV_TOWER_KEY` blanked); no global setup.
+- **Readings, for the architect.**
+  1. **Attention.** Mail held for release puts the badge in its attention state; mail waiting
+     for a peer never does. #1313's escalation keeps its own attention state, unchanged. I read
+     the plan's "for held-for-release mail only" as "of the new kinds", since spec 1940 says
+     "mail held for release puts it in its attention state" and removing escalation's would
+     break #1313.
+  2. **Counts shown.** Each non-zero count, so the ordinary case still reads `N held` and the
+     badge still disappears at zero (the #1313 contract). The popover shows all four groups.
+  3. **The panel's cloud calls.** The route refreshes the peer list within the on-demand budget
+     `afx peer list` keeps (at most one listing call per 10 s per Tower, shared by every caller),
+     and the page asks it every 30 s, not with the home page's 5 s refresh. Contract section 3
+     names its on-demand callers by example; the panel adds no calls beyond that spacing and stays
+     well inside C's 30 a minute.
+  4. **The unmocked case.** A fresh Tower has no cloud registration, so "a cloud with no relay"
+     is read as no cloud at all: relay `unknown`, listing `not-connected`, switch off.
+  5. **One wiring addition outside the plan's file list:** `tower-routes.ts` gains the
+     workspace-scoped `GET /workspace/<b64>/api/peer/outbox`, so the popover lists mail waiting
+     for a peer as `afx inbox` does. It is an exact match, hands the peer route a URL carrying only
+     the prefix's workspace, and reaches no other peer route (tested).
+  6. **Teardown order.** Playwright runs a global teardown before it stops its `webServer`, so
+     `peers-teardown.ts` first stops the test Tower through its own `POST /api/shutdown` (keyed
+     from the Tower's own state dir, never the live key), waits for its pid to exit, then removes
+     the three directories, checked again.
+  7. **The held-count suite** now drives a `mkdtemp` workspace instead of the repository's.
+- **Fix in place (phase 11 claude notes, promised).**
+  - **Note 1:** `checkRemoteSender` (`db/mailbox.ts`) requires the sending Tower slug to fit
+    `SLUG_PATTERN`, and the owner email is checked by the statement's `fromOwnerEmail` rule, both
+    as written (`enqueueRemote`) and as read (`readRemoteOwnerEmail`, used by `remoteSenderOf`).
+    A hostile stored slug or owner makes `afx inbox` / `show` fail with the rule named, never
+    print it. I chose the rule check over `printable()`, as `readRemoteSender` already throws
+    for an address that does not fit.
+  - **Note 3:** `surfaces.ts` reads the queue heads once (`queueHeads`) and the log's sent
+    messages in one query (`store.getOutboxMany`, `json_each`), instead of once per row.
+- **Tests.**
+  - Layer A: `peer-inbox.test.ts` +8 (hostile slug and owner refused by list and show and never
+    stored; the workspace-scoped outbox route scoped, head of queue, no other route; `queueHeads`,
+    `getOutboxMany`); `peer-list.test.ts` +3 (the panel route: what `afx peer list` shows,
+    `viaTunnel` by the refusals' test, no calls inside the budget);
+    `playwright-peers-config.test.ts` (new, 14: port refusals before any directory, loaded twice
+    finds one set, fresh Tower and no global setup, path check, removal).
+  - apps/web: `HeldCountBadge.test.tsx` +13 and `heldMail.test.ts` +7 (three counts, attention,
+    grouping, peer group, errors, refetch, cleared state).
+  - Layer C: `e2e/peers-panel.test.ts` (new, 8) and the held-count suite extended in place (+4),
+    both only through `playwright.peers.config.ts`.
+- **Verified.**
+  - Build: 17 s.
+  - Layer C, on demand at load 1.5, port 14102: 16 of 16 in 5.5 s, first run. After the CSS fix
+    and a rebuild, at load 1.6: 16 of 16 in 5.4 s. After each run no `codev-peers-e2e-*` or
+    `codev-held-count-*` directory remained and nothing listened on 14102.
+  - Screenshots, checked by eye: `codev/reviews/1967-tower-to-tower-messaging-stage/`
+    `peers-panel-several.png` (four peers, each mark, the clock note),
+    `peers-panel-via-cloud.png` (through Codev Cloud, switch off), and
+    `held-count-three-groups.png` (the three counts and the four-group popover).
+  - Layer A: 11 005 passed, 116 skipped, 242 s.
+  - apps/web: 482 passed, 1 skipped (38 files), run with `NODE_OPTIONS=--no-experimental-webstorage`.
+    Without it, on this Mac's Node v26.3.1, 96 tests in 11 older files fail (`Terminal.*`,
+    `VirtualKeyboard`, `architect-toolbar`, `WorkView.dashboard-host`). The cause: Node's
+    experimental built-in `localStorage` (no `--localstorage-file`) shadows jsdom's, so
+    `localStorage.getItem` is undefined at `api.ts:44`, a line this phase did not change.
+    Two of the files, rerun with the flag only as diagnosis, passed; then the whole suite did.
+    None of the failing files imports a file this phase changed except `api.ts`. Reported to the
+    architect; not changed here (the flag is unknown to older Node, so it cannot simply go into
+    the web app's test config).
+  - A literal U+202E landed in `peer-inbox.test.ts` where I typed the escape (the U+2028 trap);
+    the scan of every changed file caught it, it is now the escape text, and the file passes.

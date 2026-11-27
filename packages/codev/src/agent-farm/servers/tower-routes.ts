@@ -129,6 +129,7 @@ import {
   listHeld as listHeldMailbox,
   dismiss as dismissMailbox,
   release as releaseMailbox,
+  readRemoteOwnerEmail,
   readRemoteSender,
   reportedReason as reportedMailboxReason,
   reportedDetail as reportedMailboxDetail,
@@ -3183,14 +3184,15 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
 
 /**
  * Spec 1967: who sent a remote mailbox row, as the message's header names it, and the sending
- * Tower's owner; both `null` for local mail. A stored sender that does not fit its rules
- * throws (`readRemoteSender`), rather than be shown unchecked.
+ * Tower's owner; both `null` for local mail. A stored sender or owner that does not fit the
+ * rules the statement was verified by throws (`readRemoteSender`, `readRemoteOwnerEmail`),
+ * rather than be shown unchecked.
  */
 function remoteSenderOf(row: DbMailbox): { remoteSender: string | null; remoteOwnerEmail: string | null } {
   const remote = readRemoteSender(row);
   return {
     remoteSender: remote === null ? null : remoteSenderText({ towerSlug: remote.towerSlug, sender: remote.address }),
-    remoteOwnerEmail: remote === null ? null : row.remote_owner_email,
+    remoteOwnerEmail: remote === null ? null : readRemoteOwnerEmail(row),
   };
 }
 
@@ -3851,6 +3853,18 @@ async function handleWorkspaceRoutes(
     // path inside Spec 1313's redaction rule and decision 8 (dismissal is CLI-only).
     if (req.method === 'GET' && apiPath === 'inbox') {
       return handleInboxList(res, url, workspacePath);
+    }
+
+    // GET /api/peer/outbox - mail from THIS workspace waiting here for another Tower (Spec 1967).
+    // Backs the held-mail popover's "waiting for a peer" group, as `inbox` above backs the rest.
+    // The peer route reads its workspace from the query, so it is handed a URL that carries only
+    // the workspace this prefix resolved: no query the caller sends can name another workspace.
+    // An exact match, like `inbox`: no other peer route is reachable under the prefix.
+    if (req.method === 'GET' && apiPath === 'peer/outbox') {
+      await whenStartupReconcileSettled();
+      const scoped = new URL(`${PEER_ROUTE_PREFIX}outbox`, url.origin);
+      scoped.searchParams.set('workspace', workspacePath);
+      return await createPeerRouteHandler(peerRouteDeps(ctx))(req, res, scoped);
     }
 
     // POST /api/overview/refresh - Invalidate overview cache (Spec 0126 Phase 4)

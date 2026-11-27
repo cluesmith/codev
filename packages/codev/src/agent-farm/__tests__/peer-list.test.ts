@@ -12,7 +12,9 @@
  *   current one, and a name new to the cache is found after one refresh;
  * - this Tower's own name follows the listing's `self.slug` (G4);
  * - walkthrough step 1 end to end: `afx peer list` through the real route and the SDK,
- *   with the switch off; and `afx peer limits` shows the cloud's limits from the listing.
+ *   with the switch off; and `afx peer limits` shows the cloud's limits from the listing;
+ * - the Peers panel's route (phase 12): what `afx peer list` shows, whether the page came
+ *   through the cloud, and no listing calls beyond the on-demand budget.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -23,6 +25,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
+import type { PeerPanelResponse } from '@cluesmith/codev-types';
+import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as store from '../peer/store.js';
 import { CloudClient, LISTING_ON_DEMAND_INTERVAL_MS } from '../peer/cloud-client.js';
@@ -494,6 +498,42 @@ describe("walkthrough step 1: 'afx peer list' on mbp, with the switch off", () =
     clock.advance(LISTING_ON_DEMAND_INTERVAL_MS);
     await peerList({}, deps);
     expect(printed[1]).toBe('devvm  you  online  may message this Tower: codev:architect:main (deliver)');
+  });
+
+  // Phase 12: the read-only Peers panel on Tower's home page reads this route.
+  async function panel(headers: Record<string, string> = {}): Promise<PeerPanelResponse> {
+    const port = (server.address() as AddressInfo).port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/peer/panel`, { headers });
+    expect(response.status).toBe(200);
+    return (await response.json()) as PeerPanelResponse;
+  }
+
+  it('GET /api/peer/panel answers what afx peer list shows, and that the page did not come through the cloud', async () => {
+    const answer = await panel();
+    expect(answer).toMatchObject({ remoteMessaging: 'off', towerName: 'ana-s-mbp', tunnel: 'up', viaTunnel: false, clockSkewSince: null });
+    expect(answer.relay.state).toBe('available');
+    expect(answer.towers.map((t) => [t.name, t.online, t.mayMessage, t.marks])).toEqual([['devvm', true, [], []]]);
+  });
+
+  it('GET /api/peer/panel says the page came through the cloud by the test the refusals use, where turning the switch on is refused', async () => {
+    expect((await panel({ [TUNNEL_PROXY_HEADER]: '1' })).viaTunnel).toBe(true);
+    const port = (server.address() as AddressInfo).port;
+    const on = await fetch(`http://127.0.0.1:${port}/api/peer/switch`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', [TUNNEL_PROXY_HEADER]: '1' },
+      body: JSON.stringify({ state: 'on', humanApproved: true }),
+    });
+    expect(on.status).toBe(403);
+    expect(((await on.json()) as { error: string }).error).toBe('NOT_OVER_TUNNEL');
+  });
+
+  it('GET /api/peer/panel fetches the list within the call budget afx peer list keeps: an open page adds no calls inside it', async () => {
+    await panel();
+    await panel();
+    expect(listingCalls()).toBe(1);
+    clock.advance(LISTING_ON_DEMAND_INTERVAL_MS);
+    await panel();
+    expect(listingCalls()).toBe(2);
   });
 
   it("shows the cloud's limits once the list has been fetched, and says they are not known before", async () => {

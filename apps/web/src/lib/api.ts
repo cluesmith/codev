@@ -92,6 +92,9 @@ export type {
   OverviewRecentlyClosed,
   OverviewData,
   HeldMessage,
+  PeerOutboxMessage,
+  PeerOutboxResponse,
+  PeerQueuePause,
   ProtocolStats,
   AnalyticsResponse,
   DecisionStamp,
@@ -113,6 +116,7 @@ import type {
   TeamApiResponse,
   OverviewData,
   HeldMessage,
+  PeerOutboxResponse,
   DashboardState,
   DecisionsDocument,
   DecisionsRefusalCode,
@@ -227,6 +231,21 @@ export async function fetchOverview(): Promise<OverviewData> {
 export async function fetchInbox(): Promise<HeldMessage[]> {
   const res = await fetch(apiUrl('api/inbox'), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch held messages: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Spec 1967: messages this workspace sent to another Tower that wait on this Tower for it — the
+ * held-mail popover's "waiting for a peer" group, the same rows `afx inbox` lists there.
+ *
+ * Hits the workspace-scoped `GET /api/peer/outbox`, which takes its workspace from the
+ * `/workspace/<base64>/` prefix, as `api/inbox` does. Metadata only: the route carries no body.
+ * `null` from a Tower older than Spec 1967, which has no such route and no such mail.
+ */
+export async function fetchWaitingForPeer(): Promise<PeerOutboxResponse | null> {
+  const res = await fetch(apiUrl('api/peer/outbox'), { headers: getAuthHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Failed to fetch mail waiting for a peer: ${res.status}`);
   return res.json();
 }
 

@@ -1138,6 +1138,17 @@ export interface PeerTowersResponse {
 }
 
 /**
+ * `GET /api/peer/panel`: what the read-only Peers panel on Tower's home page shows (Spec 1967,
+ * Decision 9): the towers, grants and marks of `GET /api/peer/towers`, and whether this request
+ * came through Codev Cloud. Turning remote messaging on and adding a grant are refused through
+ * the cloud, so there the panel says they are done at this Tower's own machine.
+ */
+export interface PeerPanelResponse extends PeerTowersResponse {
+  /** This request came through Codev Cloud's tunnel, by the test the refusals use. */
+  viaTunnel: boolean;
+}
+
+/**
  * `GET /api/peer/status`: remote messaging at a glance, from what this Tower already knows. It
  * makes no call to Codev Cloud, so it backs `afx status` and `afx tower status`.
  */

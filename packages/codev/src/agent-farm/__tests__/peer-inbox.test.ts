@@ -16,6 +16,11 @@
  * so it is never sent, and one whose call is in flight is not; a dismissed remote message
  * answers a later duplicate `refused`, `dismissed`; and a released message's escalation clock
  * starts at its release.
+ *
+ * Phase 12 adds: a stored sender or owner that does not fit the statement's rules is neither
+ * stored nor printed by the list or show; the workspace-scoped outbox route behind the
+ * dashboard's popover lists only its own workspace's mail and reaches no other peer route; and
+ * a view of many outbox rows reads the queue heads and the messages once.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -30,6 +35,7 @@ import { setSwitch } from '../peer/switch.js';
 import { encodeMessagePayload } from '../peer/contract.js';
 import { handleRequest, type RouteContext } from '../servers/tower-routes.js';
 import { peerOutbox } from '../peer/cloud-wiring.js';
+import { queueHeads } from '../peer/surfaces.js';
 import { TUNNEL_PROXY_HEADER } from '../lib/tunnel-client.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as Database.Database, port: 0, workspace: '/work/codev' }));
@@ -338,6 +344,141 @@ describe('afx inbox: three groups', () => {
       ['busy', null, null],
       ['held-for-release', 'afx://devvm/codev:architect:main', 'ana@example.com'],
     ]);
+  });
+});
+
+// Phase 12 (claude, phase 11 note 1): a stored sender or owner is checked against the rules the
+// statement was verified by when it is read back, as the frame's formatter checks it, so neither
+// `afx inbox` nor `afx inbox show` prints one nothing checked. Reachable only by something that
+// can already write global.db: defence in depth.
+describe('remote mail whose stored sender or owner does not fit the statement rules', () => {
+  const ESC = '\u001b';
+  const RLO = '\u202e';
+
+  async function readBoth(id: string): Promise<Array<{ status: number; text: string }>> {
+    const answers = [];
+    for (const path of [`/api/inbox?workspace=${encodeURIComponent(WS)}`, `/api/inbox/${id}`]) {
+      const response = await fetch(`http://127.0.0.1:${holder.port}${path}`);
+      answers.push({ status: response.status, text: await response.text() });
+    }
+    return answers;
+  }
+
+  it('is refused by the list and by show when its Tower name has escape characters, and the name is not printed', async () => {
+    const id = fromDevvm({ releaseHold: true });
+    const hostile = { towerId: DEVVM, towerSlug: `devvm${ESC}[31mEVIL`, address: null };
+    holder.db.prepare('UPDATE mailbox SET remote_sender = ? WHERE id = ?').run(JSON.stringify(hostile), id);
+    for (const answer of await readBoth(id)) {
+      expect(answer.status).toBe(500);
+      expect(answer.text).toContain('slug rule');
+      expect(answer.text).not.toContain(ESC);
+      expect(answer.text).not.toContain('EVIL');
+    }
+  });
+
+  it('is refused by the list and by show when its owner has a direction override, and the owner is not printed', async () => {
+    const id = fromDevvm({ releaseHold: true });
+    holder.db.prepare('UPDATE mailbox SET remote_owner_email = ? WHERE id = ?').run(`ana${RLO}moc.elpmaxe@x`, id);
+    for (const answer of await readBoth(id)) {
+      expect(answer.status).toBe(500);
+      expect(answer.text).toContain('email rule');
+      expect(answer.text).not.toContain(RLO);
+      expect(answer.text).not.toContain('moc.elpmaxe');
+    }
+  });
+
+  it('is never stored: the receiver cannot write a sender or owner that does not fit', () => {
+    const remote = (over: Record<string, unknown>) => ({
+      workspacePath: WS,
+      toAgent: 'architect:local',
+      body: 'b',
+      formattedMessage: 'b',
+      reason: null,
+      releaseHold: true,
+      remote: {
+        sender: { towerId: DEVVM, towerSlug: 'devvm', address: null },
+        messageId: randomUUID(),
+        ownerEmail: 'ana@example.com',
+        payloadSha256: 'e'.repeat(64),
+        sentAt: Date.now(),
+        ...over,
+      },
+    });
+    expect(() => mailbox.enqueueRemote(holder.db, remote({ sender: { towerId: DEVVM, towerSlug: 'Dev VM', address: null } }) as never)).toThrow(/slug rule/);
+    expect(() => mailbox.enqueueRemote(holder.db, remote({ ownerEmail: `ana${ESC}@example.com` }) as never)).toThrow(/email rule/);
+    expect(holder.db.prepare('SELECT COUNT(*) AS n FROM mailbox').get()).toEqual({ n: 0 });
+  });
+});
+
+// Phase 12: the dashboard's held-mail popover lists mail waiting for a peer through the
+// workspace-scoped route, which takes its workspace from the URL prefix alone.
+describe('GET /workspace/<base64>/api/peer/outbox', () => {
+  const scoped = (workspace: string) => `/workspace/${Buffer.from(workspace).toString('base64url')}/api/peer/outbox`;
+
+  it("lists only that workspace's mail for a peer, whatever workspace the query names, and no body", async () => {
+    const mine = forDevvm(WS);
+    forDevvm(OTHER);
+    const answer = await call('GET', `${scoped(WS)}?workspace=${encodeURIComponent(OTHER)}`);
+    expect(answer.status).toBe(200);
+    const messages = answer.body.messages as Array<Record<string, unknown>>;
+    expect(messages.map((m) => [m.id, m.workspacePath, m.to])).toEqual([[mine.messageId, WS, 'afx://devvm/codev:architect:local']]);
+    expect(JSON.stringify(answer.body)).not.toContain(BODY);
+  });
+
+  it('names the head of each queue in a view of many rows: its next try shows, and the rest show none', async () => {
+    const first = forDevvm(WS);
+    forDevvm(WS);
+    store.recordOutboxAttempt(holder.db, first.messageId, { outcome: 'unavailable', reason: 'tower-offline', nextAttemptAt: Date.now() + 5_000 }, Date.now());
+    const answer = await call('GET', scoped(WS));
+    const messages = answer.body.messages as Array<{ id: string; nextAttemptAt: number | null }>;
+    expect(messages.map((m) => [m.id === first.messageId, m.nextAttemptAt !== null])).toEqual([
+      [true, true],
+      [false, false],
+    ]);
+  });
+
+  it('reaches no other peer route under the workspace prefix', async () => {
+    for (const [method, route] of [['GET', 'towers'], ['GET', 'panel'], ['PUT', 'switch'], ['GET', 'log']] as const) {
+      const response = await fetch(`http://127.0.0.1:${holder.port}${scoped(WS).replace(/outbox$/, route)}`, { method });
+      expect([method, route, response.status]).toEqual([method, route, 404]);
+    }
+  });
+});
+
+// Phase 12 (claude, phase 11 note 3): a view of many outbox rows reads the queue heads and the
+// messages it needs once, rather than once per row.
+describe('reading many outbox rows at once', () => {
+  const LAB = '01JLAB00000000000000000000';
+
+  /** A message waiting here for another peer than devvm. */
+  function forLab(): store.PeerOutboxRow {
+    const sentAt = Date.now();
+    const encoded = encodeMessagePayload({ sentAt, to: { workspace: 'codev', kind: 'architect', name: 'local' }, from: { workspace: 'codev', kind: 'architect', name: 'main' }, body: BODY });
+    if (!encoded.ok) throw new Error('the test payload did not encode');
+    return store.insertOutbox(
+      holder.db,
+      { messageId: randomUUID(), peerTowerId: LAB, toAddress: 'afx://lab/codev:architect:local', fromAddress: 'codev:architect:main', payload: encoded.bytes, sentAt, fromWorkspacePath: WS, fromAgent: 'architect:main' },
+      sentAt,
+    );
+  }
+
+  it("queueHeads names each peer's first held message, and passes over one that has ended", () => {
+    const ended = forDevvm();
+    const devvmHead = forDevvm();
+    forDevvm();
+    const labHead = forLab();
+    forLab();
+    store.resolveOutbox(holder.db, ended.messageId, { state: 'dismissed', outcome: null, reason: null, attempted: false }, Date.now());
+    expect([...queueHeads(holder.db)].sort()).toEqual([devvmHead.messageId, labHead.messageId].sort());
+  });
+
+  it('getOutboxMany finds every message asked for in one read, and leaves out an id with none', () => {
+    const a = forDevvm();
+    const b = forLab();
+    const found = store.getOutboxMany(holder.db, [a.messageId, 'no-such-message', b.messageId]);
+    expect([...found.keys()].sort()).toEqual([a.messageId, b.messageId].sort());
+    expect(found.get(b.messageId)?.peerTowerId).toBe(LAB);
+    expect(store.getOutboxMany(holder.db, []).size).toBe(0);
   });
 });
 
