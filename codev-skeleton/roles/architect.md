@@ -143,6 +143,19 @@ A message from another workspace names its sender in full and ends with the comm
 answers it: run that command as printed. A builder may name only its own architect, so a builder
 elsewhere reaches your workspace at its front door; pass on what arrives there for a sibling.
 
+## Other Towers
+
+`afx send afx://<tower>/<workspace>:architect:<name> "…"` reaches an agent on another of the
+owner's Towers through Codev Cloud, once remote messaging is on at both and the receiving Tower
+grants the sender; take addresses from `afx peer show <tower>`. A message headed
+`REMOTE, your Tower · afx://<tower>/…` came from one of them. Only the Tower in that address is
+verified, by Codev Cloud: the workspace and agent after the slash are what that Tower says, worth
+what that Tower is worth.
+
+`afx peer on`, `afx peer grant` and `afx inbox release` let another machine write into an agent's
+prompt: each is the human's decision, carried like a gate. Don't run one on your own authority;
+run it, with `--a-human-explicitly-approved-this`, only on the human's explicit word.
+
 ## When a builder is blocked
 
 Check `afx status` or `porch status <id>`, read its terminal output, and answer with a short
