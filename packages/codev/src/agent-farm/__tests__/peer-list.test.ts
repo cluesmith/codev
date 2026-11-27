@@ -265,10 +265,20 @@ describe('the cached listing (C13)', () => {
 
   it('takes no listing whose self is another Tower, and keeps the cached one', async () => {
     await list.refresh();
-    registration = { ...registration!, towerId: '01JSOMEONEELSE00000000000A' };
-    clock.advance(LISTING_ON_DEMAND_INTERVAL_MS);
-    expect(await list.refresh()).toMatchObject({ fresh: false, problem: 'bad-listing', listing: { refreshedAt: T0 } });
+    const other = await fetch(`${relay.url}/api/peer/towers`, { headers: { authorization: `Bearer ${devvm.apiKey}` } });
+    const devvmsListing = await other.json();
+    // A cloud that answers this Tower's call with another Tower's list.
+    const confused = new PeerList({
+      db: () => db,
+      now: () => clock.now,
+      client: { listTowers: async () => ({ called: true, answer: { ok: true, listing: devvmsListing } }) },
+      registration: () => registration,
+      adoptOwnName: (towerId, slug) => adopted.push([towerId, slug]),
+      log: (level, message) => logged.push(`${level} ${message}`),
+    });
+    expect(await confused.refresh()).toMatchObject({ fresh: false, problem: 'bad-listing', listing: { refreshedAt: T0, towers: [{ slug: 'devvm' }] } });
     expect(logged).toContain("WARN Peer: Codev Cloud's peer list is for another Tower (its self is not this Tower's id); the cached list stands");
+    expect(adopted).toEqual([]);
   });
 
   it('takes no listing for the registration a call was made under once another Tower has registered here', async () => {
@@ -276,7 +286,8 @@ describe('the cached listing (C13)', () => {
     clock.advance(LISTING_ON_DEMAND_INTERVAL_MS);
     const pending = list.refresh();
     registration = { ...registration!, towerId: '01JSOMEONEELSE00000000000A', towerName: 'someone' };
-    expect(await pending).toMatchObject({ fresh: false, problem: 'bad-listing', listing: { refreshedAt: T0 } });
+    // The previous registration's list is not this one's either: it is dropped, and nothing replaces it.
+    expect(await pending).toMatchObject({ fresh: false, problem: 'bad-listing', listing: { refreshedAt: null, towers: [] } });
     expect(adopted).toEqual([]);
   });
 
@@ -300,6 +311,52 @@ describe('the cached listing (C13)', () => {
   it('resolves only a Tower name an address parser took', async () => {
     await expect(list.resolve('DevVM')).rejects.toThrow('resolve takes a Tower name the address parser accepted');
     await expect(list.resolve('sam@studio')).rejects.toThrow();
+  });
+});
+
+describe('after this Tower registers again', () => {
+  it("shows none of the previous account's Towers or relay, with the new cloud unreachable", async () => {
+    list.noteAuthOk('available');
+    await list.refresh();
+    expect(list.cached().towers.map((t) => t.slug)).toEqual(['devvm']);
+    expect(list.relay()).toEqual({ state: 'available', why: null });
+
+    // Account B, on a cloud this test never starts: a port that refuses.
+    registration = { serverUrl: 'http://127.0.0.1:9', towerId: '01JBOBSTOWER0000000000000A', towerName: 'bobs-mbp', deregistered: false };
+    expect(list.cached()).toEqual({ refreshedAt: null, relayProtocols: null, limits: null, towers: [] });
+    expect(store.listTowerNames(db)).toEqual([]);
+    expect(list.relay()).toEqual({ state: 'unknown', why: null });
+    expect(list.relayStated()).toBe(false);
+    expect(await list.resolve('devvm')).toMatchObject({
+      ok: false,
+      reason: 'unknown-tower',
+      message: "No Tower named 'devvm' is in this Tower's peer list (this Tower has not listed its peers yet; Codev Cloud is unreachable).",
+    });
+    expect(logged).toContain("INFO Peer: this Tower's Codev Cloud registration changed; the peer list cached for the previous one is dropped");
+  });
+
+  it('keeps the list for the same Tower on the same cloud, whatever its key (as --reauth gives) and however its URL ends', async () => {
+    await list.refresh();
+    registration = { ...registration!, serverUrl: `${relay.url}/` };
+    expect(list.cached().towers.map((t) => t.slug)).toEqual(['devvm']);
+    expect(logged.filter((line) => line.includes('registration changed'))).toEqual([]);
+  });
+
+  it('drops the list when only the cloud changes, and counts the listing budget afresh for it', async () => {
+    await list.refresh();
+    const second = new StandInRelay({ now: () => clock.now });
+    await second.start();
+    try {
+      const account = second.addAccount({ ownerId: 'usr_ana', ownerEmail: 'ana@example.com' });
+      second.addTower({ account, slug: 'ana-s-mbp', towerId: mbp.towerId, apiKey: mbp.apiKey });
+      second.addTower({ account, slug: 'studio', towerId: '01JSTUDIO00000000000000AA' });
+      registration = { ...registration!, serverUrl: second.url };
+      // Within 10 seconds of the first cloud's call: the second's budget is its own.
+      expect(await list.refresh()).toMatchObject({ fresh: true, listing: { towers: [{ slug: 'studio' }] } });
+      expect(store.listTowerNames(db).map((n) => n.slug)).toEqual(['studio']);
+    } finally {
+      await second.stop();
+    }
   });
 });
 
@@ -337,6 +394,7 @@ describe("walkthrough step 1: 'afx peer list' on mbp, with the switch off", () =
       ownTower: () => ({ name: registration?.towerName ?? null, towerId: registration?.towerId ?? null }),
       settings: () => resolvePeerSettings({}),
       cloud: () => ({
+        scopeToRegistration: () => list.scopeToRegistration(),
         refreshListing: () => list.refresh('on-demand'),
         relay: () => list.relay(),
         reportSwitch: (state) => {

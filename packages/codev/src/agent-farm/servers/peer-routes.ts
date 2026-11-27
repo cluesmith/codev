@@ -73,6 +73,8 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 /** What the routes ask of Codev Cloud and the peer list (`peer/cloud-wiring.ts` in production). */
 export interface PeerCloudRouteDeps {
+  /** Drop a cached peer list fetched under another registration than this Tower's now. */
+  scopeToRegistration(): void;
   /** Fetch the peer list on demand, within the call budget; the cached list stands on any failure. */
   refreshListing(): Promise<PeerListRefresh>;
   /** Whether the cloud has a relay, as this Tower knows it now. */
@@ -409,6 +411,8 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     const method = req.method ?? 'GET';
     const route = url.pathname.slice(PEER_ROUTE_PREFIX.length);
     try {
+      // Every handler below may read the cached peer list; none may read another registration's.
+      deps.cloud().scopeToRegistration();
       switch (route) {
         case 'switch':
           if (method === 'GET') return sendJson(res, 200, switchResponse(false, null));

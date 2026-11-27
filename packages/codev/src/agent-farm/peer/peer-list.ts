@@ -12,6 +12,10 @@
  *   not on loopback has none. Then the latest of what the cloud stated (the last `auth_ok`,
  *   the last listing) or, for a cloud that never stated a relay, a `404` without the body.
  *
+ * All of it belongs to one registration: the cloud's server URL and this Tower's id. After
+ * this Tower registers with another account, Tower id or cloud, the cached listing, its
+ * former names and the relay evidence are dropped before anything reads them.
+ *
  * A send does not need this Tower's own tunnel: the listing and the relay are HTTPS calls.
  * Everything here is read per call, so a test drives it with a temporary database, the
  * stand-in relay and a hand-made registration.
@@ -24,7 +28,7 @@ import type { TunnelRelayStatus } from '../lib/tunnel-client.js';
 import { isSecureCloud, type CloudClient, type ListingPurpose } from './cloud-client.js';
 import type { CloudRouteFailureReason } from './contract.js';
 import { listedWhen } from './grants.js';
-import { listTowerNames, readListing, writeListing, type CachedListing } from './store.js';
+import { forgetListingUnlessFor, listTowerNames, readListing, readListingRelay, writeListing, type CachedListing } from './store.js';
 
 /** This Tower's registration with Codev Cloud, as the peer list needs it. */
 export interface OwnRegistration {
@@ -34,6 +38,11 @@ export interface OwnRegistration {
   towerName: string | null;
   /** The cloud removed this registration (issue #1871). */
   deregistered: boolean;
+}
+
+/** The registration a cached listing belongs to: the cloud's server URL and this Tower's id. */
+export function listingScope(registration: Pick<OwnRegistration, 'serverUrl' | 'towerId'>): string {
+  return `${registration.serverUrl.replace(/\/+$/, '')} ${registration.towerId}`;
 }
 
 export interface PeerListDeps {
@@ -152,8 +161,35 @@ export class PeerList {
   private listingSeq = 0;
   private authOk: (RelayStatement & { status: TunnelRelayStatus }) | null = null;
   private oldCloud: RelayStatement | null = null;
+  /** The registration `authOk` and `oldCloud` were noted under. */
+  private evidenceScope: string | null = null;
 
   constructor(private readonly deps: PeerListDeps) {}
+
+  /**
+   * This Tower's registration, with the cache and the relay evidence held to it: what was
+   * noted or fetched under another registration is dropped first. Without a registration
+   * nothing is dropped, since nothing can be sent until there is one.
+   */
+  private scoped(): OwnRegistration | null {
+    const registration = this.deps.registration();
+    if (registration === null) return null;
+    const scope = listingScope(registration);
+    if (this.evidenceScope !== scope) {
+      this.authOk = null;
+      this.oldCloud = null;
+      this.evidenceScope = scope;
+    }
+    if (forgetListingUnlessFor(this.deps.db(), scope)) {
+      this.deps.log('INFO', "Peer: this Tower's Codev Cloud registration changed; the peer list cached for the previous one is dropped");
+    }
+    return registration;
+  }
+
+  /** Hold the cache to this Tower's current registration, before anything reads it directly. */
+  scopeToRegistration(): void {
+    this.scoped();
+  }
 
   // -------------------------------------------------------------------------
   // Whether the cloud has a relay
@@ -161,6 +197,7 @@ export class PeerList {
 
   /** The tunnel's `auth_ok` stated (or did not state) a relay. */
   noteAuthOk(status: TunnelRelayStatus): void {
+    this.scoped();
     const relay = relayOfAuthOk(status);
     this.authOk = relay === null ? null : { seq: ++this.seq, relay, status };
   }
@@ -178,18 +215,19 @@ export class PeerList {
    * last listing a non-null `relay`? It decides what an answer without the body means.
    */
   relayStated(): boolean {
+    this.scoped();
     const auth = this.authOk?.status;
     if (auth === 'available' || auth === 'unsupported' || auth === 'insecure') return true;
-    const listing = readListing(this.deps.db());
+    const listing = readListingRelay(this.deps.db());
     return listing.refreshedAt !== null && listing.relayProtocols !== null;
   }
 
   /** Whether the cloud has a relay, as this Tower knows it now. */
   relay(): PeerCloudRelay {
-    const registration = this.deps.registration();
+    const registration = this.scoped();
     if (registration !== null && !isSecureCloud(registration.serverUrl)) return none('insecure');
     const statements: RelayStatement[] = [];
-    const listing = readListing(this.deps.db());
+    const listing = readListingRelay(this.deps.db());
     if (listing.refreshedAt !== null) statements.push({ seq: this.listingSeq, relay: relayOfListing(listing.relayProtocols) });
     if (this.authOk !== null) statements.push(this.authOk);
     if (this.oldCloud !== null) statements.push(this.oldCloud);
@@ -203,6 +241,7 @@ export class PeerList {
 
   /** The list as last fetched. */
   cached(): CachedListing {
+    this.scoped();
     return readListing(this.deps.db());
   }
 
@@ -219,7 +258,7 @@ export class PeerList {
       retryAfterSec,
       listing: readListing(db),
     });
-    const registration = this.deps.registration();
+    const registration = this.scoped();
     if (registration === null) return fromCache('not-connected');
     if (registration.deregistered) return fromCache('not-registered');
 
@@ -238,12 +277,16 @@ export class PeerList {
     }
     const { listing } = answer;
     // Read again: a registration written while the call was out may be for another Tower.
-    const current = this.deps.registration();
+    const current = this.scoped();
     if (current === null || listing.self.towerId !== current.towerId) {
       this.deps.log('WARN', "Peer: Codev Cloud's peer list is for another Tower (its self is not this Tower's id); the cached list stands");
       return fromCache('bad-listing');
     }
-    writeListing(db, { relay: listing.relay, limits: listing.limits, towers: listing.towers }, this.deps.now());
+    writeListing(
+      db,
+      { relay: listing.relay, limits: listing.limits, towers: listing.towers, fetchedFor: listingScope(current) },
+      this.deps.now(),
+    );
     this.listingSeq = ++this.seq;
     if (listing.self.slug !== current.towerName) this.deps.adoptOwnName(listing.self.towerId, listing.self.slug);
     return { fresh: true, problem: null, retryAfterSec: null, listing: readListing(db) };

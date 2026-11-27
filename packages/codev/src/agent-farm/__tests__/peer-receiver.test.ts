@@ -700,6 +700,7 @@ describe('eager withdrawal through the peer routes', () => {
         relay: { protocols: [1] },
         limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
         towers: [{ towerId: MBP, slug: 'mbp', online: true, protocols: [1], remoteMessaging: 'on' }],
+        fetchedFor: 'https://cloud.example 01JDEVVM0000000000000000AA',
       },
       f.clock.now,
     );
@@ -711,6 +712,7 @@ describe('eager withdrawal through the peer routes', () => {
       settings: () => resolvePeerSettings({}),
       // No cloud behind these routes: the listing is the one seeded here, and nothing is reported.
       cloud: () => ({
+        scopeToRegistration: () => {},
         refreshListing: async () => ({ fresh: false, problem: 'not-connected', retryAfterSec: null, listing: store.readListing(f.db) }),
         relay: () => ({ state: 'unknown', why: null }),
         reportSwitch: () => 'not-connected',

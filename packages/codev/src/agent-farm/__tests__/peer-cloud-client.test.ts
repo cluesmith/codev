@@ -392,7 +392,7 @@ describe('the switch-state report (section 2, K5)', () => {
     expect(callsTo('state').map((c) => c.status)).toEqual([503, 204]);
   });
 
-  it('makes one call at a time, so the cloud hears the changes in order, and sends only the newest after one in flight', async () => {
+  it('makes one call at a time, and after one in flight sends only the newest change, not each one in between', async () => {
     const sent: string[] = [];
     const answer: Array<(response: Response) => void> = [];
     const fetch = vi.fn((_url: string, init: RequestInit) => {

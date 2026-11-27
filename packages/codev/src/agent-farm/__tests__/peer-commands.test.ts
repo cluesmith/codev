@@ -36,6 +36,8 @@ const CODEV = '/work/codev';
 const OTHER = '/work/other';
 const MBP = '01JMBP000000000000000000AA';
 const DEVVM = '01JDEVVM0000000000000000AA';
+/** The registration the harness's listings were fetched under (the cloud stub holds none to it). */
+const FETCHED_FOR = 'https://cloud.example 01JSELF0000000000000000AAA';
 
 /**
  * The cloud behind the routes, as a test sets it: what a refresh comes to (by default the
@@ -83,7 +85,7 @@ beforeEach(async () => {
   const db = new Database(join(dir, 'global.db'));
   db.exec(GLOBAL_SCHEMA);
   // This Tower has listed its peers once (phase 7 fetches the listing; here it is seeded).
-  store.writeListing(db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [tower(MBP, 'mbp'), tower(DEVVM, 'devvm')] }, T0);
+  store.writeListing(db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [tower(MBP, 'mbp'), tower(DEVVM, 'devvm')], fetchedFor: FETCHED_FOR }, T0);
 
   const architects = new Map<string, string[]>([
     [CODEV, ['main', 'local']],
@@ -113,6 +115,7 @@ beforeEach(async () => {
     ownTower: () => ({ name: 'ana-s-mbp', towerId: '01JSELF0000000000000000AAA' }),
     settings: () => resolvePeerSettings(config.value),
     cloud: () => ({
+      scopeToRegistration: () => {},
       refreshListing: async () => {
         cloud.refreshes++;
         cloud.onRefresh?.();
@@ -373,7 +376,7 @@ describe('afx peer grant', () => {
     for (const [options, message] of cases) {
       expect((await run((d) => peerGrant(options, d))).error).toContain(message);
     }
-    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [tower(MBP, 'laptop')] }, T0 + 1);
+    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [tower(MBP, 'laptop')], fetchedFor: FETCHED_FOR }, T0 + 1);
     expect((await run((d) => peerGrant({ tower: 'mbp', all: true, ...HUMAN }, d))).error).toBe(
       "'mbp' is a former name of the Tower now called 'laptop'. Name it 'laptop'. (UNKNOWN_TOWER)",
     );
@@ -461,7 +464,7 @@ describe('afx peer revoke', () => {
   });
 
   it('finds the grants of a renamed Tower by its former name', async () => {
-    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [tower(MBP, 'laptop'), tower(DEVVM, 'devvm')] }, T0 + 1);
+    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [tower(MBP, 'laptop'), tower(DEVVM, 'devvm')], fetchedFor: FETCHED_FOR }, T0 + 1);
     expect((await run((d) => peerRevoke({ tower: 'mbp' }, d))).printed).toEqual([
       '[ok] Removed all 2 grants for laptop: it may no longer message this Tower.',
     ]);
@@ -515,6 +518,7 @@ describe('afx peer list', () => {
         relay: { protocols: [1] },
         limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
         towers: [tower(DEVVM, 'devvm'), { ...tower(MBP, 'mbp'), online: false }],
+        fetchedFor: FETCHED_FOR,
       },
       harness.clock.now,
     );
@@ -566,7 +570,7 @@ describe('afx peer list', () => {
 
   it('says so when the account has no other Tower, and when this Tower has never listed its peers', async () => {
     harness.cloud.refreshProblem = null;
-    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [] }, harness.clock.now);
+    store.writeListing(harness.db, { relay: { protocols: [1] }, limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 }, towers: [], fetchedFor: FETCHED_FOR }, harness.clock.now);
     expect((await run((d) => peerList({}, d))).printed).toEqual([
       'Remote messaging: off — a human turns it on with: afx peer on',
       'No other Towers are on your Codev Cloud account.',
@@ -614,6 +618,7 @@ describe('a grant naming a Tower that is not in the cached list', () => {
           relay: { protocols: [1] },
           limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
           towers: [tower(MBP, 'mbp'), tower(DEVVM, 'devvm'), tower('01JSTUDIO00000000000000AA', 'studio')],
+          fetchedFor: FETCHED_FOR,
         },
         harness.clock.now,
       );

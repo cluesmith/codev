@@ -106,6 +106,8 @@ vi.mock('../lib/tower-client.js', () => ({
 }));
 
 const DEVVM = '01JDEVVM0000000000000000AA';
+/** The mocked registration's scope: the cached listing is this Tower's only while it matches. */
+const FETCHED_FOR = 'http://cloud.example 01JSELF0000000000000000AAA';
 
 let server: http.Server;
 let port: number;
@@ -154,6 +156,7 @@ beforeEach(async () => {
       relay: { protocols: [1] },
       limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
       towers: [{ towerId: DEVVM, slug: 'devvm', online: true, protocols: [1], remoteMessaging: 'on' }],
+      fetchedFor: FETCHED_FOR,
     },
     Date.now(),
   );
@@ -254,6 +257,26 @@ describe('the peer routes through handleRequest', () => {
     } finally {
       fetch.mockRestore();
     }
+  });
+
+  it("show and resolve nothing from a peer list fetched under another registration, and keep a human's grants", async () => {
+    await call('POST', '/api/peer/grants', { tower: 'devvm', all: true, humanApproved: true });
+    store.writeListing(
+      holder.db,
+      {
+        relay: { protocols: [1] },
+        limits: { messagesPerTowerPerMinute: 60, messagesPerPairPerMinute: 30, queriesPerPairPerMinute: 10 },
+        towers: [{ towerId: DEVVM, slug: 'devvm', online: true, protocols: [1], remoteMessaging: 'on' }],
+        fetchedFor: 'https://cloud.codevos.ai 01JPREVIOUSTOWER000000000A',
+      },
+      Date.now(),
+    );
+    const listed = await call('GET', '/api/peer/towers');
+    expect(listed).toMatchObject({ status: 200, body: { towers: [], listing: { refreshedAt: null } } });
+    expect((await call('GET', '/api/peer/limits')).body.cloud).toBeNull();
+    const grant = await call('POST', '/api/peer/grants', { tower: 'devvm', addresses: ['codev:architect:review'], humanApproved: true });
+    expect(grant).toMatchObject({ status: 404, body: { error: 'UNKNOWN_TOWER' } });
+    expect(store.listGrants(holder.db)).toHaveLength(1);
   });
 
   it('answer an unknown peer path with a coded 404, so a client can tell it from an older Tower', async () => {

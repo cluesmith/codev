@@ -113,14 +113,16 @@ CREATE TRIGGER IF NOT EXISTS builders_updated_at
 export const PEER_SCHEMA = `
 -- The receiving Tower's switch, one row. No row means off: a fresh install and an
 -- upgraded one both read the switch as off. The listing_* columns are the cached
--- peer listing's own fields (when it was fetched, the relay it stated, the cloud's limits).
+-- peer listing's own fields (when it was fetched, the relay it stated, the cloud's limits,
+-- and the registration it was fetched under: a cache for another one is dropped).
 CREATE TABLE IF NOT EXISTS peer_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   remote_messaging INTEGER NOT NULL DEFAULT 0,   -- 1 = on
   remote_messaging_changed_at INTEGER,
   listing_refreshed_at INTEGER,                  -- NULL = never listed
   listing_relay_protocols TEXT,                  -- JSON integer array; NULL when the listing stated no relay
-  listing_limits TEXT                            -- JSON PeerCloudLimits
+  listing_limits TEXT,                           -- JSON PeerCloudLimits
+  listing_scope TEXT                             -- '<server URL> <tower id>' the listing was fetched under
 );
 
 -- Who may message whom here (default deny: no row, no mail). One row per peer and

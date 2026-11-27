@@ -114,6 +114,7 @@ export function shutdownPeerCloud(): void {
 /** What the peer routes read of the cloud, in production. */
 export function peerCloudRouteDeps(): PeerCloudRouteDeps {
   return {
+    scopeToRegistration: () => peerCloud().list.scopeToRegistration(),
     refreshListing: () => peerCloud().list.refresh('on-demand'),
     relay: () => peerCloud().list.relay(),
     reportSwitch: reportSwitchChange,

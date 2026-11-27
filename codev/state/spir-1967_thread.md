@@ -773,3 +773,22 @@ Surprises:
   key it was built with, as a registration does.
 - In bypass mode, Bash's cwd moved into `packages/codev` twice. Every command since uses an
   absolute `cd`.
+
+- **Phase 7 review (iter 1): codex REQUEST_CHANGES (HIGH), claude APPROVE (HIGH).** Response:
+  `1967-phase_7-iter1-rebuttals.md`.
+  - **Taken (codex):** after a re-registration under another account, Tower id or cloud, three
+    things were still the previous registration's: the cached list and its former names, the
+    relay evidence, and the listing budget. So `afx peer list` and the grant routes could show
+    and resolve the old account's Towers. The cloud's same-account rule meant nothing could
+    actually cross accounts.
+  - **The fix: `peer_settings.listing_scope`,** the server URL and Tower id, not the key (added
+    to v21, unshipped).
+    - The store drops a list fetched under another scope.
+    - Every `PeerList` read, and every peer route, holds the cache to the current registration
+      first.
+    - The budget is counted per registration.
+    - Grants and the switch stay: they are a human's.
+    - Neither spec covers a registration change. This is my reading, for the architect.
+  - **Taken (claude):** `relayStated` and `relay` read only the settings row; two wording nits.
+  - **Answered, not changed (claude):** a malformed `server_url` stays a loud 500 naming the
+    cause, per the fail-fast rule; `retryable` on an over-cap listing is unread but right.

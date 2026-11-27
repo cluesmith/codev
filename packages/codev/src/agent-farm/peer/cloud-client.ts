@@ -146,6 +146,8 @@ export class CloudClient {
   private readonly fetch: FetchLike;
 
   private lastListingAt: number | null = null;
+  /** The registration that last call was made under: a budget belongs to one. */
+  private lastListingFor: string | null = null;
   private listingInFlight: Promise<ListingCall> | null = null;
 
   private reportGeneration = 0;
@@ -227,9 +229,9 @@ export class CloudClient {
 
   /**
    * The listing, called at most every 10 seconds on demand and every 30 while holding
-   * mail, counted from the last call made for either. A caller asking while a call is in
-   * flight shares that call. (Everything before the call's first `await` runs at once, so
-   * a second caller always sees the first's call.)
+   * mail, counted from the last call made for either under the same registration. A caller
+   * asking while a call is in flight shares that call. (Everything before the call's first
+   * `await` runs at once, so a second caller always sees the first's call.)
    */
   async listTowers(purpose: ListingPurpose): Promise<ListingCall> {
     if (this.listingInFlight !== null) return this.listingInFlight;
@@ -237,12 +239,14 @@ export class CloudClient {
     if (typeof target === 'string') return { called: false, reason: target };
     const now = this.options.now();
     const interval = purpose === 'holding' ? LISTING_HOLDING_INTERVAL_MS : LISTING_ON_DEMAND_INTERVAL_MS;
-    if (this.lastListingAt !== null) {
+    const registration = `${target.url.origin}\n${target.apiKey}`;
+    if (this.lastListingAt !== null && this.lastListingFor === registration) {
       const since = now - this.lastListingAt;
       // A clock that went back counts as time passed: a budget must not lock the listing out.
       if (since >= 0 && since < interval) return { called: false, reason: 'budget', lastCalledAt: this.lastListingAt };
     }
     this.lastListingAt = now;
+    this.lastListingFor = registration;
     const inFlight = (async (): Promise<ListingCall> => {
       const result = await this.call('GET', target, {}, undefined, MAX_LISTING_BYTES);
       const answer = classifyListingAnswer(result, { relayStated: this.options.relayStated(), maxBytes: MAX_LISTING_BYTES });
@@ -284,7 +288,7 @@ export class CloudClient {
     while (this.reportInFlight !== null) await this.reportInFlight;
   }
 
-  /** Is a retry of the report waiting on its timer? */
+  /** Is a report still to be made: a call in flight, or a retry waiting on its timer? */
   hasPendingSwitchReport(): boolean {
     return this.pendingReport !== null;
   }

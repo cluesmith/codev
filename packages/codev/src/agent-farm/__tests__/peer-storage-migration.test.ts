@@ -36,6 +36,7 @@ const T0 = Date.UTC(2026, 10, 1, 12, 0, 0);
 const WS = '/work/codev';
 const PEER = '01JMBP000000000000000000AA';
 const OTHER_PEER = '01JDEVVM0000000000000000AA';
+const FETCHED_FOR = 'https://cloud.codevos.ai 01JSELF0000000000000000AAA';
 
 const FIXTURE_V20 = readFileSync(
   fileURLToPath(new URL('./fixtures/global-db/v20-upgraded-schema.sql', import.meta.url)),
@@ -867,10 +868,10 @@ describe('retention', () => {
 describe('peer store: the switch and the cached listing', () => {
   it('reads off until a human turns it on, and a listing write never touches it', () => {
     const db = freshDb();
-    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [] }, T0);
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [], fetchedFor: FETCHED_FOR }, T0);
     expect(store.readRemoteMessaging(db)).toEqual({ state: 'off', changedAt: null });
     store.writeRemoteMessaging(db, 'on', T0 + 1);
-    store.writeListing(db, { relay: null, limits: limits(), towers: [] }, T0 + 2);
+    store.writeListing(db, { relay: null, limits: limits(), towers: [], fetchedFor: FETCHED_FOR }, T0 + 2);
     expect(store.readRemoteMessaging(db)).toEqual({ state: 'on', changedAt: T0 + 1 });
     store.writeRemoteMessaging(db, 'off', T0 + 3);
     expect(store.readRemoteMessaging(db)).toEqual({ state: 'off', changedAt: T0 + 3 });
@@ -884,8 +885,8 @@ describe('peer store: the switch and the cached listing', () => {
     const db = freshDb();
     expect(store.readListing(db)).toEqual({ refreshedAt: null, relayProtocols: null, limits: null, towers: [] });
     const devvm = { towerId: OTHER_PEER, slug: 'devvm', online: true, protocols: [1], remoteMessaging: 'on' as const };
-    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [devvm] }, T0);
-    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [{ ...devvm, slug: 'build-box', online: false }] }, T0 + 10);
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [devvm], fetchedFor: FETCHED_FOR }, T0);
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [{ ...devvm, slug: 'build-box', online: false }], fetchedFor: FETCHED_FOR }, T0 + 10);
     expect(store.readListing(db)).toEqual({
       refreshedAt: T0 + 10,
       relayProtocols: [1],
@@ -896,9 +897,41 @@ describe('peer store: the switch and the cached listing', () => {
       { towerId: OTHER_PEER, slug: 'devvm', firstSeenAt: T0, lastSeenAt: T0 },
       { towerId: OTHER_PEER, slug: 'build-box', firstSeenAt: T0 + 10, lastSeenAt: T0 + 10 },
     ]);
-    store.writeListing(db, { relay: null, limits: limits(), towers: [] }, T0 + 20);
+    store.writeListing(db, { relay: null, limits: limits(), towers: [], fetchedFor: FETCHED_FOR }, T0 + 20);
     expect(store.readListing(db)).toMatchObject({ relayProtocols: null, towers: [] });
     expect(store.listTowerNames(db)).toHaveLength(2);
+  });
+
+  it("holds the cache to the registration it was fetched under, and leaves a human's grants alone", () => {
+    const db = freshDb();
+    const devvm = { towerId: OTHER_PEER, slug: 'devvm', online: true, protocols: [1], remoteMessaging: 'on' as const };
+    // Nothing cached: nothing to drop, and nothing written.
+    expect(store.forgetListingUnlessFor(db, FETCHED_FOR)).toBe(false);
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [devvm], fetchedFor: FETCHED_FOR }, T0);
+    store.putGrant(db, { peerTowerId: OTHER_PEER, scope: 'all', workspacePath: null, architect: null, mode: 'deliver' }, T0);
+    expect(store.readListingRelay(db)).toEqual({ refreshedAt: T0, relayProtocols: [1] });
+    expect(store.forgetListingUnlessFor(db, FETCHED_FOR)).toBe(false);
+    expect(store.readListing(db).towers).toEqual([devvm]);
+
+    expect(store.forgetListingUnlessFor(db, 'https://cloud.codevos.ai 01JANOTHERTOWER00000000AA')).toBe(true);
+    expect(store.readListing(db)).toEqual({ refreshedAt: null, relayProtocols: null, limits: null, towers: [] });
+    expect(store.readListingRelay(db)).toEqual({ refreshedAt: null, relayProtocols: null });
+    expect(store.listTowerNames(db)).toEqual([]);
+    expect(store.listGrants(db)).toHaveLength(1);
+    expect(store.readRemoteMessaging(db).state).toBe('off');
+    // Dropped once: the empty cache belongs to no registration, so any other finds nothing to drop.
+    expect(store.forgetListingUnlessFor(db, FETCHED_FOR)).toBe(false);
+  });
+
+  it("starts the former names afresh when a listing comes for another registration", () => {
+    const db = freshDb();
+    const devvm = { towerId: OTHER_PEER, slug: 'devvm', online: true, protocols: [1], remoteMessaging: 'on' as const };
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [devvm], fetchedFor: FETCHED_FOR }, T0);
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [{ ...devvm, slug: 'vm2' }], fetchedFor: FETCHED_FOR }, T0 + 1);
+    expect(store.listTowerNames(db)).toHaveLength(2);
+    store.writeListing(db, { relay: { protocols: [1] }, limits: limits(), towers: [{ ...devvm, slug: 'vm3' }], fetchedFor: 'http://127.0.0.1:8080 01JSELF0000000000000000AAA' }, T0 + 2);
+    expect(store.listTowerNames(db).map((n) => n.slug)).toEqual(['vm3']);
+    expect(() => store.writeListing(db, { relay: null, limits: limits(), towers: [], fetchedFor: '' }, T0 + 3)).toThrow(/listing registration/);
   });
 });
 

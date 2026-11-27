@@ -140,6 +140,7 @@ interface DbPeerSettings {
   listing_refreshed_at: number | null;
   listing_relay_protocols: string | null;
   listing_limits: string | null;
+  listing_scope: string | null;
 }
 
 function readSettingsRow(db: Database.Database): DbPeerSettings | null {
@@ -184,6 +185,11 @@ export interface ListingToCache {
   relay: { protocols: number[] } | null;
   limits: PeerCloudLimits;
   towers: readonly PeerListingTower[];
+  /**
+   * The registration the listing was fetched under (`listingScope` in `peer/peer-list.ts`):
+   * the cloud's server URL and this Tower's id. A cache for another is not this Tower's.
+   */
+  fetchedFor: string;
 }
 
 export interface CachedListing {
@@ -217,10 +223,13 @@ function toListingTower(row: DbPeerTower): PeerListingTower {
 /**
  * Replace the cached listing with a newly fetched one, in one transaction: the Tower rows
  * are replaced wholesale, every slug seen is added to (or refreshed in) the former-names
- * table, which is never pruned, and the listing's own fields and time are stored.
+ * table, which is never pruned while the registration stays the same, and the listing's
+ * own fields, time and registration are stored. A listing for another registration than
+ * the cached one starts the former names afresh.
  */
 export function writeListing(db: Database.Database, listing: ListingToCache, now: number): void {
   const at = epochMs(now, 'now');
+  const scope = nonEmpty(listing.fetchedFor, 'listing registration');
   const relay = listing.relay === null ? null : JSON.stringify(protocolList(listing.relay.protocols, 'relay protocols'));
   const limits = JSON.stringify(cloudLimits(listing.limits));
   const towers = listing.towers.map((t) => ({
@@ -231,6 +240,7 @@ export function writeListing(db: Database.Database, listing: ListingToCache, now
     remote_messaging: oneOf(t.remoteMessaging, LISTED_SWITCH_STATES, 'listed switch state'),
   }));
   db.transaction(() => {
+    if (readListingScope(db) !== scope) db.prepare('DELETE FROM peer_tower_names').run();
     db.prepare('DELETE FROM peer_towers').run();
     const insertTower = db.prepare(
       'INSERT INTO peer_towers (tower_id, slug, online, protocols, remote_messaging) VALUES (@tower_id, @slug, @online, @protocols, @remote_messaging)',
@@ -244,12 +254,54 @@ export function writeListing(db: Database.Database, listing: ListingToCache, now
       noteName.run(tower.tower_id, tower.slug, at, at);
     }
     db.prepare(
-      `INSERT INTO peer_settings (id, listing_refreshed_at, listing_relay_protocols, listing_limits) VALUES (1, ?, ?, ?)
+      `INSERT INTO peer_settings (id, listing_refreshed_at, listing_relay_protocols, listing_limits, listing_scope) VALUES (1, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET listing_refreshed_at = excluded.listing_refreshed_at,
                                      listing_relay_protocols = excluded.listing_relay_protocols,
-                                     listing_limits = excluded.listing_limits`,
-    ).run(at, relay, limits);
+                                     listing_limits = excluded.listing_limits,
+                                     listing_scope = excluded.listing_scope`,
+    ).run(at, relay, limits, scope);
   })();
+}
+
+function readListingScope(db: Database.Database): string | null {
+  return readSettingsRow(db)?.listing_scope ?? null;
+}
+
+/**
+ * Drop the cached listing and every former name, in one transaction, unless they were
+ * fetched under the registration `scope`: after this Tower registers with another account,
+ * Tower id or cloud, the previous registration's Towers are not its peers. Grants are a
+ * human's and stay. Returns whether anything was dropped.
+ */
+export function forgetListingUnlessFor(db: Database.Database, scope: string): boolean {
+  nonEmpty(scope, 'listing registration');
+  return db.transaction((): boolean => {
+    if (readListingScope(db) === scope) return false;
+    const towers = db.prepare('DELETE FROM peer_towers').run().changes;
+    const names = db.prepare('DELETE FROM peer_tower_names').run().changes;
+    const listing = db
+      .prepare(
+        `UPDATE peer_settings SET listing_refreshed_at = NULL, listing_relay_protocols = NULL, listing_limits = NULL, listing_scope = NULL
+         WHERE id = 1 AND (listing_refreshed_at IS NOT NULL OR listing_scope IS NOT NULL)`,
+      )
+      .run().changes;
+    return towers + names + listing > 0;
+  })();
+}
+
+/** The cached listing's time and stated relay, without its Towers (read on every relay decision). */
+export function readListingRelay(db: Database.Database): Pick<CachedListing, 'refreshedAt' | 'relayProtocols'> {
+  return listingRelayOf(readSettingsRow(db));
+}
+
+function listingRelayOf(settings: DbPeerSettings | null): Pick<CachedListing, 'refreshedAt' | 'relayProtocols'> {
+  return {
+    refreshedAt: settings?.listing_refreshed_at ?? null,
+    relayProtocols:
+      settings?.listing_relay_protocols == null
+        ? null
+        : protocolList(parseJson(settings.listing_relay_protocols, 'listing relay'), 'listing relay'),
+  };
 }
 
 /** The cached listing, as the last {@link writeListing} left it. */
@@ -257,11 +309,7 @@ export function readListing(db: Database.Database): CachedListing {
   const settings = readSettingsRow(db);
   const towers = (db.prepare('SELECT * FROM peer_towers ORDER BY slug, tower_id').all() as DbPeerTower[]).map(toListingTower);
   return {
-    refreshedAt: settings?.listing_refreshed_at ?? null,
-    relayProtocols:
-      settings?.listing_relay_protocols == null
-        ? null
-        : protocolList(parseJson(settings.listing_relay_protocols, 'listing relay'), 'listing relay'),
+    ...listingRelayOf(settings),
     limits: settings?.listing_limits == null ? null : cloudLimits(parseJson(settings.listing_limits, 'listing limits')),
     towers,
   };
