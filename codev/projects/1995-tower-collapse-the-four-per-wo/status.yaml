@@ -11,11 +11,11 @@ plan_phases:
     status: complete
   - id: bundle_cache_path
     title: OverviewCache bundle path with ride-along windows
-    status: in_progress
+    status: complete
   - id: projection_doctor_docs
     title: Overview spend projection, doctor line and docs
-    status: pending
-current_plan_phase: bundle_cache_path
+    status: in_progress
+current_plan_phase: projection_doctor_docs
 gates:
   spec-approval:
     status: approved
@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -44,7 +44,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-claude.txt
 started_at: '2026-11-26T01:28:07.091Z'
-updated_at: '2026-11-27T06:00:48.164Z'
+updated_at: '2026-11-27T06:05:44.624Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-26T22:13:27.161Z'
@@ -55,3 +55,5 @@ context_refreshes:
   - boundary: plan-phase:bundle_cache_path
     at: '2026-11-27T05:31:19.700Z'
     acknowledged_at: '2026-11-27T05:32:18.513Z'
+  - boundary: plan-phase:projection_doctor_docs
+    at: '2026-11-27T06:05:44.624Z'
