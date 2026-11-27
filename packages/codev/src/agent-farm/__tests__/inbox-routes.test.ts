@@ -55,7 +55,9 @@ vi.mock('../servers/tower-messages.js', () => ({
   broadcastMessage: vi.fn(),
   isResolveError: vi.fn((r: unknown) => typeof r === 'object' && r !== null && 'code' in r),
 }));
-vi.mock('../utils/message-format.js', () => ({
+vi.mock('../utils/message-format.js', async (importActual) => ({
+  // Spec 1967: the inbox list names a remote row's sender with the real `remoteSenderText`.
+  ...(await importActual<typeof import('../utils/message-format.js')>()),
   formatArchitectMessage: vi.fn((_to: string, msg: string) => msg),
   formatArchitectToBuilderMessage: vi.fn((_to: string, msg: string) => msg),
   formatBuilderMessage: vi.fn((id: string, to: string, msg: string) => `[${id} → ${to}] ${msg}`),
@@ -255,7 +257,7 @@ describe('POST /api/inbox/:id/dismiss', () => {
     const res = makeRes();
     await handleRequest(makeReq('POST', `/api/inbox/${row.id}/dismiss`), res, ctx);
     expect(res._statusCode).toBe(200);
-    expect(JSON.parse(res._body)).toEqual({ ok: true });
+    expect(JSON.parse(res._body)).toEqual({ ok: true, kind: 'mailbox' });
 
     // Gone from the list; the row is dismissed (NOT delivered).
     const after = makeRes();
@@ -535,5 +537,59 @@ describe('GET /workspace/<b64>/api/inbox (Issue 1450)', () => {
     const all = makeRes();
     await handleRequest(makeReq('GET', '/api/inbox'), all, makeCtx());
     expect(JSON.parse(all._body)).toHaveLength(2);
+  });
+});
+
+// Spec 1967: mail held for release reports `held-for-release` and no gate detail, on the
+// list and on the single-row view. The row keeps its own reason and detail underneath, and
+// reports them again once released.
+describe('held for release (Spec 1967)', () => {
+  function seedRemote(): ReturnType<typeof mailbox.getById> & object {
+    const result = mailbox.enqueueRemote(
+      holder.db,
+      {
+        workspacePath: WS,
+        toAgent: 'main',
+        body: 'remote body',
+        formattedMessage: '[remote] remote body',
+        reason: null,
+        releaseHold: false,
+        remote: {
+          sender: { towerId: 'peer-tower-1', towerSlug: 'peer', address: null },
+          messageId: '7d3c1a52-6f0e-4c1b-9a1e-2f4b5c6d7e8f',
+          ownerEmail: 'owner@example.com',
+          payloadSha256: 'b'.repeat(64),
+          sentAt: 1000,
+        },
+      },
+      1000,
+    );
+    if (!result.accepted) throw new Error('expected a new remote row');
+    return result.row;
+  }
+
+  async function listed(): Promise<Record<string, unknown>> {
+    const res = makeRes();
+    await handleRequest(makeReq('GET', '/api/inbox'), res, makeCtx());
+    return (JSON.parse(res._body) as Array<Record<string, unknown>>)[0];
+  }
+
+  async function shown(id: string): Promise<Record<string, unknown>> {
+    const res = makeRes();
+    await handleRequest(makeReq('GET', `/api/inbox/${id}`), res, makeCtx());
+    return JSON.parse(res._body) as Record<string, unknown>;
+  }
+
+  it('reports held-for-release with no gate detail, and the row\'s own pair once released', async () => {
+    const row = seedRemote();
+    mailbox.setHeldVerdict(holder.db, row.id, 'busy', 'user-text', 1001);
+    expect(mailbox.holdForRelease(holder.db, row.id, 1002)).toBe(true);
+
+    expect(await listed()).toMatchObject({ id: row.id, reason: 'held-for-release', detail: null });
+    expect(await shown(row.id)).toMatchObject({ id: row.id, reason: 'held-for-release', detail: null });
+
+    expect(mailbox.release(holder.db, row.id, 1003)).toBe(true);
+    expect(await listed()).toMatchObject({ id: row.id, reason: 'busy', detail: 'user-text' });
+    expect(await shown(row.id)).toMatchObject({ id: row.id, reason: 'busy', detail: 'user-text' });
   });
 });

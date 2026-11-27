@@ -13,8 +13,9 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, TowerLiveness, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, TowerLiveness, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, PeerShowResponse, PeerStatusResponse, PeerLogResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR, MAX_REQUEST_BODY_BYTES } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
+import { isRemoteAddress, parseAddress } from './address.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
 /*
@@ -25,6 +26,68 @@ import { parseSseText, type SseEnvelope } from './sse.js';
 export type { OverviewData } from '@cluesmith/codev-types';
 
 const REQUEST_TIMEOUT_MS = 10000;
+
+/**
+ * How long a send to another Tower may take to answer (Spec 1967). The sending Tower may
+ * fetch its peer list to resolve the name, wait for a relay call ahead of this one, and make
+ * this one, each bounded by its own 20-second timeout; the margin covers the rest.
+ */
+const REMOTE_SEND_TIMEOUT_MS = 65_000;
+
+/**
+ * How long `afx peer show` may take to answer (Spec 1967): the sending Tower may fetch its
+ * peer list to resolve the name, then makes one relay call, each bounded by its own
+ * 20-second timeout; the margin covers the rest. A query never waits behind messages.
+ */
+const PEER_SHOW_TIMEOUT_MS = 45_000;
+
+/** `POST /api/send`'s code for a refused send to another Tower; the value itself, as the SDK carries no runtime import. */
+const REMOTE_REFUSED: typeof REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
+
+/** The largest request body Tower reads; mirrored the same way. Past it, Tower drops the request unanswered. */
+const TOWER_MAX_REQUEST_BYTES: typeof MAX_REQUEST_BODY_BYTES = 1_048_576;
+
+/** `sendMessage`'s code for a send it did not make: its request is larger than Tower reads. */
+const REQUEST_TOO_LARGE = 'REQUEST_TOO_LARGE';
+
+/** `POST /api/send`'s code for a message stored and held on the sending Tower but not sent now; mirrored the same way. */
+const REMOTE_HELD_ON_FAULT: typeof REMOTE_HELD_ON_FAULT_ERROR = 'REMOTE_HELD_ON_FAULT';
+
+/** Is `to` an address that names a Tower? Text that is not an address is not, and Tower refuses it. */
+function namesATower(to: string): boolean {
+  const parsed = parseAddress(to);
+  return parsed.ok && isRemoteAddress(parsed.address);
+}
+
+/** The refusal fields of a `REMOTE_REFUSED` answer, each only if it has its type. */
+function readRemoteRefusal(body: Record<string, unknown> | undefined): RemoteSendRefusal | undefined {
+  if (body === undefined) return undefined;
+  const { refusedBy, reason, retryAfterSec, mailboxId, peer, detail } = body;
+  if (refusedBy !== 'this-tower' && refusedBy !== 'cloud' && refusedBy !== 'peer') return undefined;
+  if (typeof reason !== 'string') return undefined;
+  return {
+    refusedBy,
+    reason,
+    retryAfterSec: typeof retryAfterSec === 'number' ? retryAfterSec : null,
+    mailboxId: typeof mailboxId === 'string' ? mailboxId : null,
+    peer: typeof peer === 'string' ? peer : null,
+    detail: typeof detail === 'string' ? detail : null,
+  };
+}
+
+/** The `remote` part of an answer from a send to another Tower, each field only if it has its type. */
+function readRemoteAnswer(remote: unknown): RemoteSendAnswer | undefined {
+  if (typeof remote !== 'object' || remote === null) return undefined;
+  const { peer, heldWhere, ahead, duplicate, detail } = remote as Record<string, unknown>;
+  if (typeof peer !== 'string') return undefined;
+  return {
+    peer,
+    ...(heldWhere === 'recipient' || heldWhere === 'this-tower' ? { heldWhere } : {}),
+    ...(typeof ahead === 'number' ? { ahead } : {}),
+    ...(typeof duplicate === 'boolean' ? { duplicate } : {}),
+    ...(typeof detail === 'string' ? { detail } : {}),
+  };
+}
 
 /**
  * The command-relay route. Mirrors `COMMAND_ROUTE` in `@cluesmith/codev-types`
@@ -229,6 +292,12 @@ export interface TowerTunnelStatus {
   accessUrl: string | null;
   /** Set when the cloud rejected the key after it had connected (Issue #1871). */
   deregisteredAt?: string;
+  /**
+   * Why the cloud connection is down, while it is: the last attempt's failure, e.g. the
+   * remote-messaging switch unreadable from global.db (Spec 1967). `null` when connected.
+   * Absent from a Tower that predates it.
+   */
+  lastFailure?: string | null;
 }
 
 export interface TowerStatus {
@@ -413,6 +482,16 @@ function extractTowerErrorCode(text: string): string | undefined {
   }
 }
 
+/** A Tower error body as an object, when it is one. */
+function extractTowerErrorBody(text: string): Record<string, unknown> | undefined {
+  try {
+    const json: unknown = JSON.parse(text);
+    return typeof json === 'object' && json !== null && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * True for the answer a Tower gives to a route it does not have: its catch-all 404, which
  * is plain text and so carries no code. Asked only of routes whose own 404s carry one
@@ -421,6 +500,34 @@ function extractTowerErrorCode(text: string): string | undefined {
 function isUnknownRoute(result: { status: number; errorCode?: string }): boolean {
   return result.status === 404 && result.errorCode === undefined;
 }
+
+/** What {@link TowerClient.request} returns. */
+export interface TowerRequestResult<T> {
+  ok: boolean;
+  status: number;
+  data?: T;
+  error?: string;
+  errorCode?: string;
+  /** A failed answer's body, when it was a JSON object. */
+  errorBody?: Record<string, unknown>;
+  connectionRefused?: boolean;
+}
+
+/** A refused or unanswered call to a peer route (Spec 1967). */
+export interface PeerRouteFailure {
+  ok: false;
+  /** The HTTP status; 0 when no answer came. */
+  status: number;
+  error: string;
+  errorCode?: string;
+  /** The Tower has no peer routes: it is older than this client. */
+  unknownRoute?: true;
+  /** Nothing is listening on the Tower's port. */
+  notRunning?: true;
+}
+
+/** What a peer route call returns. */
+export type PeerRouteResult<T> = { ok: true; result: T } | PeerRouteFailure;
 
 /**
  * A Tower from before the liveness route (#1977) answers it 404, or 401 to a client without the
@@ -490,8 +597,9 @@ export class TowerClient {
    */
   async request<T>(
     path: string,
-    options: RequestInit = {}
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; errorCode?: string; connectionRefused?: boolean }> {
+    options: RequestInit = {},
+    timeoutMs: number = this.requestTimeoutMs,
+  ): Promise<TowerRequestResult<T>> {
     try {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = {
@@ -505,16 +613,21 @@ export class TowerClient {
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
         headers,
-        signal: AbortSignal.timeout(this.requestTimeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) {
         const text = await response.text();
         const error = extractTowerError(text);
         const errorCode = extractTowerErrorCode(text);
-        return errorCode === undefined
-          ? { ok: false, status: response.status, error }
-          : { ok: false, status: response.status, error, errorCode };
+        const errorBody = extractTowerErrorBody(text);
+        return {
+          ok: false,
+          status: response.status,
+          error,
+          ...(errorCode === undefined ? {} : { errorCode }),
+          ...(errorBody === undefined ? {} : { errorBody }),
+        };
       }
 
       if (response.status === 204) {
@@ -792,6 +905,102 @@ export class TowerClient {
       return result.status === 0 ? { ...failure, unanswered: true } : failure;
     }
     return { ok: true, result: result.data };
+  }
+
+  // ── Peers: the remote-messaging switch and grants (Spec 1967) ──
+
+  /**
+   * One call to a `/api/peer/…` route. A refusal carries Tower's reason in `error` and its
+   * code in `errorCode` (see `PeerSwitchResponse` and its neighbours in codev-types for the
+   * codes). `unknownRoute` is set when the Tower has no peer routes at all: it is older than
+   * this client. `notRunning` is set when nothing answered on the Tower's port.
+   */
+  private async peerCall<T>(path: string, init: RequestInit = {}): Promise<PeerRouteResult<T>> {
+    return this.peerResult(await this.request<T>(path, init));
+  }
+
+  /** A peer route's answer as {@link peerCall} returns it. */
+  private peerResult<T>(result: TowerRequestResult<T>): PeerRouteResult<T> {
+    if (result.ok && result.data !== undefined) return { ok: true, result: result.data };
+    const failure: PeerRouteFailure = { ok: false, status: result.status, error: result.error ?? `Tower answered ${result.status}` };
+    if (result.connectionRefused) return { ...failure, notRunning: true };
+    if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
+    return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+  }
+
+  private peerPost<T>(path: string, method: 'POST' | 'PUT', body: unknown): Promise<PeerRouteResult<T>> {
+    return this.peerCall<T>(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** The remote-messaging switch. */
+  getPeerSwitch(): Promise<PeerRouteResult<PeerSwitchResponse>> {
+    return this.peerCall<PeerSwitchResponse>('/api/peer/switch');
+  }
+
+  /** Turn remote messaging on or off. Tower refuses `on` unless `humanApproved` is true. */
+  setPeerSwitch(request: PeerSwitchRequest): Promise<PeerRouteResult<PeerSwitchResponse>> {
+    return this.peerPost<PeerSwitchResponse>('/api/peer/switch', 'PUT', request);
+  }
+
+  /** This Tower's grants, or one peer's (named by a tower-ref). */
+  getPeerGrants(tower?: string): Promise<PeerRouteResult<PeerGrantsResponse>> {
+    const query = tower === undefined ? '' : `?${new URLSearchParams({ tower }).toString()}`;
+    return this.peerCall<PeerGrantsResponse>(`/api/peer/grants${query}`);
+  }
+
+  /** Add grants. Tower refuses unless `humanApproved` is true. */
+  addPeerGrants(request: PeerGrantRequest): Promise<PeerRouteResult<PeerGrantResponse>> {
+    return this.peerPost<PeerGrantResponse>('/api/peer/grants', 'POST', request);
+  }
+
+  /** Remove grants: those named, or every grant for the peer when none are. */
+  revokePeerGrants(request: PeerRevokeRequest): Promise<PeerRouteResult<PeerRevokeResponse>> {
+    return this.peerPost<PeerRevokeResponse>('/api/peer/grants/revoke', 'POST', request);
+  }
+
+  /** The limits this Tower enforces itself, and Codev Cloud's as its last peer list gave them. */
+  getPeerLimits(): Promise<PeerRouteResult<PeerLimitsResponse>> {
+    return this.peerCall<PeerLimitsResponse>('/api/peer/limits');
+  }
+
+  /** My other Towers: Tower asks Codev Cloud, within its call budget, and answers from its cache otherwise. */
+  getPeerTowers(): Promise<PeerRouteResult<PeerTowersResponse>> {
+    return this.peerCall<PeerTowersResponse>('/api/peer/towers');
+  }
+
+  /** Remote messaging at a glance, from what Tower already knows: it makes no call to Codev Cloud. */
+  getPeerStatus(): Promise<PeerRouteResult<PeerStatusResponse>> {
+    return this.peerCall<PeerStatusResponse>('/api/peer/status');
+  }
+
+  /** The record of cross-Tower attempts, newest first: every peer's, or one peer's (a tower-ref). */
+  getPeerLog(options: { tower?: string; limit?: number } = {}): Promise<PeerRouteResult<PeerLogResponse>> {
+    const params = new URLSearchParams();
+    if (options.tower !== undefined) params.set('tower', options.tower);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return this.peerCall<PeerLogResponse>(`/api/peer/log${query === '' ? '' : `?${query}`}`);
+  }
+
+  /**
+   * What one of my other Towers (a tower-ref) lets this Tower message, as it answered a
+   * discovery query. Every other outcome, an offline peer included, is a refusal with
+   * `errorCode` `REMOTE_REFUSED` and the words in `error`: a query is never held.
+   */
+  async getPeerShow(tower: string): Promise<PeerRouteResult<PeerShowResponse>> {
+    const path = `/api/peer/show?${new URLSearchParams({ tower }).toString()}`;
+    const timeoutMs = Math.max(PEER_SHOW_TIMEOUT_MS, this.requestTimeoutMs);
+    const result = await this.request<PeerShowResponse>(path, {}, timeoutMs);
+    // A refusal's words as Tower wrote them, as a refused send's are, with no code after them.
+    const message = result.errorBody?.message;
+    if (!result.ok && result.errorCode === REMOTE_REFUSED && typeof message === 'string') {
+      return { ok: false, status: result.status, error: message, errorCode: result.errorCode };
+    }
+    return this.peerResult(result);
   }
 
   async getWorkspaceStatus(workspacePath: string): Promise<TowerWorkspaceStatus | null> {
@@ -1102,10 +1311,21 @@ export class TowerClient {
      * Spec 1940: Tower's code for a failed send, when it gave one, so a caller can tell the
      * failures apart without matching {@link error}'s text: `MALFORMED_ADDRESS` (the text
      * is not an address), `REFUSED` (this sender may not name that recipient),
-     * `CROSS_TOWER_UNAVAILABLE` (an `afx://` address), and the older `NOT_FOUND`,
+     * `REMOTE_REFUSED` (a send to another Tower was refused; see {@link refusal}),
+     * `LOCAL_ADDRESS_ONLY` (an interrupt names another Tower), and the older `NOT_FOUND`,
      * `AMBIGUOUS` and `INVALID_PARAMS`. Absent when Tower could not be reached.
      */
     errorCode?: string;
+    /**
+     * Spec 1967: with `REMOTE_REFUSED`, who refused the send to another Tower and why.
+     * {@link error} is then the refusal in words for a person, with no code after it.
+     */
+    refusal?: RemoteSendRefusal;
+    /**
+     * Spec 1967: a send to another Tower that was not refused. `resolvedTo` is the
+     * recipient's full address and `mailboxId` the message's id; `held` says where.
+     */
+    remote?: RemoteSendAnswer;
     /**
      * Spec 1313 mailbox-first delivery. `delivered` = written to the PTY now;
      * `held` = persisted to the durable mailbox and awaiting a clean prompt
@@ -1172,6 +1392,30 @@ export class TowerClient {
      */
     unverifiedCause?: 'no-echo' | 'input-raced';
   }> {
+    const body = JSON.stringify({
+      to,
+      message,
+      from: options?.from,
+      workspace: options?.workspace,
+      fromWorkspace: options?.fromWorkspace,
+      options: {
+        raw: options?.raw,
+        noEnter: options?.noEnter,
+        interrupt: options?.interrupt,
+        escape: options?.escape,
+        deliverAfter: options?.deliverAfter,
+      },
+    });
+    // Tower drops a request past its ceiling unanswered, before any check could refuse it in
+    // words; the request is measured here, as it will be sent, and not sent at all.
+    const requestBytes = new TextEncoder().encode(body).length;
+    if (requestBytes > TOWER_MAX_REQUEST_BYTES) {
+      return {
+        ok: false,
+        error: `Not sent: the request would be ${requestBytes} bytes, and Tower reads none over ${TOWER_MAX_REQUEST_BYTES}.`,
+        errorCode: REQUEST_TOO_LARGE,
+      };
+    }
     const result = await this.request<{
       ok: boolean;
       resolvedTo: string;
@@ -1188,32 +1432,27 @@ export class TowerClient {
       bodyLength?: number;
       verified?: boolean;
       unverifiedCause?: 'no-echo' | 'input-raced';
+      remote?: RemoteSendAnswer;
     }>(
       '/api/send',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          to,
-          message,
-          from: options?.from,
-          workspace: options?.workspace,
-          fromWorkspace: options?.fromWorkspace,
-          options: {
-            raw: options?.raw,
-            noEnter: options?.noEnter,
-            interrupt: options?.interrupt,
-            escape: options?.escape,
-            deliverAfter: options?.deliverAfter,
-          },
-        }),
-      },
+      { method: 'POST', body },
+      namesATower(to) ? Math.max(REMOTE_SEND_TIMEOUT_MS, this.requestTimeoutMs) : this.requestTimeoutMs,
     );
 
     if (!result.ok) {
       const failure = { ok: false, error: result.error, connectionRefused: result.connectionRefused };
-      return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+      if (result.errorCode === undefined) return failure;
+      const message = result.errorBody?.message;
+      // Words that say the message is stored and not to send it again: those, and nothing appended.
+      if (result.errorCode === REMOTE_HELD_ON_FAULT && typeof message === 'string') {
+        return { ...failure, error: message, errorCode: result.errorCode };
+      }
+      const refusal = result.errorCode === REMOTE_REFUSED ? readRemoteRefusal(result.errorBody) : undefined;
+      if (refusal === undefined || typeof message !== 'string') return { ...failure, errorCode: result.errorCode };
+      return { ...failure, error: message, errorCode: result.errorCode, refusal };
     }
 
+    const remote = readRemoteAnswer(result.data!.remote);
     return {
       ok: true,
       resolvedTo: result.data!.resolvedTo,
@@ -1230,6 +1469,7 @@ export class TowerClient {
       bodyLength: result.data!.bodyLength,
       verified: result.data!.verified,
       unverifiedCause: result.data!.unverifiedCause,
+      ...(remote === undefined ? {} : { remote }),
     };
   }
 

@@ -1,4 +1,5 @@
 import type { ServedAgentState } from './agent-state.js';
+import type { PeerCloudLimits, PeerListedSwitchState, PeerOutcome, PeerRequestKind } from './peer-wire.js';
 
 /**
  * Tower API response shapes.
@@ -7,6 +8,12 @@ import type { ServedAgentState } from './agent-state.js';
  * the browser dashboard (packages/codev/dashboard), and the
  * VS Code extension (packages/codev-vscode).
  */
+
+/**
+ * The largest request body Tower reads, in bytes: past it, the request is dropped
+ * unanswered. A literal, so the SDK's mirror of it is checked against this.
+ */
+export const MAX_REQUEST_BODY_BYTES = 1_048_576;
 
 // --- Dashboard State (GET /workspace/:path/api/state) ---
 
@@ -350,6 +357,19 @@ export interface OverviewData {
    * escalation never triggers delivery.
    */
   mailboxEscalated: boolean;
+  /**
+   * Spec 1967: mail from another Tower held for release for recipients in this workspace. It
+   * waits for a human's `afx inbox release`, not for an agent, so it is not part of `heldCount`.
+   * Count only, never bodies. Absent from a Tower older than Spec 1967: read it as 0.
+   */
+  heldForReleaseCount?: number;
+  /**
+   * Spec 1967: messages sent from this workspace to another Tower that wait on this Tower for
+   * that Tower (the sending Tower's outbox, by sending workspace). They wait for a route, not for
+   * an agent, so they are not part of `heldCount`. Absent from a Tower older than Spec 1967: read
+   * it as 0.
+   */
+  waitingForPeerCount?: number;
   /**
    * Issue 1410: per-builder count of pending review-comments (the queued
    * feedback in each builder's `.codev/pending-comments.json`), keyed by
@@ -836,6 +856,408 @@ export interface AddressBookResponse {
   workspaces: AddressBookWorkspace[];
 }
 
+// --- Peers: the remote-messaging switch, grants and the peer list (Spec 1967; /api/peer/…) ---
+//
+// The local routes behind `afx peer on|off|list|grants|grant|revoke|limits`. A refusal is the
+// usual Tower error body, `{ error, message }`. The codes: `INVALID_PARAMS` (400),
+// `HUMAN_APPROVAL_REQUIRED` (403: turning the switch on and adding a grant are a human's
+// acts), `NOT_OVER_TUNNEL` (403: neither is accepted from Codev Cloud's tunnel),
+// `NOT_AVAILABLE` (400: another owner's Tower, stage 3), `NOT_A_PEER` (400: this Tower
+// itself), `UNKNOWN_TOWER` (404), `NOT_GRANTABLE` (400: an address no grant can name),
+// `NOT_FOUND` (404: no such workspace or architect, or no grant to remove), `AMBIGUOUS`
+// (409), `CONFIG_INVALID` (500).
+
+/** The remote-messaging switch (`GET /api/peer/switch`, `PUT /api/peer/switch`). */
+export interface PeerSwitchResponse {
+  state: 'on' | 'off';
+  /** Did this request change it? Always `false` for a GET and for a request that asked for the state it was in. */
+  changed: boolean;
+  /** When a human last turned it on or off, epoch ms; `null` if never. */
+  changedAt: number | null;
+  /** This Tower's own name, the slug Codev Cloud gave it; `null` if it has never been registered. */
+  towerName: string | null;
+  /** How many grants this Tower holds. */
+  grantCount: number;
+  /**
+   * What this Tower did to tell Codev Cloud of the change (contract section 2); `null` when
+   * nothing changed. `reporting`: the report is under way, retried if it fails. `tunnel-down`:
+   * not reported now, and the next connection states it. `not-connected`: this Tower has no
+   * registration, or the cloud removed it. `no-relay`: the cloud has no relay, so there is
+   * nothing to tell. `failed`: the report could not be started (see the Tower log); the next
+   * connection states the switch.
+   */
+  cloudReport: PeerSwitchReport | null;
+  /**
+   * Messages from other Towers that a human released and that still wait to be delivered here.
+   * A release is the owner's decision about that message, so turning the switch off does not
+   * take it back; `afx inbox dismiss <id>` stops one.
+   */
+  releasedWaiting: number;
+}
+
+/** See {@link PeerSwitchResponse.cloudReport}. */
+export type PeerSwitchReport = 'reporting' | 'tunnel-down' | 'not-connected' | 'no-relay' | 'failed';
+
+/** Body of `PUT /api/peer/switch`. `on` is refused unless `humanApproved` is `true`. */
+export interface PeerSwitchRequest {
+  state: 'on' | 'off';
+  humanApproved?: boolean;
+}
+
+/**
+ * What a grant covers (Spec 1940, Decision 4): a workspace's front door, resolved when mail
+ * arrives; one architect by name; every architect of a workspace; or everything here.
+ */
+export type PeerGrantScopeName = 'front-door' | 'architect' | 'architects' | 'all';
+/** What happens to mail a grant admits: delivered, or held for release by a human. */
+export type PeerGrantModeName = 'deliver' | 'hold';
+
+/** The recipients of a grant request, as `afx peer grant` names them: exactly one of the three. */
+export interface PeerGrantRecipients {
+  /** Local addresses: `<workspace>:architect:<name>` for one architect, `<workspace>:architect` for its front door. */
+  addresses?: string[];
+  /** `--workspace <name>`: every architect in that workspace. */
+  workspace?: string;
+  /** `--all`: everything on this Tower, architects and builders. */
+  all?: boolean;
+}
+
+/** Body of `POST /api/peer/grants`. Refused unless `humanApproved` is `true`. */
+export interface PeerGrantRequest extends PeerGrantRecipients {
+  /** The peer, as a tower-ref (`devvm`). */
+  tower: string;
+  /** Default `deliver`. */
+  mode?: PeerGrantModeName;
+  humanApproved?: boolean;
+}
+
+/**
+ * Body of `POST /api/peer/grants/revoke`. With none of the three recipient fields it removes
+ * every grant for that Tower. Narrowing access needs no approval.
+ */
+export interface PeerRevokeRequest extends PeerGrantRecipients {
+  tower: string;
+}
+
+/** One grant as the routes report it. */
+export interface PeerGrantView {
+  peerTowerId: string;
+  /** The peer's current name, as this Tower last listed it; `null` if it has not been listed. */
+  peerName: string | null;
+  scope: PeerGrantScopeName;
+  mode: PeerGrantModeName;
+  /** The workspace's key; `null` exactly when the scope is `all`. */
+  workspacePath: string | null;
+  /** The name the workspace is addressed by now; `null` for `all`, or when it has none. */
+  workspaceName: string | null;
+  /** The architect's name; set exactly when the scope is `architect`. */
+  architect: string | null;
+  /** What it covers, for a person: `codev:architect:local`, `codev:architect`, `every architect in codev`, `everything`. */
+  recipient: string;
+  /** For a front-door grant, the architect the front door reaches now; otherwise `null`. */
+  reaches: string | null;
+  /** Why the grant matches nothing now (its workspace or architect is gone); `null` when it applies. */
+  matchesNothing: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** `GET /api/peer/grants[?tower=<tower-ref>]`. */
+export interface PeerGrantsResponse {
+  remoteMessaging: 'on' | 'off';
+  grants: PeerGrantView[];
+}
+
+/** A peer as a grant route resolved it. */
+export interface PeerTowerNamed {
+  towerId: string;
+  name: string;
+}
+
+/** What one requested grant did. */
+export interface PeerGrantChange {
+  grant: PeerGrantView;
+  /** `added`; `mode-changed` (it existed with the other mode); `unchanged` (it existed as asked). */
+  change: 'added' | 'mode-changed' | 'unchanged';
+}
+
+/** The 200 response of `POST /api/peer/grants`. */
+export interface PeerGrantResponse {
+  tower: PeerTowerNamed;
+  changes: PeerGrantChange[];
+  remoteMessaging: 'on' | 'off';
+}
+
+/** The 200 response of `POST /api/peer/grants/revoke`. */
+export interface PeerRevokeResponse {
+  tower: PeerTowerNamed;
+  removed: PeerGrantView[];
+  /**
+   * Messages from this peer that a human released and that still wait to be delivered here.
+   * Removing a grant does not take a release back; `afx inbox dismiss <id>` stops one.
+   */
+  releasedWaiting: number;
+}
+
+/** The limits this Tower enforces itself, from the user's Codev config (`peer.limits`). */
+export interface PeerTowerLimits {
+  /** Remote messages accepted from one peer in a minute. */
+  acceptedPerPeerPerMinute: number;
+  /** Remote messages from one peer accepted here and not yet delivered. */
+  undeliveredPerPeer: number;
+  /** Messages waiting on this Tower for one peer. */
+  waitingPerPeer: number;
+}
+
+/** `GET /api/peer/limits`. */
+export interface PeerLimitsResponse {
+  tower: PeerTowerLimits;
+  /** Days this Tower keeps its record of cross-Tower attempts: the configured value, raised to 30. */
+  recordRetentionDays: number;
+  /** Codev Cloud's own limits, as its last peer list gave them; `null` if this Tower has never listed its peers. */
+  cloud: { limits: PeerCloudLimits; listedAt: number } | null;
+}
+
+/**
+ * Why `GET /api/peer/towers` answered from this Tower's cached list rather than a fresh one:
+ * - `not-connected`: no registration with Codev Cloud (`afx tower connect`);
+ * - `not-registered`: the registration was removed from Codev Cloud (`afx tower connect --reauth`);
+ * - `no-relay`: the cloud has no relay, so it was not asked;
+ * - `cloud-unreachable`: no answer, or an answer that was not the cloud's;
+ * - `unauthenticated`: the cloud refused this Tower's key;
+ * - `rate-limited`: the cloud is limiting this Tower's calls (`retryAfterSec` with it);
+ * - `bad-listing`: the cloud's list did not fit the contract, and was not used;
+ * - `registration-changed`: this Tower registered again while the list was being fetched, so the
+ *   answer was the previous registration's, and was not used;
+ * - `recent`: the list was fetched moments ago, within the call budget (contract section 3).
+ */
+export type PeerListProblem =
+  | 'registration-changed'
+  | 'not-connected'
+  | 'not-registered'
+  | 'no-relay'
+  | 'cloud-unreachable'
+  | 'unauthenticated'
+  | 'rate-limited'
+  | 'bad-listing'
+  | 'recent';
+
+/**
+ * Whether Codev Cloud has a relay, as this Tower knows it: `available`; `none`, with why;
+ * or `unknown` when the cloud has never said either way.
+ */
+export interface PeerCloudRelay {
+  state: 'available' | 'none' | 'unknown';
+  /**
+   * With `none`: `insecure` (the server URL is plain HTTP and not loopback), `stated-none`
+   * (the cloud said it has none), `old-cloud` (it predates the relay), `unsupported` (its
+   * relay speaks no version this Tower speaks), `malformed` (its handshake's relay did not fit).
+   */
+  why: 'insecure' | 'stated-none' | 'old-cloud' | 'unsupported' | 'malformed' | null;
+}
+
+/** One of my other Towers, as `GET /api/peer/towers` lists it. */
+export interface PeerListedTowerView {
+  towerId: string;
+  /** Its current name. */
+  name: string;
+  /** A live session at Codev Cloud when it was listed: a hint, never a promise. */
+  online: boolean;
+  /** The protocol versions its session stated. */
+  protocols: number[];
+  /** Its own switch, as the cloud last heard it. */
+  remoteMessaging: PeerListedSwitchState;
+  /** What it may message on this Tower: its grants here. Empty when nothing. */
+  mayMessage: PeerGrantView[];
+  /** The marks set on it now, from the answers this Tower's messages to it got. Empty when none. */
+  marks: PeerMarkView[];
+}
+
+/**
+ * A mark on a peer, from the answers this Tower's messages to it got (Spec 1967, gaps G10, G12
+ * and G15). Each lasts until a message to that peer gets any other answer:
+ * - `not-verifying`: five answers in a row were `not-verified`, so the two Towers may disagree
+ *   about the contract;
+ * - `cloud-error`: five in a row were the cloud's `cloud-error`;
+ * - `clock-out-of-range`: the last answer was `clock-skew`, so one of the two clocks is off.
+ */
+export type PeerMarkName = 'not-verifying' | 'cloud-error' | 'clock-out-of-range';
+
+export interface PeerMarkView {
+  mark: PeerMarkName;
+  /** How many answers in a row set it. */
+  run: number;
+  /** When the first of them came, and the latest, epoch ms. */
+  since: number;
+  lastAt: number;
+}
+
+/** One address a peer answered a discovery query with, as this Tower writes it: `afx://<tower>/<address>`. */
+export interface PeerShownAddress {
+  address: string;
+  /** Whether the agent has a live terminal there. */
+  live: boolean;
+}
+
+/**
+ * `GET /api/peer/show?tower=<tower-ref>` (Spec 1967, Decision 6): what runs on one of my other
+ * Towers that this Tower may message, as that Tower answered. Only an answer is a 200; every
+ * other outcome, an offline peer included, is a refusal (`REMOTE_REFUSED`), and nothing is held.
+ */
+export interface PeerShowResponse {
+  tower: PeerTowerNamed;
+  /** In the order the peer gave them. */
+  addresses: PeerShownAddress[];
+  /** The peer trimmed its list to fit the answer cap: some addresses are not shown. */
+  truncated: boolean;
+}
+
+/** `GET /api/peer/towers`: my other Towers, fetched from Codev Cloud within the call budget, else cached. */
+export interface PeerTowersResponse {
+  remoteMessaging: 'on' | 'off';
+  /** This Tower's own name; `null` if it has never been registered. */
+  towerName: string | null;
+  /** This Tower's own tunnel. While it is down this Tower can send but not receive. */
+  tunnel: 'up' | 'down';
+  relay: PeerCloudRelay;
+  /** Whether the towers below were fetched now, and if not, why. */
+  listing: {
+    fresh: boolean;
+    /** When the list below was fetched; `null` if this Tower has never listed its peers. */
+    refreshedAt: number | null;
+    problem: PeerListProblem | null;
+    retryAfterSec: number | null;
+  };
+  towers: PeerListedTowerView[];
+  /**
+   * The last time, within the last 10 minutes, that this Tower refused a relayed request as
+   * `clock-skew`, epoch ms; `null` when none was. While it is set, this Tower's own clock may be
+   * out of range (Spec 1967, G12).
+   */
+  clockSkewSince: number | null;
+}
+
+/**
+ * `GET /api/peer/panel`: what the read-only Peers panel on Tower's home page shows (Spec 1967,
+ * Decision 9): the towers, grants and marks of `GET /api/peer/towers`, and whether this request
+ * came through Codev Cloud. Turning remote messaging on and adding a grant are refused through
+ * the cloud, so there the panel says they are done at this Tower's own machine.
+ */
+export interface PeerPanelResponse extends PeerTowersResponse {
+  /** This request came through Codev Cloud's tunnel, by the test the refusals use. */
+  viaTunnel: boolean;
+}
+
+/**
+ * `GET /api/peer/status`: remote messaging at a glance, from what this Tower already knows. It
+ * makes no call to Codev Cloud, so it backs `afx status` and `afx tower status`.
+ */
+export interface PeerStatusResponse {
+  remoteMessaging: 'on' | 'off';
+  /** This Tower's own name: the slug Codev Cloud gave it; `null` if it has never been registered. */
+  towerName: string | null;
+  /** This Tower's own tunnel to Codev Cloud. */
+  tunnel: 'up' | 'down';
+  /** My other Towers in this Tower's last peer list: how many, how many were online then, and when it was fetched. */
+  peers: { listed: number; online: number; listedAt: number | null };
+}
+
+/**
+ * Why no mail leaves this Tower for any peer now: what a fresh send would be refused for.
+ * `remote-off` (this Tower's switch), `not-connected` (no registration with Codev Cloud),
+ * `not-registered` (Codev Cloud removed the registration), `no-relay` (the cloud has none).
+ */
+export type PeerQueuePause = 'remote-off' | 'not-connected' | 'not-registered' | 'no-relay';
+
+/** The states of a message on this Tower for another Tower. `held` is waiting; the rest are ends. */
+export type PeerOutboxStateName = 'held' | 'accepted' | 'refused' | 'dismissed' | 'expired';
+
+/** A message on this Tower for another Tower (Spec 1967), as `afx inbox` and `afx inbox show` report it. */
+export interface PeerOutboxMessage {
+  /** The message id: the id the send printed, and the handle `afx inbox show|dismiss <id>` takes. */
+  id: string;
+  /** The recipient's full address, `afx://<tower>/<address>`. */
+  to: string;
+  peerTowerId: string;
+  /** The peer's current name, as this Tower last listed it; `null` if it has not been listed. */
+  peerName: string | null;
+  /** The sending agent; `null` when it had none. */
+  fromAgent: string | null;
+  /** The sending workspace, as the send gave it. */
+  workspacePath: string;
+  /** The send time, fixed across retries; the 30-day lifetime runs from it. */
+  sentAt: number;
+  /** When its lifetime ends, epoch ms. */
+  expiresAt: number;
+  state: PeerOutboxStateName;
+  /**
+   * While held: why it waits, the last answer's reason (`tower-offline`, `rate-limited`, …),
+   * `not-verified`, or `queued` before its first attempt. Once ended: the last answer's reason,
+   * or the state.
+   */
+  reason: string;
+  /** The last answer's outcome; `null` before any answer. */
+  lastOutcome: PeerOutcome | null;
+  /** Relay calls made for it. */
+  attempts: number;
+  /** For the next message its peer's queue sends: when it is tried next, epoch ms. `null` for the rest. */
+  nextAttemptAt: number | null;
+  /** Its relay call is in flight now, so it cannot be dismissed until the answer comes. */
+  inFlight: boolean;
+  resolvedAt: number | null;
+}
+
+/** `GET /api/peer/outbox?workspace=<path>`: the messages from that workspace waiting on this Tower for a peer, oldest first. */
+export interface PeerOutboxResponse {
+  /** Why none of them leaves now; `null` when the queues run. */
+  paused: PeerQueuePause | null;
+  messages: PeerOutboxMessage[];
+}
+
+/** One row of this Tower's record of cross-Tower attempts (`GET /api/peer/log`). It never carries a body. */
+export interface PeerLogEntry {
+  direction: 'outbound' | 'inbound';
+  /** When it happened; for a counted row, the first attempt of its minute. */
+  at: number;
+  /** For a counted row, the last attempt of its minute; otherwise `at`. */
+  lastAt: number;
+  /** How many attempts the row stands for. More than one only for a counted row. */
+  count: number;
+  /** A flood, counted rather than recorded one by one: requests that did not verify, and rate-limited ones. */
+  aggregate: boolean;
+  /** `null` for a counted row. */
+  kind: PeerRequestKind | null;
+  /** The other Tower, as this Tower names it now (its current name, else the name recorded, else its id); `null` when unknown. */
+  peer: string | null;
+  peerTowerId: string | null;
+  /** For a request that did not verify before its sender was known: the tunnel session it came on. */
+  tunnelSession: string | null;
+  messageId: string | null;
+  from: string | null;
+  to: string | null;
+  payloadSize: number | null;
+  outcome: PeerOutcome;
+  reason: string | null;
+  /**
+   * For an outbound message, the message's own state here now, beside what this call got: an
+   * answer received under a registration since replaced is recorded as the call got it, while
+   * the message stays held (`registration-changed`). `null` for the rest, and once the message
+   * has been pruned.
+   */
+  message: { state: PeerOutboxStateName; reason: string } | null;
+}
+
+/** `GET /api/peer/log[?tower=<tower-ref>][&limit=<n>]`: the record, newest first, with the marks set now. */
+export interface PeerLogResponse {
+  entries: PeerLogEntry[];
+  /** There are older rows than those returned. */
+  truncated: boolean;
+  /** The marks set now on the peers in the log's scope, with the peer each is on. */
+  marks: Array<PeerMarkView & { peerTowerId: string; peer: string }>;
+  /** See {@link PeerTowersResponse.clockSkewSince}. */
+  clockSkewSince: number | null;
+}
+
 // --- Tunnel (GET /api/tunnel/status) ---
 
 export interface TunnelStatus {
@@ -901,6 +1323,15 @@ export interface ProtocolStats {
 }
 
 /**
+ * Why a mailbox row is held, as every surface reports it (Spec 1313):
+ * - `busy`, `no-profile`, `no-live-pty`: the render gate's verdict (see `HeldMessage.reason`);
+ * - `held-for-release` (Spec 1967): mail from another Tower that a hold-for-release grant
+ *   admitted, or whose grant or switch no longer allowed delivery. Nothing delivers it until a
+ *   human releases it with `afx inbox release`.
+ */
+export type HeldMailReason = 'busy' | 'no-profile' | 'no-live-pty' | 'held-for-release';
+
+/**
  * Issue 1450: one currently-*held* mailbox row as `GET /api/inbox` projects it —
  * the payload behind `afx inbox` and the dashboard's held-mail popover.
  *
@@ -926,8 +1357,11 @@ export interface HeldMessage {
   toAgent: string;
   /** Sending agent; `null` for rows with no recorded sender (rendered as `?`). */
   fromAgent: string | null;
-  /** Why the render gate held it: `'busy' | 'no-profile' | 'no-live-pty'`; `null` if unset. */
-  reason: string | null;
+  /**
+   * Why it is held: the render gate's `'busy' | 'no-profile' | 'no-live-pty'`, or
+   * `'held-for-release'` for remote mail held for a human's release (Spec 1967); `null` if unset.
+   */
+  reason: HeldMailReason | null;
   /**
    * The gate's detail behind a `busy` reason (Issue #1482):
    * `'user-text'` — a draft or menu occupies the composer; a human is at the line and the hold
@@ -954,6 +1388,38 @@ export interface HeldMessage {
    * with a countdown rather than an age.
    */
   notBefore: number | null;
+  /**
+   * Spec 1967: for mail from another Tower, its sender as the message's header names it
+   * (`afx://mbp/codev:architect:main`); `null` for local mail, whose sender is `fromAgent`.
+   * Absent from a Tower older than Spec 1967.
+   */
+  remoteSender?: string | null;
+  /** Spec 1967: for mail from another Tower, the sending Tower's owner, when its statement named one. */
+  remoteOwnerEmail?: string | null;
+}
+
+/** Body of `POST /api/inbox/:id/release` (Spec 1967): refused unless `humanApproved` is `true`. */
+export interface InboxReleaseRequest {
+  humanApproved?: boolean;
+}
+
+/** The 200 response of `POST /api/inbox/:id/release`: the message is now ordinary held mail, delivered through the gate. */
+export interface InboxReleaseResponse {
+  id: string;
+  workspacePath: string;
+  toAgent: string;
+}
+
+/**
+ * The 200 response of `POST /api/inbox/:id/dismiss`. `kind` says what was dismissed: a mailbox
+ * row (mail for an agent here, held for release included), or a message waiting here for a
+ * peer (`outbox`, Spec 1967), which is then never sent.
+ */
+export interface InboxDismissResponse {
+  ok: true;
+  kind: 'mailbox' | 'outbox';
+  /** For a message waiting for a peer, the peer's name as this Tower last listed it. */
+  peer?: string | null;
 }
 
 export interface AnalyticsResponse {

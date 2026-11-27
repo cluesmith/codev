@@ -161,7 +161,7 @@ target: "${target}"
       const warnings = log.mock.calls.filter(([level]) => level === 'WARN').map(([, msg]) => msg as string);
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("Skipping task 'Nightly Report' (report.yaml)");
-      expect(warnings[0]).toContain('Cross-Tower messaging is not available');
+      expect(warnings[0]).toContain("A cron task's target takes a local address");
     });
 
     it('is refused with an owner in it and in any letter case', () => {

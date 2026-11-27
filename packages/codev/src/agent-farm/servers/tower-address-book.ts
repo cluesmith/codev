@@ -13,6 +13,7 @@
  */
 
 import type { AddressBookAgent, AddressBookResponse, AddressBookWorkspace, AgentAddress } from '@cluesmith/codev-types';
+import type { DiscoveryWorkspace } from '../peer/discovery.js';
 import { tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import { getTerminalManager, getWorkspaceTerminals } from './tower-terminals.js';
 import type { WorkspaceTerminals } from './tower-types.js';
@@ -200,4 +201,32 @@ export function addressBook(from: SenderContext = {}): AddressBookResponse {
     return workspace;
   });
   return { workspaces };
+}
+
+/**
+ * What discovery may list (Spec 1967, plan phase 10): every running workspace, in the
+ * book's order, with its architects and builders as the book finds them, and whether each
+ * has a live terminal. Only running ones: a name reaches no other (Spec 1940's address
+ * book), so step 13 refuses mail to a stopped workspace, and Spec 1940 has a full grant show
+ * "every active workspace". A registered agent of a running workspace with no live terminal
+ * is listed, not live: mail for it is accepted and held. Shells are left out: no other Tower
+ * ever reaches one.
+ */
+export function discoverableWorkspaces(): DiscoveryWorkspace[] {
+  const registered = getRegisteredWorkspaces();
+  const running = runningWorkspacePaths();
+  const workspaces: DiscoveryWorkspace[] = [];
+  for (const listed of listedWorkspaces([], running, getWorkspaceTerminals())) {
+    if (!listed.running) continue;
+    workspaces.push({
+      workspacePath: listed.path,
+      addressName: printableAddressName(listed.path, registered, running).name,
+      seats: seatsOf(listed.path, listed.entry).flatMap((seat) =>
+        seat.kind === 'shell'
+          ? []
+          : [{ kind: seat.kind, name: seat.name, live: seat.terminalId !== undefined && hasLiveTerminal(seat.terminalId) }],
+      ),
+    });
+  }
+  return workspaces;
 }

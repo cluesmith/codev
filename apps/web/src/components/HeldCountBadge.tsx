@@ -32,36 +32,72 @@
  * so a scheduled-only state is invisible here. That is the existing contract — the badge is an
  * *attention* indicator — and `afx inbox` remains the surface that sees it.
  *
- * Presentational: it takes a `loadMessages` loader rather than importing `fetchInbox`, so it
- * unit-tests in isolation with a fake loader, mirroring `CloudStatus`.
+ * ## Three counts (Spec 1967)
+ *
+ * Mail from another Tower adds two kinds of held mail, each counted and listed apart from mail
+ * waiting for a local agent, as `afx inbox` lists them:
+ *
+ *   - **held for release** (`OverviewData.heldForReleaseCount`): mail from another Tower that
+ *     waits for a human's `afx inbox release`. It puts the badge in its attention state, as an
+ *     escalated row does: nothing moves until a human acts.
+ *   - **waiting for a peer** (`OverviewData.waitingForPeerCount`): mail this workspace sent to
+ *     another Tower that waits here for a route. It never puts the badge in its attention
+ *     state: it waits for a Tower, not for a starved agent.
+ *
+ * The badge shows each count that is not zero, so the ordinary case still reads `N held`, and
+ * renders nothing while all three are zero. The popover gains a group for each kind, each the
+ * length of its count. Release and dismissal stay in the CLI, as dismissal always has.
+ *
+ * Presentational: it takes `loadMessages` / `loadWaitingForPeer` loaders rather than importing
+ * `fetchInbox`, so it unit-tests in isolation with fake loaders, mirroring `CloudStatus`.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import type { HeldMessage } from '../lib/api.js';
+import type { HeldMessage, PeerOutboxMessage, PeerOutboxResponse } from '../lib/api.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
-import { formatHeldAge, formatHeldDuration, isScheduled } from '../lib/heldMail.js';
+import { formatHeldAge, formatHeldDuration, groupHeldMail, heldSenderOf, isScheduled, peerPauseText } from '../lib/heldMail.js';
 
 export interface HeldCountBadgeProps {
   /** Count of currently-held ELIGIBLE rows across the workspace (`OverviewData.heldCount`). */
   count: number;
+  /** Mail from another Tower held for a human's release (`OverviewData.heldForReleaseCount`). */
+  heldForReleaseCount?: number;
+  /** Mail from this workspace waiting here for another Tower (`OverviewData.waitingForPeerCount`). */
+  waitingForPeerCount?: number;
   /** True when at least one held row has crossed the escalation age. */
   escalated: boolean;
   /**
-   * Fetches the workspace's held rows. Called on open, and again whenever `count` changes
+   * Fetches the workspace's held rows. Called on open, and again whenever a count changes
    * while open. Injected so the component stays presentational and testable.
    */
   loadMessages: () => Promise<HeldMessage[]>;
+  /**
+   * Fetches the mail waiting here for another Tower, with the loader above; `null` from a Tower
+   * that lists none. Without it, the popover has no such group.
+   */
+  loadWaitingForPeer?: () => Promise<PeerOutboxResponse | null>;
+}
+
+/** What one open of the panel loaded. */
+interface Loaded {
+  messages: HeldMessage[];
+  waitingForPeer: PeerOutboxResponse | null;
 }
 
 /** What the panel is currently showing. */
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; messages: HeldMessage[] };
+  | ({ kind: 'ready' } & Loaded);
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
 
 function HeldRow({ message, now }: { message: HeldMessage; now: number }) {
   const scheduled = isScheduled(message.notBefore, now);
-  // `?` for a missing sender matches how `afx inbox` renders the same row.
-  const fromTo = `${message.fromAgent ?? '?'} → ${message.toAgent}`;
+  // `?` for a missing sender matches how `afx inbox` renders the same row; mail from another
+  // Tower names its sender's full address, as its header does.
+  const fromTo = `${heldSenderOf(message)} → ${message.toAgent}`;
   // A scheduled row shows its countdown to due time; a stuck one shows how long it has waited.
   const when = scheduled
     ? `→${formatHeldDuration(message.notBefore! - now)}`
@@ -83,7 +119,36 @@ function HeldRow({ message, now }: { message: HeldMessage; now: number }) {
   );
 }
 
-export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadgeProps) {
+/** Mail from another Tower held for release: who sent it, to whom, and how long it has waited. */
+function ForReleaseRow({ message, now }: { message: HeldMessage; now: number }) {
+  return (
+    <li className="held-row" data-testid="held-row">
+      <span className="held-row-addresses">{`${heldSenderOf(message)} → ${message.toAgent}`}</span>
+      <span className="held-row-meta">{formatHeldAge(message.createdAt, now)} · held for release</span>
+    </li>
+  );
+}
+
+/** A message waiting here for another Tower: to whom, how long ago it was sent, and why it waits. */
+function WaitingForPeerRow({ message, now }: { message: PeerOutboxMessage; now: number }) {
+  return (
+    <li className="held-row" data-testid="held-row">
+      <span className="held-row-addresses">{`${message.fromAgent ?? '?'} → ${message.to}`}</span>
+      <span className="held-row-meta">
+        {formatHeldAge(message.sentAt, now)} · {message.inFlight ? 'sending now' : message.reason}
+      </span>
+    </li>
+  );
+}
+
+export function HeldCountBadge({
+  count,
+  heldForReleaseCount = 0,
+  waitingForPeerCount = 0,
+  escalated,
+  loadMessages,
+  loadWaitingForPeer,
+}: HeldCountBadgeProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // In-flight flag, separate from `state`: a refetch keeps the previous rows rendered, so
@@ -104,9 +169,11 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
   // and turn the effect into a refetch loop. Behaviour should not hinge on a caller
   // remembering to memoize.
   const loaderRef = useRef(loadMessages);
+  const peerLoaderRef = useRef(loadWaitingForPeer);
   useEffect(() => {
     loaderRef.current = loadMessages;
-  }, [loadMessages]);
+    peerLoaderRef.current = loadWaitingForPeer;
+  }, [loadMessages, loadWaitingForPeer]);
 
   const load = useCallback(() => {
     const generation = ++generationRef.current;
@@ -116,11 +183,14 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
     // away is exactly the wrong moment to do it — the user is watching to see what moved.
     // `aria-busy` carries the in-flight state instead. Only a cold open shows the spinner.
     setState((prev) => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
-    loaderRef.current().then(
-      (messages) => {
+    // Both lists in one load, so the groups always come from one moment, and one failure
+    // fails the whole panel rather than leave a group silently out.
+    const peerLoader = peerLoaderRef.current;
+    Promise.all([loaderRef.current(), peerLoader ? peerLoader() : Promise.resolve(null)]).then(
+      ([messages, waitingForPeer]) => {
         if (generationRef.current !== generation) return;
         setBusy(false);
-        setState({ kind: 'ready', messages });
+        setState({ kind: 'ready', messages, waitingForPeer });
       },
       (err: unknown) => {
         if (generationRef.current !== generation) return;
@@ -134,13 +204,13 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
     // lifetime of the component and the fetch effect fires only on open / count change.
   }, []);
 
-  // Load on open, and again when `count` changes while open. Refetch rather than snapshot:
-  // the count is SSE-driven, so a change means the mailbox actually moved — precisely when a
+  // Load on open, and again when a count changes while open. Refetch rather than snapshot:
+  // the counts are SSE-driven, so a change means the mailbox actually moved — precisely when a
   // user staring at the open panel would expect it to follow.
   useEffect(() => {
     if (!open) return;
     load();
-  }, [open, count, load]);
+  }, [open, count, heldForReleaseCount, waitingForPeerCount, load]);
 
   // Escape closes and returns focus to the button (the disclosure pattern's keyboard contract).
   // Click-outside closes without moving focus, since the user is already looking elsewhere.
@@ -167,36 +237,65 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
   // held row being delivered WHILE the panel is open would unmount the button mid-interaction
   // and drop focus to <body>. So when open, stay mounted and say the mail cleared; the user's
   // own close unmounts us. The closed-at-zero contract is unchanged.
-  if (count <= 0 && !open) {
+  const local = Math.max(0, count);
+  const forRelease = Math.max(0, heldForReleaseCount);
+  const forPeer = Math.max(0, waitingForPeerCount);
+  const total = local + forRelease + forPeer;
+  if (total <= 0 && !open) {
     return null;
   }
 
-  const label = `${count} held`;
-  const title = escalated
-    ? `${count} held message${count === 1 ? '' : 's'} — at least one past the escalation age. Click to list them.`
-    : `${count} held message${count === 1 ? '' : 's'} awaiting a clear prompt. Click to list them.`;
+  // Mail held for release waits for a human, so it is an attention state as escalation is.
+  // Mail waiting for a peer waits for a Tower, never for a starved agent, so it is not.
+  const attention = escalated || forRelease > 0;
+
+  // One segment per count that is not zero, so the ordinary case still reads `N held`.
+  const segments: Array<{ key: string; text: string }> = [];
+  if (local > 0) segments.push({ key: 'held', text: `${local} held` });
+  if (forRelease > 0) segments.push({ key: 'release', text: `${forRelease} for release` });
+  if (forPeer > 0) segments.push({ key: 'peer', text: `${forPeer} for a peer` });
+  if (segments.length === 0) segments.push({ key: 'held', text: '0 held' });
+
+  const described: string[] = [];
+  if (local > 0 || total <= 0) {
+    described.push(
+      escalated
+        ? `${plural(local, 'held message', 'held messages')} — at least one past the escalation age`
+        : `${plural(local, 'held message', 'held messages')} awaiting a clear prompt`,
+    );
+  }
+  if (forRelease > 0) described.push(`${plural(forRelease, 'message', 'messages')} from another Tower held for a human's release`);
+  if (forPeer > 0) described.push(`${plural(forPeer, 'message', 'messages')} waiting here for another Tower`);
+  const title = `${described.join('; ')}. Click to list them.`;
 
   // `now` is sampled per render rather than ticked on a timer: the panel is a triage glance,
   // and every refetch re-renders anyway. A live-ticking age would be motion for its own sake.
   const now = Date.now();
   const messages = state.kind === 'ready' ? state.messages : [];
-  const heldRows = messages.filter((m) => !isScheduled(m.notBefore, now));
-  const scheduledRows = messages.filter((m) => isScheduled(m.notBefore, now));
+  const { held: heldRows, scheduled: scheduledRows, forRelease: forReleaseRows } = groupHeldMail(messages, now);
+  const waitingForPeer = state.kind === 'ready' ? state.waitingForPeer : null;
+  const forPeerRows = waitingForPeer?.messages ?? [];
+  const nothingHeld = heldRows.length === 0 && forReleaseRows.length === 0 && forPeerRows.length === 0;
 
   return (
     <div className="held-badge-wrapper" ref={wrapperRef}>
       <button
         type="button"
         ref={buttonRef}
-        className={`held-badge${escalated ? ' held-badge--attention' : ''}`}
+        className={`held-badge${attention ? ' held-badge--attention' : ''}`}
         data-testid="held-badge"
         title={title}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className={`held-dot${escalated ? ' held-dot--attention' : ''}`} />
-        {label}
+        <span className={`held-dot${attention ? ' held-dot--attention' : ''}`} />
+        {segments.map((segment, i) => (
+          <span key={segment.key} className="held-count" data-testid={`held-count-${segment.key}`}>
+            {i > 0 && <span className="held-count-sep" aria-hidden="true">·</span>}
+            <span className="held-count-text">{segment.text}</span>
+          </span>
+        ))}
       </button>
       {/* aria-live: the rows arrive asynchronously after the panel opens, so without it a
           screen reader announces an empty container and never mentions the messages. */}
@@ -214,13 +313,13 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
               Could not load held messages: {state.message}
             </p>
           )}
-          {/* Keyed on heldRows, not messages: when the held rows drain but a SCHEDULED row
+          {/* Keyed on the held groups, not on every row: when they drain but a SCHEDULED row
               remains, the panel is not empty yet there is still nothing held — and the
               Scheduled group's "not counted above" needs something above it to refer to. */}
-          {state.kind === 'ready' && heldRows.length === 0 && (
+          {state.kind === 'ready' && nothingHeld && (
             <p className="held-popover-note" data-testid="held-empty">
-              {count <= 0 && messages.length > 0 ? 'No held messages — the rows below are scheduled.'
-                : count <= 0 ? 'Held mail cleared.'
+              {total <= 0 && scheduledRows.length > 0 ? 'No held messages — the rows below are scheduled.'
+                : total <= 0 ? 'Held mail cleared.'
                 : 'No held messages.'}
             </p>
           )}
@@ -243,6 +342,32 @@ export function HeldCountBadge({ count, escalated, loadMessages }: HeldCountBadg
               <ul className="held-list" data-testid="held-group-scheduled">
                 {scheduledRows.map((m) => (
                   <HeldRow key={m.id} message={m} now={now} />
+                ))}
+              </ul>
+            </section>
+          )}
+          {forReleaseRows.length > 0 && (
+            <section className="held-group held-group--release">
+              <h2 className="held-group-title">Held for release ({forReleaseRows.length})</h2>
+              <p className="held-group-note">
+                From another Tower, waiting for a human: <code>afx inbox release</code> or dismiss.
+              </p>
+              <ul className="held-list" data-testid="held-group-release">
+                {forReleaseRows.map((m) => (
+                  <ForReleaseRow key={m.id} message={m} now={now} />
+                ))}
+              </ul>
+            </section>
+          )}
+          {forPeerRows.length > 0 && (
+            <section className="held-group held-group--peer">
+              <h2 className="held-group-title">Waiting for a peer ({forPeerRows.length})</h2>
+              <p className="held-group-note" data-testid="held-peer-note">
+                {waitingForPeer?.paused ? peerPauseText(waitingForPeer.paused) : 'Sent from here, waiting here for another Tower.'}
+              </p>
+              <ul className="held-list" data-testid="held-group-peer">
+                {forPeerRows.map((m) => (
+                  <WaitingForPeerRow key={m.id} message={m} now={now} />
                 ))}
               </ul>
             </section>

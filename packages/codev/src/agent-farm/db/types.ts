@@ -6,6 +6,7 @@
  */
 
 import type { Builder, ArchitectState, UtilTerminal, Annotation, BuilderType } from '../types.js';
+import type { PeerWireSenderAddress } from '@cluesmith/codev-types';
 
 /**
  * Database row type for architect table.
@@ -93,6 +94,15 @@ export type MailboxStatus = 'held' | 'delivered' | 'superseded' | 'dismissed';
 export type MailboxReason = 'busy' | 'no-profile' | 'no-live-pty';
 
 /**
+ * The reason the mailbox REPORTS for a row (Spec 1967): the stored {@link MailboxReason}, or
+ * `held-for-release` while a held row carries `release_hold = 1`. Such a row keeps its own
+ * `reason` column underneath (NULL or the last gate verdict), which is reported again once it
+ * is released. `held-for-release` is never stored in `reason`, whose CHECK does not allow it;
+ * `reportedReason` in `db/mailbox.ts` is the one mapping.
+ */
+export type MailboxReportedReason = MailboxReason | 'held-for-release';
+
+/**
  * The render gate's classification detail behind a `busy` hold (Issue #1482). Persisted
  * beside {@link MailboxReason} so every operator surface can tell the two apart:
  *   - `user-text`           — a draft or menu occupies the composer. A human is at the line;
@@ -172,6 +182,30 @@ export interface DbMailbox {
   created_at: number;      // epoch ms; per-agent enqueue order
   updated_at: number;      // epoch ms
   resolved_at: number | null;  // delivered/superseded/dismissed timestamp; null while held
+  // Spec 1967: provenance of mail that arrived from another Tower; all null for local mail.
+  remote_tower_id: string | null;     // the sending Tower's id, from the verified statement
+  remote_message_id: string | null;   // the message id (the statement's requestId)
+  remote_sender: string | null;       // JSON MailboxRemoteSender; read it with readRemoteSender
+  remote_owner_email: string | null;  // the sending Tower's owner, from the statement
+  release_hold: number;               // 0 | 1 — held for release; only ever 1 with status 'held'
+  /**
+   * When the owner released it from held for release (`afx inbox release`), or null. A released
+   * row is the owner's decision: the switch and the grants no longer govern it (spec 1940,
+   * Withdrawal: "what I do with a message already there is my own decision").
+   */
+  released_at: number | null;
+}
+
+/**
+ * Who sent a remote mailbox row (Spec 1967), stored as JSON in `mailbox.remote_sender`: the
+ * sending Tower as the verified statement names it, and the sending address as the payload
+ * states it (`null` when the sender has no agent identity). Validated on write and on read in
+ * `db/mailbox.ts`.
+ */
+export interface MailboxRemoteSender {
+  towerId: string;
+  towerSlug: string;
+  address: PeerWireSenderAddress | null;
 }
 
 /**

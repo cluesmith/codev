@@ -81,6 +81,18 @@ A message from another workspace names its sender in full and ends with the comm
 answers it: run that command as printed. Where it reads `reply through your architect`, send the
 answer to your own architect and say who it is for.
 
+## Other Towers
+
+`afx send afx://<tower>/<workspace>:architect "…"` reaches the front door of a workspace on
+another of your owner's Towers, through Codev Cloud; as across workspaces, naming an architect
+there is refused. A message headed `REMOTE, your Tower · afx://<tower>/…` came from one of those
+Towers. Only the Tower in that address is verified, by Codev Cloud: the workspace and agent after
+the slash are what that Tower says. Reply with the command on its last line.
+
+`afx peer on`, `afx peer grant` and `afx inbox release` let another machine write into an agent's
+prompt, so each is a human's decision. Don't run one on your own initiative; when your architect
+relays a human's decision to, run it with `--a-human-explicitly-approved-this`.
+
 ## Waiting on external work
 
 **A wait is a claim that a producer exists.** Before waiting on a file, a build, or a sibling's

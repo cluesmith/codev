@@ -12,6 +12,7 @@
 import {
   TowerClient as SdkTowerClient,
   type TowerClientOptions,
+  type TowerRequestResult,
 } from '@cluesmith/codev-sdk/tower-client';
 import { DEFAULT_TOWER_PORT } from '@cluesmith/codev-sdk/constants';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
@@ -43,9 +44,10 @@ export class TowerClient extends SdkTowerClient {
   override async request<T>(
     path: string,
     options: RequestInit = {},
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; connectionRefused?: boolean }> {
+    timeoutMs?: number,
+  ): Promise<TowerRequestResult<T>> {
     assertTunnelMutationAllowedUnderTest(path, this.targetsDefaultTowerPort);
-    return super.request<T>(path, options);
+    return super.request<T>(path, options, timeoutMs);
   }
 }
 

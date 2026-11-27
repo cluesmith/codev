@@ -64,7 +64,8 @@ See [codev.md](codev.md) for full documentation.
 | `afx status` | Show status of all agents |
 | `afx cleanup` | Clean up a builder worktree (`--keep-ignored` copies its untracked and kept ignored files out first) |
 | `afx send` | Send instructions to a builder (`--message-file`, opt-in `--exit-code`, safe `--retry`) |
-| `afx inbox` | List/show/dismiss held (undelivered) messages |
+| `afx inbox` | List/show/release/dismiss held (undelivered) messages |
+| `afx peer` | Messaging between your own Towers through Codev Cloud: the switch, grants, your other Towers |
 | `afx open` | Open file annotation viewer |
 | `afx shell` | Spawn a utility shell |
 | `afx tower` | Cross-project dashboard |

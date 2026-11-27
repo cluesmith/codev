@@ -12,7 +12,9 @@ run-name: "Windows: ${{ inputs.purpose || 'unlabelled' }}"
 #
 # Jobs:
 #   probe     scripts/windows-probe.mjs on x64 and ARM64: Git Bash, PATHEXT, named pipes,
-#             CIM census latency, job objects, detached survival, native-dependency installs.
+#             CIM census latency, job objects, detached survival, native-dependency installs,
+#             and (Spec 1967, `--argv`) whether an `afx://` address typed unquoted reaches the
+#             process unchanged under Git Bash, PowerShell and cmd, one step per shell.
 #             With tower=true the x64 leg also starts Tower from the built checkout (building
 #             the repo on ARM64 fails in the artifact-canvas bundler; users install prebuilt packages).
 #   targeted  runs the packages/codev vitest files matching `filter` (skipped when empty).
@@ -96,6 +98,29 @@ jobs:
 
       - name: Probe platform facts and native-dependency installs
         run: node scripts/windows-probe.mjs --deps --out "$RUNNER_TEMP/probe-${{ matrix.os }}.json"
+
+      # Spec 1967: an address typed unquoted must reach the process unchanged in every shell a
+      # Windows user may type `afx send` in. Each step fails unless both arrive byte for byte.
+      - name: Probe afx:// addresses typed unquoted (Git Bash)
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          PROBE_SHELL: bash
+        run: node scripts/windows-probe.mjs --out "$RUNNER_TEMP/probe-argv-bash-${{ matrix.os }}.json" --argv afx://devvm/codev:architect:local afx://devvm/codev:builder-spir-7
+
+      - name: Probe afx:// addresses typed unquoted (PowerShell)
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        env:
+          PROBE_SHELL: pwsh
+        run: node scripts/windows-probe.mjs --out "$env:RUNNER_TEMP/probe-argv-pwsh-${{ matrix.os }}.json" --argv afx://devvm/codev:architect:local afx://devvm/codev:builder-spir-7
+
+      - name: Probe afx:// addresses typed unquoted (cmd)
+        if: ${{ !cancelled() }}
+        shell: cmd
+        env:
+          PROBE_SHELL: cmd
+        run: node scripts\windows-probe.mjs --out "%RUNNER_TEMP%\probe-argv-cmd-${{ matrix.os }}.json" --argv afx://devvm/codev:architect:local afx://devvm/codev:builder-spir-7
 
       - name: Install dependencies
         if: ${{ !cancelled() && inputs.tower && matrix.os == 'windows-latest' }}

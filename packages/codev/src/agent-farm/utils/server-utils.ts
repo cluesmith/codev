@@ -7,7 +7,7 @@
 import type * as http from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ensureLocalKey } from '@cluesmith/codev-core/auth';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX, TOWER_LIVENESS_ROUTE } from '@cluesmith/codev-types';
+import { MAX_REQUEST_BODY_BYTES, TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, WS_MARKER_PROTOCOL, WS_KEY_PROTOCOL_PREFIX, TOWER_LIVENESS_ROUTE } from '@cluesmith/codev-types';
 import { matchIdePrefix } from '../lib/ide-prefix.js';
 
 /**
@@ -48,7 +48,7 @@ export function readBody(req: http.IncomingMessage, maxSize = 1024 * 1024): Prom
  * @param req - HTTP incoming message
  * @param maxSize - Maximum body size in bytes (default 1MB)
  */
-export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024): Promise<Record<string, unknown>> {
+export function parseJsonBody(req: http.IncomingMessage, maxSize = MAX_REQUEST_BODY_BYTES): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let body = '';
     let size = 0;

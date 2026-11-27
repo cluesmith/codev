@@ -183,6 +183,7 @@ Agents message each other with `afx send`:
 | `afx send <workspace>:architect "…"` | Another workspace's **front door**: its `main` architect, else the first registered. Open to every sender, builders included |
 | `afx send <workspace>:architect:<name> "…"` | A named architect in another workspace on this Tower. Architects and humans may name any architect; a **builder is refused** and told the front door to use instead |
 | `afx send <workspace>:<builder-id> "…"` | A builder in another workspace |
+| `afx send afx://<tower>/<workspace>:architect "…"` | An agent on another of your own Towers, through Codev Cloud: after the slash, any `<workspace>:` form above but a shell. Both Towers need remote messaging on, and the receiving one a grant for the sender (`afx peer on`, `afx peer grant`: a human's decisions). A builder may not name an architect there, only its front door |
 
 **Find an address with `afx workspace list`** rather than guessing one: it prints every workspace
 on this Tower and its agents as addresses ready to paste, marked for what *you* may send to.

@@ -13,8 +13,9 @@
  * optional: a frame that silently omits the recipient is exactly the defect.
  */
 
-import type { AgentAddress } from '@cluesmith/codev-types';
-import { formatAddress, isAddressComponent } from '@cluesmith/codev-sdk/address';
+import type { AgentAddress, PeerWireSenderAddress } from '@cluesmith/codev-types';
+import { formatAddress, isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
+import { normalizeRemoteBody, readWireSenderAddress, SLUG_PATTERN } from '../peer/contract.js';
 import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from './architect-name.js';
 import { WORKSPACE_NAME_COMMAND } from './workspace-address.js';
 
@@ -401,4 +402,169 @@ export function formatCrossWorkspaceMessage(
   return `### [${role} ${from} ${verb}${recipient(toAgent)} | ${timestamp}] ###
 ${message}
 ${replyFooter(reply)}`;
+}
+
+// ============================================================================
+// Frames for a message from another of my Towers (Spec 1967; Spec 1940, Decision 7, case 3)
+// ============================================================================
+
+/**
+ * The frame's marker: the header begins `### [` and the footer is a run of `#`. A remote
+ * body line that begins with it, after any spaces and tabs, could pass for the end of the
+ * frame or the start of another, so {@link normalizeRemoteFrameBody} alters it.
+ */
+export const FRAME_MARKER = '###';
+
+/** A line whose first character other than a space or a tab begins the frame's marker. */
+const MARKER_LINE = new RegExp(`^([ \\t]*)(?=${FRAME_MARKER})`, 'gm');
+
+/**
+ * Decision 7's rules for a REMOTE body, applied by the receiving Tower before the body is
+ * stored, so the stored form is what is delivered:
+ *
+ * 1. line endings: CR LF, a lone CR, U+2028 and U+2029 each become one line feed;
+ * 2. the listed code points are removed, and no others ({@link normalizeRemoteBody});
+ * 3. a line whose first character other than a space or a tab begins the frame's marker
+ *    gets a backslash in front of the marker, so it no longer does.
+ *
+ * Local bodies never come here: a body from this Tower is delivered exactly as it was sent.
+ * The body must already be valid Unicode (the payload reader refuses one that is not).
+ */
+export function normalizeRemoteFrameBody(body: string): string {
+  return normalizeRemoteBody(body).replace(MARKER_LINE, '$1\\');
+}
+
+/**
+ * Who sent a message from another of my Towers. `towerSlug` is the sending Tower's name from
+ * the verified statement, the one part of the frame Codev Cloud vouches for; `sender` is the
+ * sending Tower's statement of the workspace and agent, `null` when the sender has no agent
+ * identity, with `workspace` absent when the sending workspace has no address name.
+ */
+export interface RemoteOrigin {
+  towerSlug: string;
+  sender: PeerWireSenderAddress | null;
+}
+
+/** How the recipient of a remote message can reply. */
+export type RemoteReplyRoute =
+  /** `(reply: afx send afx://<tower>/<address> "…")`: a command that works pasted unchanged. */
+  | { how: 'address'; address: AgentAddress }
+  /** A builder that may not address the sender: it replies through its own architect. */
+  | { how: 'through-architect' }
+  /** Nothing can be sent back: the sender has no agent identity, or its workspace has no address name. */
+  | { how: 'no-address'; why: 'no-agent' | 'no-workspace' | 'unwritable' };
+
+/** The sender's address on its own Tower, as the recipient writes it: with the Tower in front. */
+function remoteAddressOf(origin: RemoteOrigin): AgentAddress | null {
+  const { sender } = origin;
+  if (sender === null || sender.workspace === undefined) return null;
+  const address: AgentAddress =
+    sender.kind === 'architect'
+      ? { tower: origin.towerSlug, workspace: sender.workspace, kind: 'architect', ...(sender.name === undefined ? {} : { name: sender.name }) }
+      : { tower: origin.towerSlug, workspace: sender.workspace, kind: 'id', name: sender.name };
+  return tryFormatAddress(address).ok ? address : null;
+}
+
+/**
+ * The footer's reply route for a remote message (Decision 7's table): the shortest address
+ * that reaches the sender and that the recipient may send to, or how to reply instead.
+ *
+ * - An architect recipient may send to any agent: the sender's `afx://` address.
+ * - A builder recipient may name only its own spawning architect (the builder rule, which
+ *   its own Tower enforces when it sends), so: another builder by its address; the `main`
+ *   architect, or an unnamed one, through that workspace's front door; any other named
+ *   architect through the builder's own architect.
+ */
+export function remoteReplyRoute(origin: RemoteOrigin, recipientIsArchitect: boolean): RemoteReplyRoute {
+  const { sender } = origin;
+  if (sender === null) return { how: 'no-address', why: 'no-agent' };
+  if (sender.workspace === undefined) return { how: 'no-address', why: 'no-workspace' };
+  const address = remoteAddressOf(origin);
+  if (address === null) return { how: 'no-address', why: 'unwritable' };
+  if (recipientIsArchitect || address.kind === 'id') return { how: 'address', address };
+  if (address.name === undefined || address.name === DEFAULT_ARCHITECT) {
+    return { how: 'address', address: { tower: address.tower, workspace: address.workspace, kind: 'architect' } };
+  }
+  return { how: 'through-architect' };
+}
+
+/** The name `afx send <workspace>:architect` reaches first (Decision 4, rule 3). */
+const DEFAULT_ARCHITECT = 'main';
+
+/**
+ * Text for a remote frame, checked here whatever the caller checked: every part must fit the
+ * rule it was validated by, or the formatter throws before anything is stored.
+ */
+function checkedOrigin(origin: RemoteOrigin): void {
+  if (!SLUG_PATTERN.test(origin.towerSlug)) {
+    throw new Error('Cannot format a remote frame: the sending Tower name does not fit the slug rule.');
+  }
+  if (origin.sender !== null && readWireSenderAddress(origin.sender) === null) {
+    throw new Error('Cannot format a remote frame: the sender address does not fit the payload rules.');
+  }
+}
+
+/**
+ * Who the header says the message is from: the sender's `afx://` address, or, when it has
+ * none, the sending Tower with what is known of the sender, marked so that it cannot be
+ * mistaken for an address (stage 1 marks a sender with no workspace name the same way).
+ * `afx inbox` names a remote message's sender with this too, so the two always agree.
+ */
+export function remoteSenderText(origin: RemoteOrigin): string {
+  const tower = `afx://${origin.towerSlug}`;
+  if (origin.sender === null) return `${tower} (no agent identity)`;
+  const address = remoteAddressOf(origin);
+  if (address !== null) return formatAddress(address);
+  const { workspace: _workspace, ...agent } = origin.sender;
+  const local = formatAddress(agent as AgentAddress);
+  return origin.sender.workspace === undefined
+    ? `${tower} ${local} (a workspace with no address name)`
+    : `${tower} ${local} (an address too long to write)`;
+}
+
+function remoteReplyFooter(origin: RemoteOrigin, reply: RemoteReplyRoute): string {
+  switch (reply.how) {
+    case 'address': {
+      if (reply.address.tower !== origin.towerSlug || reply.address.owner !== undefined) {
+        throw new Error('Cannot format a remote frame: the reply address names another Tower than the sender.');
+      }
+      return `${FOOTER}  (reply: afx send ${formatAddress(reply.address)} "…")`;
+    }
+    case 'through-architect':
+      return `${FOOTER}  (reply through your architect: afx send architect "…")`;
+    case 'no-address':
+      switch (reply.why) {
+        case 'no-agent':
+          return `${FOOTER}  (no reply address; the sender on ${origin.towerSlug} has no agent identity)`;
+        case 'no-workspace':
+          return `${FOOTER}  (no reply address; the sender's workspace on ${origin.towerSlug} needs: ${WORKSPACE_NAME_COMMAND})`;
+        case 'unwritable':
+          return `${FOOTER}  (no reply address; the sender's address on ${origin.towerSlug} is too long to write)`;
+      }
+  }
+}
+
+/**
+ * Format a message from an agent on another of my Towers (Decision 7, case 3):
+ *
+ * ```
+ * ### [REMOTE, your Tower · afx://mbp/codev:architect:main → local | <time>] ###
+ * <body>
+ * ###############################  (reply: afx send afx://mbp/codev:architect:main "…")
+ * ```
+ *
+ * The header is written here, by the receiving Tower, from the verified statement (the
+ * Tower) and the payload's validated sender (the workspace and agent); nothing in the body
+ * can alter it. `body` must already be {@link normalizeRemoteFrameBody}'s output, which is
+ * what the mailbox stores. The frame stays three lines around the body, as every frame does.
+ */
+export function formatRemoteMessage(origin: RemoteOrigin, toAgent: string, reply: RemoteReplyRoute, body: string): string {
+  checkedOrigin(origin);
+  if (normalizeRemoteFrameBody(body) !== body) {
+    throw new Error('Cannot format a remote frame around a body that has not been normalised.');
+  }
+  const timestamp = new Date().toISOString();
+  return `### [REMOTE, your Tower · ${remoteSenderText(origin)}${recipient(toAgent)} | ${timestamp}] ###
+${body}
+${remoteReplyFooter(origin, reply)}`;
 }

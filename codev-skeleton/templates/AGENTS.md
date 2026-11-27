@@ -123,7 +123,7 @@ For complete reference, see `codev/resources/commands/`:
 
 ## Inter-agent messaging
 
-Agents communicate through `afx send`, within a workspace and between the workspaces on one Tower. These addressing forms are supported:
+Agents communicate through `afx send`, within a workspace, between the workspaces on one Tower, and between your own Towers through Codev Cloud. These addressing forms are supported:
 
 | Form | Meaning | Allowed from |
 |---|---|---|
@@ -133,6 +133,7 @@ Agents communicate through `afx send`, within a workspace and between the worksp
 | `afx send <workspace>:architect "msg"` | Another workspace's **front door** (e.g. `afx send marketmaker:architect "..."`): its architect named `main` if present, else the first registered architect. | Any sender, builders included. |
 | `afx send <workspace>:architect:<name> "msg"` | A named architect in another workspace on this Tower (e.g. `afx send marketmaker:architect:review "..."`). If no architect of that name is registered there the send fails, listing the workspace's architects and its front door; it is never rerouted. | Architects and humans. A **builder is refused**, with the workspace's front door named in the error. |
 | `afx send <workspace>:<builder-id> "msg"` | A builder in another workspace. | Any sender. |
+| `afx send afx://<tower>/<workspace>:architect "msg"` | An agent on another of your own Towers, through Codev Cloud (e.g. `afx send afx://devvm/codev:architect:local "..."`): after the slash, any `<workspace>:` form above but a shell. Both Towers need remote messaging on, and the receiving Tower a grant for the sender; `afx peer show <tower>` lists what you may message there. `--raw`, `--interrupt`, `--no-enter` and `--delay` are refused. | Any sender. A **builder** may not name an architect there, only the front door (`afx://<tower>/<workspace>:architect`). |
 
 **Send outcomes (delivered vs held)**: `afx send` reports the real first outcome. **delivered** means the message was written to the recipient's prompt after a clean render-gate pass; **held** means the prompt wasn't clear, so the message was persisted in Tower's durable mailbox and delivers automatically once the prompt is clean — with a why-held reason (`busy`, `no-profile`, or `no-live-pty`) and a mailbox id. A held message is never force-injected onto a busy line, so it can't corrupt a draft the gate can see, and held rows survive a Tower restart. (The gate reads the composer off the rendered screen and counts input through `PtySession.write()`; `afx attach` writes the shellper socket directly, so a draft typed there is seen only once the app echoes it.) List held messages with `afx inbox`, read one (including its body) with `afx inbox show <id>`, and clear one with `afx inbox dismiss <id>`; `afx send --interrupt` is the explicit bypass.
 
@@ -145,6 +146,8 @@ Agents communicate through `afx send`, within a workspace and between the worksp
 **Workspace names**: `<workspace>` is the workspace's directory name, lower-cased, unless it has been given an explicit name with `afx workspace name <name>` (`--clear` removes it). Two running workspaces that share a directory name cannot be addressed by it: the send fails listing both, and naming one of them is the remedy.
 
 **Replying across workspaces**: a message from another workspace names its sender by full address in the header (`ARCHITECT codev:architect:review`), and its last line carries the command that answers it (`reply: afx send codev:architect:review "…"`). Run that command as printed. A builder written to by an architect in another workspace is shown that workspace's front door when the front door reaches that architect, and otherwise `reply through your architect`. A sender whose workspace has no usable name is shown with `no reply address` and the naming command its workspace needs.
+
+**Messages between your Towers**: a message from another of your Towers is headed `REMOTE, your Tower · afx://mbp/codev:architect:main → local`, and its last line is the command that answers it (`reply: afx send afx://mbp/codev:architect:main "…"`). Only the Tower in that address (`mbp`) is verified, by Codev Cloud; the workspace and agent after the slash are what that Tower says. A send to another Tower is `delivered`, `held` there (as above, or held for a human's release), `held` on this Tower while that Tower is offline or the cloud is unreachable (sent once it can be, within 30 days; `afx inbox` lists it under Waiting for a peer), or `refused` with the reason, exiting non-zero. Turning remote messaging on (`afx peer on`), adding a grant (`afx peer grant`) and releasing held mail (`afx inbox release`) let another machine write into an agent's prompt, so each is a human's decision: don't run one on your own initiative.
 
 **Discovering active agents**:
 

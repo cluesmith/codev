@@ -41,8 +41,13 @@ vi.mock('../utils/config.js', () => ({ getConfig: mockGetConfig }));
 
 import { inboxList, inboxShow, inboxDismiss } from '../commands/inbox.js';
 
+/** Spec 1967: `afx inbox` also asks for mail waiting for a peer; none, unless a test says so. */
+const NO_PEER_MAIL = { ok: true, status: 200, data: { paused: null, messages: [] } };
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRequest.mockReset();
+  mockRequest.mockResolvedValue(NO_PEER_MAIL);
   mockGetConfig.mockReturnValue({ workspaceRoot: CURRENT_WS });
 });
 
@@ -66,7 +71,7 @@ function row(overrides: Record<string, unknown> = {}) {
 
 describe('inboxList', () => {
   it('lists held rows in table format (header + separator + one row per message)', async () => {
-    mockRequest.mockResolvedValue({
+    mockRequest.mockResolvedValueOnce({
       ok: true,
       status: 200,
       data: [row(), row({ id: 'ffffffff-0000-0000-0000-000000000000', toAgent: 'spir-2', reason: 'no-profile' })],
@@ -75,13 +80,13 @@ describe('inboxList', () => {
     await inboxList();
 
     expect(mockRequest).toHaveBeenCalledWith('/api/inbox?workspace=%2Fhome%2Fuser%2Fproject');
-    expect(mockLogger.header).toHaveBeenCalledWith('Held messages (2)');
+    expect(mockLogger.header).toHaveBeenCalledWith('Waiting for a local agent (2)');
     // Header row + separator + 2 data rows = 4 row() calls.
     expect(mockLogger.row).toHaveBeenCalledTimes(4);
   });
 
   it('shows a friendly message when nothing is held', async () => {
-    mockRequest.mockResolvedValue({ ok: true, status: 200, data: [] });
+    mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [] });
 
     await inboxList();
 
@@ -90,7 +95,7 @@ describe('inboxList', () => {
   });
 
   it('scopes to a workspace when --workspace is given (URL-encoded query)', async () => {
-    mockRequest.mockResolvedValue({ ok: true, status: 200, data: [] });
+    mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [] });
 
     await inboxList({ workspace: '/ws1' });
 
@@ -98,7 +103,7 @@ describe('inboxList', () => {
   });
 
   it('defaults to the current workspace (from config) when --workspace is omitted', async () => {
-    mockRequest.mockResolvedValue({ ok: true, status: 200, data: [] });
+    mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [] });
 
     await inboxList();
 
@@ -107,7 +112,7 @@ describe('inboxList', () => {
   });
 
   it('marks an escalated row with a trailing "!" on its reason', async () => {
-    mockRequest.mockResolvedValue({
+    mockRequest.mockResolvedValueOnce({
       ok: true,
       status: 200,
       data: [row({ reason: 'busy', escalated: true })],
@@ -121,8 +126,26 @@ describe('inboxList', () => {
     expect(dataRow).toBeDefined();
   });
 
+  it('warns, and lists the rest, when Tower is older than this CLI and has no mail waiting for a peer to list', async () => {
+    mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [row()] });
+    mockRequest.mockResolvedValueOnce({ ok: false, status: 404, error: 'Not found' });
+
+    await inboxList();
+
+    expect(mockRequest).toHaveBeenLastCalledWith('/api/peer/outbox?workspace=%2Fhome%2Fuser%2Fproject');
+    expect(mockLogger.header).toHaveBeenCalledWith('Waiting for a local agent (1)');
+    expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('The running Tower is older than this CLI: it lists no mail waiting for a peer.'));
+  });
+
+  it('calls fatal when the mail waiting for a peer cannot be read for another reason', async () => {
+    mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [] });
+    mockRequest.mockResolvedValueOnce({ ok: false, status: 500, error: 'Internal error', errorCode: 'INTERNAL_ERROR' });
+
+    await expect(inboxList()).rejects.toThrow('FATAL: Internal error');
+  });
+
   it('calls fatal on an API error', async () => {
-    mockRequest.mockResolvedValue({ ok: false, status: 0, error: 'Tower not running' });
+    mockRequest.mockResolvedValueOnce({ ok: false, status: 0, error: 'Tower not running' });
 
     await expect(inboxList()).rejects.toThrow('FATAL: Tower not running');
   });
@@ -140,7 +163,7 @@ describe('inboxList', () => {
     it('renders a long from → to pair in full instead of truncating it', async () => {
       const longFrom = 'architect:integration-review';
       const longTo = 'builder-aspir-1478-carry-architect-name';
-      mockRequest.mockResolvedValue({
+      mockRequest.mockResolvedValueOnce({
         ok: true,
         status: 200,
         data: [row({ fromAgent: longFrom, toAgent: longTo })],
@@ -155,7 +178,7 @@ describe('inboxList', () => {
     });
 
     it('sizes the column to the widest row, and never below its header', async () => {
-      mockRequest.mockResolvedValue({
+      mockRequest.mockResolvedValueOnce({
         ok: true,
         status: 200,
         data: [
@@ -176,7 +199,7 @@ describe('inboxList', () => {
     });
 
     it('keeps a short table compact — the column never shrinks below "FROM → TO"', async () => {
-      mockRequest.mockResolvedValue({ ok: true, status: 200, data: [row({ fromAgent: 'a', toAgent: 'b' })] });
+      mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [row({ fromAgent: 'a', toAgent: 'b' })] });
 
       await inboxList();
 
@@ -184,7 +207,7 @@ describe('inboxList', () => {
     });
 
     it('renders a missing sender as "?" (unchanged)', async () => {
-      mockRequest.mockResolvedValue({ ok: true, status: 200, data: [row({ fromAgent: null })] });
+      mockRequest.mockResolvedValueOnce({ ok: true, status: 200, data: [row({ fromAgent: null })] });
 
       await inboxList();
 
@@ -198,7 +221,7 @@ describe('inboxList', () => {
     it('shows a pair of maximum-length legitimate ids whole', async () => {
       const maxFrom = `architect:${'a'.repeat(MAX_SENDER_ID_LENGTH - 'architect:'.length)}`;
       const maxTo = 'b'.repeat(MAX_SENDER_ID_LENGTH);
-      mockRequest.mockResolvedValue({
+      mockRequest.mockResolvedValueOnce({
         ok: true,
         status: 200,
         data: [row({ fromAgent: maxFrom, toAgent: maxTo })],
@@ -213,7 +236,7 @@ describe('inboxList', () => {
     });
 
     it('caps a stored sender that exceeds the identity bound, and does not pad every row to it', async () => {
-      mockRequest.mockResolvedValue({
+      mockRequest.mockResolvedValueOnce({
         ok: true,
         status: 200,
         data: [row({ fromAgent: 'x'.repeat(200_000), toAgent: 'spir-1' })],

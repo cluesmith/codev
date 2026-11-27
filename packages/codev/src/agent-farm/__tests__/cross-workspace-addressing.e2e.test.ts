@@ -504,17 +504,17 @@ describe('Spec 1940: cross-workspace addressing on a real Tower that has never c
     ]);
   });
 
-  it('an afx:// address is refused with the stated reason, and nothing is stored', async () => {
+  it('an afx:// address is refused while remote messaging is off, and nothing is stored', async () => {
     const before = mailCount();
 
     const sent = await afxSend(review(), 'afx://devvm/codev:architect', 'To my other Tower');
 
+    // Stage 2 (Spec 1967) replaced stage 1's "not available in this version" refusal. On a
+    // fresh Tower remote messaging is off, and the switch is the first check that applies.
     expect(sent.exitCode).toBe(1);
     expect(outcomeLines(sent)).toEqual([]);
     expect(sent.stderr).toHaveLength(1);
-    expect(sent.stderr[0]).toContain(
-      'Cross-Tower messaging is not available in this version: an afx:// address cannot be delivered yet.',
-    );
+    expect(sent.stderr[0]).toContain('Remote messaging is off on this Tower. A human turns it on with: afx peer on');
     expect(mailCount()).toBe(before);
   });
 

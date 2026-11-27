@@ -27,7 +27,9 @@ import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/arch
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { parseAddress } from '@cluesmith/codev-sdk/address';
+import { MAX_REQUEST_BODY_BYTES, type RemoteSendAnswer } from '@cluesmith/codev-types';
 import { olderTowerError } from '../utils/older-tower.js';
+import { namesATower } from '../utils/agent-names.js';
 
 /**
  * `--file` attachment cap. One constant with the message-body ceiling (Issue #1573): the file's
@@ -243,12 +245,18 @@ export function architectSenderId(): string {
 /**
  * Read file content for --file (and, #1950, --message-file), with size validation.
  */
-function readFileContent(filePath: string, label = 'File'): string {
+function readFileContent(filePath: string, label: string, toAnotherTower: boolean): string {
   if (!existsSync(filePath)) {
     throw new Error(`${label} not found: ${filePath}`);
   }
   const fileBuffer = readFileSync(filePath);
-  if (fileBuffer.length > MAX_FILE_SIZE) {
+  // A message for another Tower is sized by Tower's sender, in the contract's order and on
+  // the body once normalised (Spec 1967). A file no request could carry is refused before it
+  // is sent; the SDK measures the request itself, which is the exact check.
+  if (toAnotherTower && fileBuffer.length > MAX_REQUEST_BODY_BYTES) {
+    throw new Error(`${label} too large: ${fileBuffer.length} bytes (Tower takes no request over ${MAX_REQUEST_BODY_BYTES} bytes)`);
+  }
+  if (!toAnotherTower && fileBuffer.length > MAX_FILE_SIZE) {
     throw new Error(
       `${label} too large: ${fileBuffer.length} bytes (max ${MAX_FILE_SIZE} bytes / 48KB)`
     );
@@ -380,6 +388,54 @@ async function explainNotFound(
 }
 
 /**
+ * The stage 1 carry-over hint (Spec 1940, "Helpful failures"; Spec 1967): `devvm:codev:architect`
+ * is malformed, since a local address has at most a workspace before `architect`. When the
+ * first of the two components before `architect` is one of my Towers, the address meant is
+ * `afx://devvm/codev:architect`, and the failure says so.
+ *
+ * Only on that failure: Tower's peer list is asked then, and not otherwise. Returns what to
+ * report in place of Tower's error, or null when it stands.
+ */
+async function explainMalformed(client: TowerClient, to: string, result: SendResult): Promise<string | null> {
+  if (result.errorCode !== 'MALFORMED_ADDRESS') return null;
+  const parsed = parseAddress(to);
+  if (parsed.ok || parsed.error.code !== 'TOO_MANY_BEFORE_ARCHITECT') return null;
+  const [first, ...rest] = to.trim().toLowerCase().split(':');
+  const meant = `afx://${first}/${rest.join(':')}`;
+  if (!parseAddress(meant).ok) return null;
+  const peers = await client.getPeerTowers();
+  if (!peers.ok) return null;
+  const mine = peers.result.towerName === first || peers.result.towers.some((tower) => tower.name === first);
+  if (!mine) return null;
+  return `Malformed address: ${parsed.error.message}; \`${first}\` is one of your Towers, so write ${meant}`;
+}
+
+/**
+ * A send to another Tower that is held, for the person who sent it (Spec 1967, Decision 5):
+ * where it waits, why, and what happens next.
+ */
+export function remoteHeldLine(resolvedTo: string, remote: RemoteSendAnswer, reason?: string, mailboxId?: string): string {
+  const id = mailboxId ? ` — mailbox id ${mailboxId}` : '';
+  if (remote.heldWhere === 'this-tower') {
+    const ahead = !remote.ahead
+      ? ''
+      : remote.ahead === 1
+        ? ` 1 held message for ${remote.peer} goes before it.`
+        : ` ${remote.ahead} held messages for ${remote.peer} go before it.`;
+    const next =
+      reason === 'tower-offline'
+        ? `It is sent when ${remote.peer} returns.`
+        : `It is sent to ${remote.peer} when it can be, within 30 days.`;
+    return `Message held on this Tower (${reason ?? 'queued'})${id}.${ahead} ${next}`;
+  }
+  const next =
+    reason === 'held-for-release'
+      ? `It waits there until a human on ${remote.peer} releases it.`
+      : `${remote.peer} delivers it when the recipient's prompt is clear.`;
+  return `Message held on ${remote.peer} for ${resolvedTo} (${reason ?? 'pending'})${id}. ${next}`;
+}
+
+/**
  * Read message from stdin
  */
 async function readStdin(): Promise<string> {
@@ -482,6 +538,8 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
   // Determine the message
   let message = options.message;
   let target = options.builder;
+  // With --all the one positional is the message, and every recipient is on this Tower.
+  const toAnotherTower = !options.all && target !== undefined && namesATower(target);
 
   // #1950 --message-file: the body comes from the file, never through a shell. With --all the
   // first positional IS the message, so any positional there is a second message. Only the one
@@ -491,7 +549,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
     if (message !== undefined || (options.all && target !== undefined)) {
       fatal('Give the message on the command line or with --message-file, not both.');
     }
-    message = readFileContent(options.messageFile, 'Message file').replace(/\r?\n$/, '');
+    message = readFileContent(options.messageFile, 'Message file', toAnotherTower).replace(/\r?\n$/, '');
   }
 
   // When using --all, the first positional arg (builder) is actually the message
@@ -520,14 +578,16 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
 
   // Append file content to message if --file specified
   if (options.file) {
-    const fileContent = readFileContent(options.file);
+    const fileContent = readFileContent(options.file, 'File', toAnotherTower);
     message = message + '\n\nAttached content:\n```\n' + fileContent + '\n```';
   }
 
   // Mirror Tower's body ceiling here (Issue #1573) so the refusal is local, immediate and
   // identically worded, instead of a 400 the user has to interpret. Checked AFTER the --file
   // append because that content travels in the same body and counts against the same limit.
-  const tooLarge = messageLimitError(message);
+  // A recipient on another Tower is sized by Tower's sender, in the contract's order of
+  // refusals and on the body once normalised (Spec 1967), so it is not checked here.
+  const tooLarge = toAnotherTower ? null : messageLimitError(message);
   if (tooLarge) fatal(tooLarge);
 
   logger.header('Sending Instruction');
@@ -603,8 +663,12 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
       }, retry);
 
       if (!result.ok) {
-        const explained = await explainNotFound(client, target!, result);
-        throw new Error(explained ?? (result.error || 'Unknown error'));
+        const explained =
+          (await explainNotFound(client, target!, result)) ??
+          (await explainMalformed(client, target!, result));
+        // What the receiving Tower said, for a person, after the words this Tower wrote.
+        const said = result.refusal?.detail ? ` (${result.refusal.peer ?? 'the receiving Tower'} says: ${result.refusal.detail})` : '';
+        throw new Error((explained ?? (result.error || 'Unknown error')) + said);
       }
 
       // Report the real first outcome (Spec 1307 `--delay` + Spec 1313 mailbox). A
@@ -618,6 +682,9 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
             `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}`,
         );
         logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
+      } else if (result.held && result.remote) {
+        logger.info(remoteHeldLine(result.resolvedTo ?? target!, result.remote, result.reason, result.mailboxId));
+        if (result.remote.detail) logger.info(`${result.remote.peer} says: ${result.remote.detail}`);
       } else if (result.held) {
         logger.info(
           `Message held for ${result.resolvedTo ?? target} (${formatVerdict(result.reason, result.detail, 'pending')})` +
@@ -655,6 +722,7 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
               ? ' (unverified — header not seen on the terminal)'
               : '';
         logger.success(`Message delivered to ${result.resolvedTo ?? target}${size}${unverified}`);
+        if (result.remote?.detail) logger.info(`${result.remote.peer} says: ${result.remote.detail}`);
         if (result.unverifiedCause === 'input-raced') {
           logger.warn(
             `That terminal received input while this message was being written, so the body may ` +

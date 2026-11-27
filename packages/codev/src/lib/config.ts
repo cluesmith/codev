@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { getFrameworkCacheDir as _getFrameworkCacheDir } from './skeleton.js';
 import { defaultInteractiveShell } from './platform.js';
 import { validateCustomHarnessConfig } from '../agent-farm/utils/harness.js';
+import { PEER_MIN_RETENTION_DAYS } from '../agent-farm/peer/store.js';
 import {
   validateConsultModels,
   validateReasoningEffort,
@@ -184,6 +185,27 @@ export interface CodevConfig {
      */
     escalationSeconds?: number;
   };
+  /**
+   * Tower-to-Tower messaging (Spec 1967). Tower-global, like `mailbox`: read from the
+   * user-global `~/.codev/config.json` layer. {@link resolvePeerSettings} checks it.
+   */
+  peer?: {
+    /** The limits this Tower enforces itself (the approved spec's defaults). */
+    limits?: {
+      /** Remote messages accepted from one peer in a minute. Default 30. */
+      acceptedPerPeerPerMinute?: number;
+      /** Remote messages from one peer accepted and not yet delivered. Default 50. */
+      undeliveredPerPeer?: number;
+      /** Messages waiting on this Tower for one peer. Default 50. */
+      waitingPerPeer?: number;
+    };
+    /**
+     * Days this Tower keeps its record of cross-Tower attempts, and resolved mail it sent.
+     * Default 30; a smaller value is used as 30, since a Tower keeps its record at least
+     * that long.
+     */
+    recordRetentionDays?: number;
+  };
   cleanup?: {
     /**
      * #1950 `afx cleanup --keep-ignored`: globs (git pathspec glob syntax, worktree-relative) of
@@ -236,6 +258,14 @@ const DEFAULT_CONFIG: CodevConfig = {
   mailbox: {
     retentionDays: 30,
     escalationSeconds: 60,
+  },
+  peer: {
+    limits: {
+      acceptedPerPeerPerMinute: 30,
+      undeliveredPerPeer: 50,
+      waitingPerPeer: 50,
+    },
+    recordRetentionDays: PEER_MIN_RETENTION_DAYS,
   },
   framework: {
     source: 'local',
@@ -477,6 +507,45 @@ export function findConfigSource(workspaceRoot: string, keyPath: string[]): stri
     if (defined) found = layer; // later layers win, matching merge precedence
   }
   return found;
+}
+
+/** The peer settings Tower uses, after {@link resolvePeerSettings} has checked them. */
+export interface ResolvedPeerSettings {
+  limits: {
+    acceptedPerPeerPerMinute: number;
+    undeliveredPerPeer: number;
+    waitingPerPeer: number;
+  };
+  /** The configured record retention, raised to 30 days. */
+  recordRetentionDays: number;
+}
+
+/**
+ * The `peer` settings of a loaded config, checked (Spec 1967). Each limit must be a whole
+ * number of at least 1, and the record retention a number of days; anything else throws,
+ * naming the key, so a typo is reported rather than quietly replaced. A retention below 30
+ * days is used as 30.
+ */
+export function resolvePeerSettings(config: CodevConfig): ResolvedPeerSettings {
+  const limits = config.peer?.limits ?? {};
+  const defaults = DEFAULT_CONFIG.peer!.limits!;
+  const limit = (key: keyof NonNullable<NonNullable<CodevConfig['peer']>['limits']>): number => {
+    const value: unknown = limits[key] ?? defaults[key];
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value;
+    throw new Error(`peer.limits.${key} must be a whole number of at least 1, got ${JSON.stringify(value)}`);
+  };
+  const retention: unknown = config.peer?.recordRetentionDays ?? DEFAULT_CONFIG.peer!.recordRetentionDays;
+  if (typeof retention !== 'number' || !Number.isFinite(retention)) {
+    throw new Error(`peer.recordRetentionDays must be a number of days, got ${JSON.stringify(retention)}`);
+  }
+  return {
+    limits: {
+      acceptedPerPeerPerMinute: limit('acceptedPerPeerPerMinute'),
+      undeliveredPerPeer: limit('undeliveredPerPeer'),
+      waitingPerPeer: limit('waitingPerPeer'),
+    },
+    recordRetentionDays: Math.max(PEER_MIN_RETENTION_DAYS, retention),
+  };
 }
 
 /**

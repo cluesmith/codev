@@ -33,7 +33,8 @@ import type {
 import Database from 'better-sqlite3';
 import { openDatabase } from '../../lib/sqlite.js';
 import { getGlobalDbPath } from '../db/index.js';
-import { heldSummaryForWorkspace } from '../db/mailbox.js';
+import { countHeldForRelease, heldSummaryForWorkspace } from '../db/mailbox.js';
+import { countWaitingForPeer } from '../peer/surfaces.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
 import { CANONICAL_KEY_SOURCE, ISSUE_KEY_SOURCE, canonicalIssueId, isIssueKey } from '../../lib/issue-id.js';
 import { resolveIssueIdKind, loadForgeConfig } from '../../lib/forge.js';
@@ -1128,6 +1129,9 @@ export class OverviewCache {
     // /api/overview. Defaults (0 / false) survive a missing or unreadable DB.
     let heldCount = 0;
     let mailboxEscalated = false;
+    // Spec 1967: the two other kinds of held mail, each workspace-scoped as `heldCount` is.
+    let heldForReleaseCount = 0;
+    let waitingForPeerCount = 0;
     try {
       const dbPath = getGlobalDbPath();
       if (fs.existsSync(dbPath)) {
@@ -1144,6 +1148,8 @@ export class OverviewCache {
             const builder = builders.find(b => b.roleId === agentCount.toAgent.toLowerCase());
             if (builder) builder.heldCount = agentCount.count;
           }
+          heldForReleaseCount = countHeldForRelease(db, normWs);
+          waitingForPeerCount = countWaitingForPeer(db, normWs);
         } finally {
           db.close();
         }
@@ -1311,7 +1317,7 @@ export class OverviewCache {
     // has no view of the live terminal sessions. `handleOverview` (tower-routes.ts)
     // injects the real architect list via `liveArchitects` before serialization,
     // mirroring how it enriches `lastDataAt`.
-    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, queuedFeedback, feedbackMode, forgeStatus };
+    const result: OverviewData = { builders, pendingPRs, backlog, recentlyClosed, architects: [], heldCount, mailboxEscalated, heldForReleaseCount, waitingForPeerCount, queuedFeedback, feedbackMode, forgeStatus };
     if (forgeResetAt) {
       result.forgeResetAt = forgeResetAt;
     }

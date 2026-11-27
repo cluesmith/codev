@@ -18,6 +18,7 @@ const mockIsRunning = vi.fn();
 const mockGetHealth = vi.fn();
 const mockGetWorkspaceStatus = vi.fn();
 const mockGetOverview = vi.fn();
+const mockGetPeerStatus = vi.fn();
 const mockLoggerRow = vi.fn();
 const mockLoggerInfo = vi.fn();
 const mockLoggerKv = vi.fn();
@@ -37,6 +38,7 @@ vi.mock('../lib/tower-client.js', () => ({
     getHealth: (...a: any[]) => mockGetHealth(...a),
     getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
     getOverview: (...a: any[]) => mockGetOverview(...a),
+    getPeerStatus: (...a: any[]) => mockGetPeerStatus(...a),
   }),
 }));
 
@@ -116,6 +118,7 @@ function heldMailSummary(): string | undefined {
 describe('afx status — held-mail awareness (Spec 1313 round 3, human path)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetPeerStatus.mockResolvedValue({ ok: false, status: 404, error: 'Not found', unknownRoute: true });
     mockIsRunning.mockResolvedValue(true);
     mockGetHealth.mockResolvedValue({ uptime: 100, activeWorkspaces: 1, memoryUsage: 1024 * 1024 });
     mockGetWorkspaceStatus.mockResolvedValue({
@@ -186,6 +189,42 @@ describe('afx status — held-mail awareness (Spec 1313 round 3, human path)', (
     await status();
     expect(heldMailSummary()).toBe('none');
     expect(builderHeader()).not.toContain('Held');
+  });
+
+  // Spec 1967: one line for remote messaging, after the held-mail line.
+  describe('the remote-messaging line (Spec 1967)', () => {
+    /** The 'Remote messaging' value (ANSI-stripped), and whether it follows the held-mail line. */
+    function remoteLine(): { value: string | undefined; afterHeld: boolean } {
+      const labels = mockLoggerKv.mock.calls.map((c) => stripAnsi(String(c[0])));
+      const at = labels.indexOf('Remote messaging');
+      return { value: at === -1 ? undefined : stripAnsi(String(mockLoggerKv.mock.calls[at][1])), afterHeld: at === labels.indexOf('Held mail') + 1 };
+    }
+
+    it("shows the switch, peers online, and this workspace's mail held for release and waiting for a peer", async () => {
+      mockGetOverview.mockResolvedValue({ ...overview([['spir-1', 0]], 0, false), heldForReleaseCount: 2, waitingForPeerCount: 1 });
+      mockGetPeerStatus.mockResolvedValue({
+        ok: true,
+        result: { remoteMessaging: 'on', towerName: 'ana-s-mbp', tunnel: 'up', peers: { listed: 3, online: 2, listedAt: 1 } },
+      });
+      await status();
+      expect(remoteLine()).toEqual({ value: 'on · 2 of 3 peers online · 2 held for release · 1 waiting for a peer', afterHeld: true });
+    });
+
+    it('reads absent counts from an older overview as none, and says when the peers were never listed', async () => {
+      mockGetOverview.mockResolvedValue(overview([['spir-1', 0]], 0, false));
+      mockGetPeerStatus.mockResolvedValue({
+        ok: true,
+        result: { remoteMessaging: 'off', towerName: null, tunnel: 'down', peers: { listed: 0, online: 0, listedAt: null } },
+      });
+      await status();
+      expect(remoteLine().value).toBe('off · peers not listed yet · 0 held for release · 0 waiting for a peer');
+    });
+
+    it('says the state is unknown on a Tower older than this CLI', async () => {
+      mockGetOverview.mockResolvedValue(overview([['spir-1', 0]], 0, false));
+      await status();
+      expect(remoteLine().value).toBe('unknown: this Tower is older than this CLI');
+    });
   });
 });
 

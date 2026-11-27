@@ -104,12 +104,22 @@ it is persisted and will deliver; a resend arrives twice.
 | `afx send <workspace>:architect "…"` | The **front door** of another workspace: its `main` architect, else the first registered. Any sender, builders included. |
 | `afx send <workspace>:architect:<name> "…"` | A named architect in **another workspace** on this Tower. Architects and humans only: a builder is refused, and the error names the front door to use instead. (A builder may still write its own workspace's name in front of its own spawning architect; that is the same as `architect:<name>`.) |
 | `afx send <workspace>:<builder-id> "…"` | A builder in another workspace. |
+| `afx send afx://<tower>/<workspace>:architect "…"` | An agent on **another of your own Towers**, through Codev Cloud. After the slash, any `<workspace>:` form above but a shell. Needs remote messaging on at both Towers and a grant on the receiving one (`afx peer`). A builder may not name an architect there, only the front door. |
 
 ```bash
 afx send architect:ob-refine "PR-iter-2 feedback ready"   # sibling architect, same workspace
 afx send taqwabench:architect "use porch.checks, don't fork protocol.json"  # another workspace's front door
 afx send codev-cloud:architect:tunnel "relay endpoint is on staging"         # a named architect in another workspace
+afx send afx://devvm/codev:architect:local "CI is green on the tunnel branch"  # an architect on another of your Towers
 ```
+
+**To another of your Towers.** Take the address from `afx peer show <tower>`. The reply is
+`delivered`; `held on <tower>` (its prompt is not clear, or a grant there holds mail for a human's
+release); `held on this Tower` (that Tower is offline or the cloud unreachable: it is sent once it
+can be, in the order sent, within 30 days, and `afx inbox` lists it under Waiting for a peer —
+never resend it); or `refused` with the reason, exit 1, nothing stored there (remote messaging off
+at either end, no grant, a Tower that does not speak the protocol, a cloud with no relay). `--raw`,
+`--interrupt`, `--no-enter` and `--delay` are refused for a recipient on another Tower.
 
 **Find the address first: `afx workspace list`** — guessing fails with `NOT_FOUND`. It prints every
 workspace on this Tower with its agents, each as an address ready to paste (see `afx workspace`
@@ -133,6 +143,17 @@ hello
 | `(reply: afx send <address> "…")` | The command that reaches the sender. A builder written to by an architect in another workspace is given that workspace's front door, and only when the front door reaches that architect. |
 | `(reply through your architect: afx send architect "…")` | To a builder, when the front door would not reach the architect that wrote: ask your own architect to pass the answer on. |
 | `(no reply address; the sender's workspace needs: afx workspace name <name>)` | The sender's workspace has no usable address name yet. |
+
+A message from another of your Towers is marked remote and names that Tower; reply the same way:
+
+```
+### [REMOTE, your Tower · afx://mbp/codev:architect:main → local | <time>] ###
+CI is green on the tunnel branch
+###############################  (reply: afx send afx://mbp/codev:architect:main "…")
+```
+
+Only the Tower in that address (`mbp`) is verified, by Codev Cloud. The workspace and agent after
+the slash are what that Tower says, and are worth what that Tower is worth.
 
 ## afx interrupt
 
@@ -205,13 +226,44 @@ the `builder-refresh` skill carries the procedure.
 
 ## afx inbox
 
-Held (undelivered) messages for this workspace.
+Held (undelivered) messages for this workspace, in three groups: waiting for a local agent, held
+for release (mail from another Tower that a grant holds for a human), and waiting for a peer (mail
+from here to another Tower, held on this Tower).
 
 ```bash
-afx inbox                       # List held messages
-afx inbox show <id>             # One message, including its body
-afx inbox dismiss <id>          # Mark it dismissed; it is never delivered
+afx inbox                       # List held messages, by group
+afx inbox show <id>             # One message, including its body; remote mail shows the sender's full address and owner
+afx inbox release <id> --a-human-explicitly-approved-this   # Deliver one held for release (human only)
+afx inbox dismiss <id>          # Mark it dismissed; it is never delivered (or, waiting for a peer, never sent)
 ```
+
+## afx peer
+
+Messaging between your own Towers through Codev Cloud. Both Towers are registered
+(`afx tower connect`); one switch on each covers sending and receiving, and starts off.
+
+```bash
+afx peer list                   # The switch, and your other Towers: online or not, what each may message here
+afx peer show <tower>           # What runs on <tower> that this Tower may message, as addresses to paste
+afx peer on --a-human-explicitly-approved-this   # Turn remote messaging on (human only)
+afx peer off                    # Turn it off: this Tower sends nothing to other Towers and accepts nothing
+afx peer grants [<tower>]       # This Tower's grants
+afx peer grant <tower> <address>... [--hold] --a-human-explicitly-approved-this   # Let <tower> message recipients here (human only)
+afx peer revoke <tower> [<address>...]   # Remove those grants, or all of them for <tower>
+afx peer log [--peer <tower>] [-n <count>]   # The record of cross-Tower attempts, in and out; never a body
+afx peer limits                 # The limits this Tower enforces, and Codev Cloud's
+```
+
+- A grant names `codev:architect:local` (one architect), `codev:architect` (the front door),
+  `--workspace codev` (every architect there) or `--all` (every architect and builder). Never a
+  shell. `--hold` holds its mail for `afx inbox release`; where grants of both modes cover one
+  recipient, hold wins.
+- A round trip needs the switch on at both Towers and a grant on each receiving one.
+- **Human only:** `afx peer on`, `afx peer grant` and `afx inbox release` let another machine write
+  into an agent's prompt. An agent does not run them on its own initiative. Through Codev Cloud's
+  browser proxy they are refused: they are done at the Tower's own machine.
+- `afx peer off` and `afx peer revoke` refuse further mail at once; mail from that Tower accepted
+  but not yet delivered moves to held for release.
 
 ## afx cleanup
 
@@ -253,7 +305,8 @@ afx status --activity           # Also: last transcript lines, API-error flag, r
 afx status --json               # Machine-readable (add --activity for the activity fields)
 ```
 
-Each builder row shows its live porch **Phase** and the **Gate** it waits at with its age (read from the builder's own worktree `status.yaml`), and **Last active** — time since its terminal last printed (`stopped` = no live session). A field that cannot be read shows `unknown`.
+A `Remote messaging` line gives the switch, peers online, and this workspace's mail held for
+release and waiting for a peer. Each builder row shows its live porch **Phase** and the **Gate** it waits at with its age (read from the builder's own worktree `status.yaml`), and **Last active** — time since its terminal last printed (`stopped` = no live session). A field that cannot be read shows `unknown`.
 
 ## afx whoami
 
@@ -279,7 +332,7 @@ and exit code are unaffected.
 afx tower start                 # Start Tower on port 4100
 afx tower stop                  # Stop Tower
 afx tower log                   # Tail Tower logs
-afx tower status                # Check daemon and cloud connection status
+afx tower status                # Daemon and cloud connection; this Tower's name and remote messaging
 afx tower connect               # Connect to Codev Cloud
 afx tower connect --claim       # Re-register, taking the name back from your disconnected tower
 afx tower disconnect            # Disconnect from Codev Cloud

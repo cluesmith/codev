@@ -8,16 +8,43 @@
  *
  * TICK-001: Transport changed from raw TCP/TLS to WebSocket.
  * The H2 role-reversal is transport-agnostic — it works over any duplex stream.
+ *
+ * Spec 1967: the client is also the receiving Tower's peer entry point. It states the
+ * protocol and the remote-messaging switch in `auth`, keeps the session secret `auth_ok`
+ * hands it in this session's state and nowhere else, and answers `POST /__tower/peer`
+ * itself: steps 1 to 8 of the contract's section 5, then a verified request goes to the
+ * handler the Tower injects. Nothing at or under that path is proxied to the local
+ * listener. See `answerPeerRequest`.
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import http2 from 'node:http2';
 import http from 'node:http';
-import https from 'node:https';
 import { Duplex } from 'node:stream';
 import { URL } from 'node:url';
 import WebSocket, { createWebSocketStream } from 'ws';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER } from '@cluesmith/codev-types';
+import {
+  TOWER_KEY_HEADER,
+  LEGACY_WEB_KEY_HEADER,
+  PEER_MAX_PAYLOAD_BYTES,
+  PEER_RECEIVER_ANSWER_MS,
+  PEER_STATEMENT_ID_MEMORY_MS,
+  type PeerRequestKind,
+  type PeerStatement,
+  type PeerSwitchState,
+} from '@cluesmith/codev-types';
+import {
+  PEER_ENTRY_PATH,
+  PEER_HEADER,
+  buildPeerHandshake,
+  encodeReceiverAnswer,
+  isSecureCloudTransport,
+  readRelayOffer,
+  verifyRelayedRequest,
+  type EncodedAnswer,
+  type RelayOffer,
+  type RelayVerification,
+} from '../peer/contract.js';
 import { getExpectedKey } from '../utils/server-utils.js';
 import { backoffDelayMs } from './reconnect-backoff.js';
 
@@ -26,10 +53,108 @@ export interface TunnelClientOptions {
   apiKey: string;         // Tower API key (ctk_...)
   towerId: string;        // Tower ID (confirmed after auth handshake)
   localPort: number;      // localhost port to proxy to (4100)
+  /**
+   * The peer entry point (Spec 1967). Absent: this client does not state the protocol,
+   * takes no relay, and answers every request at the entry point `not-verified`.
+   */
+  peer?: TunnelPeerOptions;
   /** @deprecated Use serverUrl protocol (ws:// vs wss://) instead */
   tunnelPort?: number;
   /** @deprecated No longer needed — WebSocket handles TLS via wss:// */
   usePlainTcp?: boolean;
+}
+
+// ============================================================================
+// The peer entry point's types (Spec 1967)
+// ============================================================================
+
+/**
+ * What this session's `auth_ok` said of a relay, as this Tower took it (contract section
+ * 1). Only `available` holds a session secret.
+ *
+ * - `available`: a relay this Tower can use;
+ * - `absent`: no `relay` field, a cloud that predates the contract;
+ * - `null`: `relay: null`, a cloud that explicitly has none;
+ * - `malformed`: a relay that did not fit the contract's shape, ignored;
+ * - `unsupported`: a relay for no version this Tower speaks, ignored;
+ * - `insecure`: a relay offered on a tunnel without TLS to a host that is not loopback,
+ *   whose secret this Tower refuses (the TLS rule);
+ * - `not-stated`: this client did not state the protocol, so it took no relay.
+ */
+export type TunnelRelayStatus = 'available' | 'absent' | 'null' | 'malformed' | 'unsupported' | 'insecure' | 'not-stated';
+
+/** A connected tunnel session as the rest of Tower may see it: never its secret. */
+export interface TunnelPeerSession {
+  sessionId: string;
+  /** This Tower's id, as `auth_ok` confirmed it. */
+  towerId: string;
+  /** This Tower's own name while connected (`auth_ok.slug`); `null` from a cloud that sends none. */
+  slug: string | null;
+  relay: TunnelRelayStatus;
+  /** The versions the relay states it carries; empty without one. */
+  relayProtocols: number[];
+}
+
+/** A request that passed steps 1 to 8: what the Tower's handler is given. */
+export interface VerifiedPeerRequest {
+  /** The tunnel session it arrived on. */
+  sessionId: string;
+  /** This Tower's clock when the body had been read, the time steps 7 and 8 used. */
+  receivedAt: number;
+  /**
+   * This Tower's clock by which the answer is due: {@link PEER_RECEIVER_ANSWER_MS} after the
+   * request arrived, a deadline the body read has already spent part of.
+   */
+  answerBy: number;
+  statement: PeerStatement;
+  /** The forwarded body exactly as received: the bytes `payloadSha256` covers. */
+  payload: Uint8Array;
+}
+
+/** Steps 9 on (plan phase 6): the answer to a verified request, encoded by `contract.ts`. */
+export type PeerRequestHandler = (request: VerifiedPeerRequest) => Promise<EncodedAnswer>;
+
+/** Where a request at the entry point ended: the step that stopped it, or handed on. */
+export type PeerEntryResult =
+  | { outcome: 'not-verified'; step: 1 | 2 | 4 | 5 | 6 | 8 }
+  | { outcome: 'unsupported-version'; step: 3 }
+  | { outcome: 'clock-skew'; step: 7 }
+  | { outcome: 'handed-on'; step: null };
+
+/** What an entry event may say of the request, and from which step on. */
+export interface PeerEntryFacts {
+  /** The sending Tower's id, once the MAC has verified (step 2) and when it fits its rule. */
+  fromTowerId: string | null;
+  /** Once every field of the statement has fit its rule (step 4). */
+  requestId: string | null;
+  kind: PeerRequestKind | null;
+}
+
+/**
+ * One event for every request that reaches the entry point, whatever its fate. It never
+ * carries the secret, the statement, the MAC or the body.
+ */
+export type PeerEntryEvent = PeerEntryResult &
+  PeerEntryFacts & {
+    /** This Tower's clock when the request was decided. */
+    at: number;
+    sessionId: string;
+  };
+
+/** What the Tower injects into the entry point. */
+export interface TunnelPeerOptions {
+  /**
+   * The remote-messaging switch, read for every `auth`, so each reconnect states it afresh.
+   * A throw fails the connect attempt, and its message becomes the state reason and the last
+   * failure (`afx tower status`): it names the cause and nothing else.
+   */
+  remoteMessaging: () => PeerSwitchState;
+  /** Where a verified request goes. */
+  onVerifiedRequest: PeerRequestHandler;
+  /** The audit hook: one event per request at the entry point. */
+  onEntryEvent: (event: PeerEntryEvent) => void;
+  /** This Tower's clock for steps 7 and 8. Default `Date.now`. */
+  now?: () => number;
 }
 
 /**
@@ -47,6 +172,8 @@ export interface TunnelIdentity {
   slug?: string;
   /** The display name; absent from a cloud that predates codev-cloud#17. */
   name?: string;
+  /** What this Tower took of the cloud's relay (Spec 1967). */
+  relay: TunnelRelayStatus;
 }
 
 export interface TowerMetadata {
@@ -299,6 +426,254 @@ function buildTunnelWsUrl(serverUrl: string): string {
   return `${wsProtocol}//${parsed.host}/tunnel`;
 }
 
+/**
+ * The reason given for an auth response that is not a JSON object. Its text is never
+ * echoed, only its size (Spec 1967): a response to `auth` may carry a session secret, and
+ * one that does not parse cannot be searched for it reliably.
+ */
+function unreadableAuthResponse(text: string): string {
+  return `invalid auth response (${Buffer.byteLength(text, 'utf8')} bytes, not shown: it may carry a session secret)`;
+}
+
+/**
+ * Whether a field of `auth_ok` that Tower keeps or logs (`towerId`, `slug`, `name`) repeats
+ * the session secret the same response carries. Such an `auth_ok` is not used at all (Spec
+ * 1967: the secret lives only in the tunnel session and never reaches a file or a log).
+ *
+ * The spellings compared come from what was sent, whatever becomes of the offer (taken,
+ * refused as insecure, unsupported or malformed): the sent text itself, and the bytes it
+ * decodes to, written as base64url, base64 with and without padding, and hex in either case.
+ * It is decoded one way only: as hex when it is written in hex, otherwise tolerantly as
+ * base64 of either alphabet (hex text read as base64 is bytes nobody sent).
+ */
+function authOkRepeatsSecret(authOk: Readonly<Record<string, unknown>>): boolean {
+  const relay = authOk.relay;
+  const sent = typeof relay === 'object' && relay !== null ? (relay as Record<string, unknown>).sessionSecret : undefined;
+  // Shorter than any secret could be written: it could match ordinary text.
+  if (typeof sent !== 'string' || sent.length < 16) return false;
+  const forms = [sent];
+  let hex: string | null = null;
+  const isHex = /^[0-9a-fA-F]+$/.test(sent) && sent.length % 2 === 0;
+  const bytes = Buffer.from(sent, isHex ? 'hex' : 'base64');
+  if (bytes.length >= 16) {
+    const base64 = bytes.toString('base64');
+    forms.push(bytes.toString('base64url'), base64, base64.replace(/=+$/, ''));
+    hex = bytes.toString('hex');
+  }
+  return ['towerId', 'slug', 'name'].some((field) => {
+    const value = authOk[field];
+    if (typeof value !== 'string') return false;
+    if (forms.some((form) => value.includes(form))) return true;
+    return hex !== null && value.toLowerCase().includes(hex);
+  });
+}
+
+/** An auth response type, shown only when it has the shape of one. */
+function shownAuthType(type: unknown): string {
+  return typeof type === 'string' && /^[a-z_]{1,32}$/.test(type) ? type : '(not shown)';
+}
+
+/**
+ * What a log line says of an error thrown by code that held a verified statement, its
+ * payload or an auth response: its class, never its message, which could quote any of them.
+ */
+function errorKind(err: unknown): string {
+  if (err instanceof Error) return err.constructor.name;
+  return typeof err;
+}
+
+// ============================================================================
+// The peer entry point (Spec 1967, contract sections 1, 5 and 10)
+// ============================================================================
+
+/**
+ * Is this `:path` at or under the peer entry point? Such a request is answered by the
+ * entry point and never proxied to Tower's local listener (contract section 10). The test
+ * is deliberately generous, so that no spelling of the path reaches the listener: the path
+ * as sent and once percent-decoded, with backslashes read as slashes, runs of slashes
+ * collapsed and dot segments removed, compared without regard to case; anything that
+ * starts with the entry path counts (a query, a further segment, `/__tower/peers`).
+ * Exported for unit testing.
+ */
+export function isUnderPeerEntryPath(path: string): boolean {
+  const spellings = [path];
+  try {
+    spellings.push(decodeURIComponent(path));
+  } catch {
+    // An invalid escape: the path as sent is still checked.
+  }
+  return spellings.some((spelling) => {
+    const collapsed = spelling.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+    let pathname: string;
+    try {
+      pathname = new URL(collapsed, 'http://tower.invalid').pathname;
+    } catch {
+      pathname = collapsed;
+    }
+    return pathname.toLowerCase().startsWith(PEER_ENTRY_PATH);
+  });
+}
+
+/** What a session takes from its `auth_ok`'s relay. */
+export interface TakenRelay {
+  relay: TunnelRelayStatus;
+  protocols: number[];
+  /** The decoded session secret: only for `available`. */
+  secret: Uint8Array | null;
+}
+
+/**
+ * The session's relay: a secret only when this client stated the protocol, the relay fits
+ * and speaks a version this Tower speaks, and the tunnel passes the TLS rule (`wss:`, or a
+ * loopback host). Exported for unit testing.
+ */
+export function takeRelay(offer: RelayOffer, tunnelUrl: URL, statesProtocol: boolean): TakenRelay {
+  if (!statesProtocol) return { relay: 'not-stated', protocols: [], secret: null };
+  if (offer.relay !== 'offered') {
+    return { relay: offer.relay, protocols: offer.relay === 'unsupported' ? offer.protocols : [], secret: null };
+  }
+  if (!isSecureCloudTransport(tunnelUrl)) return { relay: 'insecure', protocols: offer.protocols, secret: null };
+  return { relay: 'available', protocols: offer.protocols, secret: offer.secret };
+}
+
+/** One tunnel connection's peer state. It dies with the connection, and its secret with it. */
+interface TunnelSession {
+  readonly id: string;
+  /** This Tower's id as `auth_ok` confirmed it: what step 5 compares `toTowerId` with. */
+  readonly towerId: string;
+  readonly slug: string | null;
+  readonly relay: TunnelRelayStatus;
+  readonly relayProtocols: readonly number[];
+  /** The only copy of the decoded secret; `null` without a usable relay, and once the session ends. */
+  secret: Uint8Array | null;
+  /** Statement ids used in this session (step 8), with when each was first presented. */
+  readonly statementIds: Map<string, number>;
+}
+
+/**
+ * Step 8: if this statement id has been presented in this session in the last 10 minutes,
+ * `false`. Otherwise it is used up now, `true`. Ids are forgotten as they age out of the
+ * memory (they were remembered in the order they were first seen). Pruning stops at the
+ * first id still in memory, so after the clock steps back some ids are kept longer than
+ * 10 minutes: that only refuses more, never less, and ends with the session.
+ */
+function useStatementId(session: TunnelSession, statementId: string, now: number): boolean {
+  for (const [id, seenAt] of session.statementIds) {
+    if (now - seenAt <= PEER_STATEMENT_ID_MEMORY_MS) break;
+    session.statementIds.delete(id);
+  }
+  if (session.statementIds.has(statementId)) return false;
+  session.statementIds.set(statementId, now);
+  return true;
+}
+
+/** A request body as read: whole, or cut where it passed the cap. */
+interface ReadBody {
+  bytes: Buffer;
+  /** The body went past the cap and was not read further. */
+  overCap: boolean;
+}
+
+/** Why a body was not read: the stream died first, or the body did not end within the deadline. */
+type UnreadBody = 'stream-died' | 'deadline';
+
+/**
+ * Read a request body until it ends, or until it passes `cap` by at least a byte, when
+ * reading stops (contract section 5, step 1). Gives up after `deadlineMs`: the body read
+ * spends the answer's deadline, so a body that has not ended by then is never answered late.
+ */
+function readCappedBody(stream: http2.ServerHttp2Stream, cap: number, deadlineMs: number): Promise<ReadBody | UnreadBody> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let length = 0;
+    let settled = false;
+    const timer = setTimeout(() => settle('deadline'), Math.max(0, deadlineMs));
+    const settle = (body: ReadBody | UnreadBody) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      stream.removeListener('data', onData);
+      if (body === 'deadline') stream.pause();
+      resolve(body);
+    };
+    const onData = (chunk: Buffer) => {
+      chunks.push(chunk);
+      length += chunk.length;
+      if (length > cap) {
+        stream.pause();
+        settle({ bytes: Buffer.concat(chunks), overCap: true });
+      }
+    };
+    stream.on('data', onData);
+    stream.once('end', () => settle({ bytes: Buffer.concat(chunks), overCap: false }));
+    stream.once('aborted', () => settle('stream-died'));
+    stream.once('close', () => settle('stream-died'));
+  });
+}
+
+/**
+ * Write one of R's answers. When the request's body was not read to its end, the stream
+ * is then closed with NO_ERROR, which Node sends once the answer has finished, so the
+ * cloud stops sending a body nobody reads.
+ */
+function sendPeerAnswer(stream: http2.ServerHttp2Stream, answer: EncodedAnswer, requestUnread: boolean): void {
+  if (stream.destroyed || stream.closed) return;
+  stream.respond({ ':status': answer.status, ...answer.headers });
+  stream.end(answer.body);
+  if (requestUnread) stream.close(http2.constants.NGHTTP2_NO_ERROR);
+}
+
+const NO_FACTS: PeerEntryFacts = { fromTowerId: null, requestId: null, kind: null };
+
+function statementFacts(statement: PeerStatement): PeerEntryFacts {
+  return { fromTowerId: statement.fromTowerId, requestId: statement.requestId, kind: statement.kind };
+}
+
+/**
+ * A request stopped in steps 1 to 7: its result, what its event may say (a sender only
+ * after step 2, the request's id and kind only after step 4), and the contract's answer.
+ */
+function stoppedBy(verification: Exclude<RelayVerification, { verdict: 'verified' }>): {
+  result: PeerEntryResult;
+  facts: PeerEntryFacts;
+  answer: EncodedAnswer;
+} {
+  switch (verification.step) {
+    case 1:
+    case 2:
+      return { result: { outcome: 'not-verified', step: verification.step }, facts: NO_FACTS, answer: notVerified() };
+    case 3:
+      return {
+        result: { outcome: 'unsupported-version', step: 3 },
+        facts: { ...NO_FACTS, fromTowerId: verification.fromTowerId },
+        answer: encodeReceiverAnswer({ outcome: 'refused', reason: 'unsupported-version', supported: verification.supported }),
+      };
+    case 4:
+      return {
+        result: { outcome: 'not-verified', step: 4 },
+        facts: { ...NO_FACTS, fromTowerId: verification.fromTowerId },
+        answer: notVerified(),
+      };
+    case 5:
+    case 6:
+      return {
+        result: { outcome: 'not-verified', step: verification.step },
+        facts: statementFacts(verification.statement),
+        answer: notVerified(),
+      };
+    case 7:
+      return {
+        result: { outcome: 'clock-skew', step: 7 },
+        facts: statementFacts(verification.statement),
+        answer: encodeReceiverAnswer({ outcome: 'refused', reason: 'clock-skew' }),
+      };
+  }
+}
+
+function notVerified(): EncodedAnswer {
+  return encodeReceiverAnswer({ outcome: 'not-verified' });
+}
+
 export class TunnelClient {
   private options: TunnelClientOptions;
   private state: TunnelState = 'disconnected';
@@ -322,6 +697,10 @@ export class TunnelClient {
   private heartbeatWs: WebSocket | null = null;
   /** Suppresses repeat auth-failure alarms while the breaker half-opens (#1372) */
   private authFailureLogged = false;
+  /** The current connection's peer state, from its `auth_ok` until it ends (Spec 1967). */
+  private session: TunnelSession | null = null;
+  /** See `getLastFailure`. */
+  private lastFailure: string | null = null;
 
   constructor(options: TunnelClientOptions) {
     this.options = options;
@@ -329,6 +708,19 @@ export class TunnelClient {
 
   getState(): TunnelState {
     return this.state;
+  }
+
+  /** The connected session's identity and relay (Spec 1967); `null` unless connected. Never the secret. */
+  getPeerSession(): TunnelPeerSession | null {
+    const session = this.session;
+    if (this.state !== 'connected' || session === null) return null;
+    return {
+      sessionId: session.id,
+      towerId: session.towerId,
+      slug: session.slug,
+      relay: session.relay,
+      relayProtocols: [...session.relayProtocols],
+    };
   }
 
   getUptime(): number | null {
@@ -345,7 +737,14 @@ export class TunnelClient {
     this.authOkListeners.push(callback);
   }
 
-  private setState(newState: TunnelState, reason?: string): void {
+  /**
+   * `failure: false` marks a move to `disconnected` that is not a failed attempt (the breaker
+   * reset, its half-open retry): it leaves the last failure in place.
+   */
+  private setState(newState: TunnelState, reason?: string, { failure = true }: { failure?: boolean } = {}): void {
+    // The last failure stays until the tunnel is up again (or disconnected on purpose).
+    if (newState === 'connected') this.lastFailure = null;
+    else if ((newState === 'disconnected' || newState === 'auth_failed') && reason && failure) this.lastFailure = reason;
     if (this.state === newState) return;
     const prev = this.state;
     this.state = newState;
@@ -357,10 +756,6 @@ export class TunnelClient {
       this.consecutiveFailures = 0;
       this.rateLimitCount = 0;
       this.authFailureLogged = false;
-      // Push cached metadata on connect
-      if (this._pendingMetadata) {
-        this.pushMetadataViaHttp(this._pendingMetadata);
-      }
     } else if (newState === 'disconnected' || newState === 'auth_failed' || newState === 'deregistered') {
       this.connectedAt = null;
     }
@@ -392,6 +787,16 @@ export class TunnelClient {
     this.stopHeartbeat();
     this.cleanup();
     this.setState('disconnected', 'disconnect() called');
+    this.lastFailure = null;
+  }
+
+  /**
+   * Why the tunnel is not connected: the reason the last attempt failed, until it connects
+   * again or is disconnected on purpose; `null` otherwise. Already sanitized, like every
+   * state reason.
+   */
+  getLastFailure(): string | null {
+    return this.lastFailure;
   }
 
   /**
@@ -408,63 +813,23 @@ export class TunnelClient {
       // attempt would leave a standalone caller worse off than before, so
       // reconnect here rather than relying on the caller to build a new client.
       this.clearReconnectTimer();
-      this.setState('disconnected', 'circuit breaker reset');
+      this.setState('disconnected', 'circuit breaker reset', { failure: false });
       this.scheduleReconnect();
     }
   }
 
   /**
-   * Send tower metadata to codevos.ai.
-   *
-   * Uses a dual mechanism:
-   * 1. Caches metadata for `GET /__tower/metadata` (served when codevos.ai H2 client polls)
-   * 2. When connected, proactively POSTs to `serverUrl/api/tower/metadata` via HTTPS
-   *
-   * Call before `connect()` to set initial metadata, or after to update it.
+   * Set the tower metadata served at `GET /__tower/metadata`, which the cloud may poll
+   * through the tunnel. Call before `connect()` to set initial metadata, or after to
+   * update it. (The push to `POST /api/tower/metadata`, a route the cloud never had, is
+   * gone: issue #1986.)
    */
   sendMetadata(metadata: TowerMetadata): void {
     this._pendingMetadata = metadata;
-    // Proactively push via HTTPS when connected
-    if (this.state === 'connected') {
-      this.pushMetadataViaHttp(metadata);
-    }
   }
 
   /** Stored metadata for serving via GET /__tower/metadata */
   private _pendingMetadata: TowerMetadata | null = null;
-
-  /**
-   * Push metadata to codevos.ai via outbound HTTPS POST.
-   * Best-effort — failures are silently ignored since codevos.ai
-   * can also poll via the H2 tunnel's GET /__tower/metadata handler.
-   */
-  private pushMetadataViaHttp(metadata: TowerMetadata): void {
-    try {
-      const url = new URL('/api/tower/metadata', this.options.serverUrl);
-      const body = JSON.stringify(metadata);
-      const isSecure = url.protocol === 'https:';
-      const transport = isSecure ? https : http;
-
-      const req = transport.request(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.options.apiKey}`,
-          'Content-Length': Buffer.byteLength(body),
-        },
-      }, (res) => {
-        res.resume(); // Drain response
-      });
-
-      req.on('error', () => {
-        // Best-effort — silently ignore network errors
-      });
-
-      req.end(body);
-    } catch {
-      // Ignore URL construction or other errors
-    }
-  }
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer) {
@@ -511,6 +876,14 @@ export class TunnelClient {
   private cleanup(): void {
     this.stopHeartbeat();
     this.clearConnectTimeout();
+
+    // The session's secret dies with the connection (contract section 1). A request still
+    // being read on it fails step 2 from now on.
+    if (this.session) {
+      this.session.secret = null;
+      this.session.statementIds.clear();
+      this.session = null;
+    }
 
     if (this.h2Session && !this.h2Session.destroyed) {
       this.h2Session.destroy();
@@ -664,8 +1037,22 @@ export class TunnelClient {
     // Ignore a stale socket (e.g. one the connect watchdog already tore down)
     if (ws !== this.ws) return;
 
-    // Send JSON auth message (TICK-001 protocol)
-    ws.send(JSON.stringify({ type: 'auth', apiKey: this.options.apiKey }));
+    // Send JSON auth message (TICK-001 protocol). Its `peer` field (Spec 1967) states the
+    // protocol and the switch as it stands now, so every reconnect announces the switch
+    // afresh. A switch that cannot be read fails this attempt rather than state a guess.
+    let auth: string;
+    try {
+      const peer = this.options.peer;
+      auth = JSON.stringify({
+        type: 'auth',
+        apiKey: this.options.apiKey,
+        ...(peer ? { peer: buildPeerHandshake(peer.remoteMessaging()) } : {}),
+      });
+    } catch (err) {
+      this.handleConnectionError(new Error(`remote-messaging switch unreadable: ${(err as Error).message}`));
+      return;
+    }
+    ws.send(auth);
 
     // Wait for auth response
     const onMessage = (data: WebSocket.RawData) => {
@@ -677,32 +1064,63 @@ export class TunnelClient {
       // and flip the state back to `connected` while a reconnect is pending.
       if (ws !== this.ws) return;
 
+      const text = data.toString();
+      let msg: Record<string, unknown>;
       try {
-        const msg = JSON.parse(data.toString());
+        const parsed: unknown = JSON.parse(text);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object');
+        msg = parsed as Record<string, unknown>;
+      } catch {
+        this.handleConnectionError(new Error(unreadableAuthResponse(text)));
+        return;
+      }
 
+      // An `auth_ok` carries the session secret, so nothing below echoes the response.
+      try {
         if (msg.type === 'auth_ok') {
-          this.options.towerId = msg.towerId;
+          if (authOkRepeatsSecret(msg)) {
+            this.handleConnectionError(new Error('auth_ok not used: a field repeats its session secret (not shown)'));
+            return;
+          }
+          this.options.towerId = msg.towerId as string;
+          const session = this.openSession(msg, readRelayOffer(msg));
+          this.session = session;
           this.emitAuthOk({
-            towerId: msg.towerId,
-            slug: typeof msg.slug === 'string' && msg.slug ? msg.slug : undefined,
+            towerId: msg.towerId as string,
+            slug: session.slug ?? undefined,
             name: typeof msg.name === 'string' && msg.name ? msg.name : undefined,
+            relay: session.relay,
           });
-          this.startH2Server(ws);
+          this.startH2Server(ws, session);
         } else if (msg.type === 'auth_error') {
-          this.handleAuthError(msg.reason || 'unknown');
+          this.handleAuthError(typeof msg.reason === 'string' && msg.reason ? msg.reason : 'unknown');
         } else {
-          this.handleConnectionError(
-            new Error(`unexpected auth response type: ${sanitizeRemoteDetail(String(msg.type))}`)
-          );
+          this.handleConnectionError(new Error(`unexpected auth response type: ${shownAuthType(msg.type)}`));
         }
       } catch (err) {
-        this.handleConnectionError(
-          new Error(`invalid auth response: ${sanitizeRemoteDetail(data.toString())}`)
-        );
+        this.handleConnectionError(new Error(`auth response not handled (${errorKind(err)})`));
       }
     };
 
     ws.on('message', onMessage);
+  }
+
+  /**
+   * A new connection's peer state, from its `auth_ok` (Spec 1967, contract section 1):
+   * its own id and name, and the relay as the TLS rule allows this Tower to take it.
+   */
+  private openSession(authOk: Record<string, unknown>, offer: RelayOffer): TunnelSession {
+    const taken = takeRelay(offer, new URL(buildTunnelWsUrl(this.options.serverUrl)), this.options.peer !== undefined);
+    return {
+      id: randomUUID(),
+      // An id that is not a string matches no statement's `toTowerId` (step 5).
+      towerId: typeof authOk.towerId === 'string' ? authOk.towerId : '',
+      slug: typeof authOk.slug === 'string' && authOk.slug ? authOk.slug : null,
+      relay: taken.relay,
+      relayProtocols: taken.protocols,
+      secret: taken.secret,
+      statementIds: new Map(),
+    };
   }
 
   private emitAuthOk(identity: TunnelIdentity): void {
@@ -779,7 +1197,7 @@ export class TunnelClient {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.destroyed || this.state !== 'auth_failed') return;
-      this.setState('disconnected', 'auth circuit breaker half-open, retrying');
+      this.setState('disconnected', 'auth circuit breaker half-open, retrying', { failure: false });
       this.doConnect();
     }, AUTH_RETRY_INTERVAL_MS);
   }
@@ -794,7 +1212,7 @@ export class TunnelClient {
     this.scheduleReconnect();
   }
 
-  private startH2Server(ws: WebSocket): void {
+  private startH2Server(ws: WebSocket, session: TunnelSession): void {
     // Belt and braces alongside the onWsOpen guard — never build h2 state on a
     // socket the client has already moved on from.
     if (ws !== this.ws) return;
@@ -814,23 +1232,25 @@ export class TunnelClient {
     });
     this.h2Server = h2Server;
 
-    h2Server.on('session', (session: http2.ServerHttp2Session) => {
+    h2Server.on('session', (h2Session: http2.ServerHttp2Session) => {
       // The session lands a tick later; the attempt may have been torn down since.
       if (ws !== this.ws) {
-        session.destroy();
+        h2Session.destroy();
         return;
       }
-      this.h2Session = session;
+      this.h2Session = h2Session;
       // Raise the connection-level receive window above one stream's window so a
       // large transfer can't consume the whole session window and starve a small
       // RPC on the other stream (#1677).
-      session.setLocalWindowSize(TUNNEL_H2_SESSION_WINDOW_SIZE);
+      h2Session.setLocalWindowSize(TUNNEL_H2_SESSION_WINDOW_SIZE);
       this.setState('connected', 'h2 session established');
       this.startHeartbeat(ws);
     });
 
+    // Every stream is bound to the session it arrived on, so a request is verified under
+    // that session's secret and no other.
     h2Server.on('stream', (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
-      this.handleH2Stream(stream, headers);
+      this.handleH2Stream(stream, headers, session);
     });
 
     h2Server.on('error', () => {
@@ -842,10 +1262,23 @@ export class TunnelClient {
     h2Server.emit('connection', wsStream);
   }
 
-  private handleH2Stream(stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders): void {
+  private handleH2Stream(
+    stream: http2.ServerHttp2Stream,
+    headers: http2.IncomingHttpHeaders,
+    session: TunnelSession,
+  ): void {
     const method = headers[':method'] as string;
     const path = headers[':path'] as string;
     const protocol = headers[':protocol'] as string | undefined;
+
+    // The peer entry point first (Spec 1967): nothing at or under its path is ever proxied.
+    if (path && isUnderPeerEntryPath(path)) {
+      this.answerPeerRequest(stream, headers, session).catch((err: unknown) => {
+        console.warn(`Tunnel: peer entry point failed (${errorKind(err)}); the request was reset unanswered`);
+        if (!stream.destroyed) stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+      });
+      return;
+    }
 
     // Check blocklist
     if (path && isBlockedPath(path)) {
@@ -877,6 +1310,103 @@ export class TunnelClient {
 
     // Regular HTTP proxy
     this.proxyHttpRequest(stream, headers, method, path);
+  }
+
+  /**
+   * The peer entry point (Spec 1967, contract section 5): steps 1 to 8, in order, for a
+   * request at or under `/__tower/peer` on the tunnel session it arrived on.
+   *
+   * - Step 1's method and path are checked here; the rest of step 1 and steps 2 to 7 are
+   *   `contract.ts`'s, under this session's secret and this Tower's id and clock.
+   * - Step 8, the statement-id memory, is this session's. From there the statement is used
+   *   up, whatever happens to it next.
+   * - A request that passes all eight goes to the Tower's handler, and its answer is sent.
+   *   One that fails gets the contract's answer for that step: `not-verified`, or `refused`
+   *   with `unsupported-version` or `clock-skew`.
+   *
+   * Nothing here stores anything. Every request produces exactly one entry event.
+   */
+  private async answerPeerRequest(
+    stream: http2.ServerHttp2Stream,
+    headers: http2.IncomingHttpHeaders,
+    session: TunnelSession,
+  ): Promise<void> {
+    stream.on('error', () => {
+      // A stream the cloud resets ends here; the request's event is emitted below.
+    });
+    const peer = this.options.peer;
+    const now = peer?.now ?? Date.now;
+
+    // Step 1, the part only the tunnel client sees: exactly `POST /__tower/peer`.
+    if (headers[':method'] !== 'POST' || headers[':path'] !== PEER_ENTRY_PATH) {
+      this.emitEntryEvent(session, { outcome: 'not-verified', step: 1 }, NO_FACTS, now());
+      sendPeerAnswer(stream, notVerified(), true);
+      return;
+    }
+
+    // The answer is due PEER_RECEIVER_ANSWER_MS after the request arrived, and the body read
+    // spends that time too (contract section 5).
+    const answerBy = now() + PEER_RECEIVER_ANSWER_MS;
+    const body = await readCappedBody(stream, PEER_MAX_PAYLOAD_BYTES, PEER_RECEIVER_ANSWER_MS);
+    const receivedAt = now();
+    if (body === 'stream-died') {
+      // The stream died before its body ended: there is nothing to answer on.
+      this.emitEntryEvent(session, { outcome: 'not-verified', step: 1 }, NO_FACTS, receivedAt);
+      return;
+    }
+    if (body === 'deadline') {
+      // Step 1 never completed: no whole body arrived in time to verify.
+      this.emitEntryEvent(session, { outcome: 'not-verified', step: 1 }, NO_FACTS, receivedAt);
+      sendPeerAnswer(stream, notVerified(), true);
+      return;
+    }
+
+    // Steps 1 to 7. A client that did not state the protocol holds no secret: step 2 fails.
+    const verification = verifyRelayedRequest({
+      statementHeader: headers[PEER_HEADER.statement],
+      macHeader: headers[PEER_HEADER.mac],
+      body: body.bytes,
+      sessionSecret: session.secret,
+      receiverTowerId: session.towerId,
+      now: receivedAt,
+    });
+    if (verification.verdict !== 'verified') {
+      const stop = stoppedBy(verification);
+      this.emitEntryEvent(session, stop.result, stop.facts, receivedAt);
+      sendPeerAnswer(stream, stop.answer, body.overCap);
+      return;
+    }
+    const { statement } = verification;
+    const facts = statementFacts(statement);
+
+    // Step 8.
+    if (!useStatementId(session, statement.statementId, receivedAt)) {
+      this.emitEntryEvent(session, { outcome: 'not-verified', step: 8 }, facts, receivedAt);
+      sendPeerAnswer(stream, notVerified(), false);
+      return;
+    }
+
+    this.emitEntryEvent(session, { outcome: 'handed-on', step: null }, facts, receivedAt);
+    // A session holds a secret only when `peer` was given, so a verified request has a handler.
+    const answer = await peer!.onVerifiedRequest({
+      sessionId: session.id,
+      receivedAt,
+      answerBy,
+      statement,
+      payload: body.bytes,
+    });
+    sendPeerAnswer(stream, answer, false);
+  }
+
+  /** The audit hook. Its failure is logged and never changes the answer. */
+  private emitEntryEvent(session: TunnelSession, result: PeerEntryResult, facts: PeerEntryFacts, at: number): void {
+    const hook = this.options.peer?.onEntryEvent;
+    if (!hook) return;
+    try {
+      hook({ ...result, ...facts, at, sessionId: session.id });
+    } catch (err) {
+      console.warn(`Tunnel: peer entry event not recorded (${errorKind(err)})`);
+    }
   }
 
   private handleWebSocketConnect(stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders): void {

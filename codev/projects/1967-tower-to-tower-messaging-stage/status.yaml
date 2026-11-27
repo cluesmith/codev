@@ -1,0 +1,119 @@
+id: '1967'
+title: tower-to-tower-messaging-stage
+protocol: spir
+phase: review
+plan_phases:
+  - id: phase_1
+    title: Wire contract module and shared test vectors
+    status: complete
+  - id: phase_2
+    title: Stand-in relay and two-Tower test harness
+    status: complete
+  - id: phase_3
+    title: Peer storage and the mailbox migration
+    status: complete
+  - id: phase_4
+    title: The remote-messaging switch and grants
+    status: complete
+  - id: phase_5
+    title: Tunnel handshake, session secret and the verified entry point
+    status: complete
+  - id: phase_6
+    title: 'Receiving a message: accepted once, delivery through the mailbox and gate'
+    status: complete
+  - id: phase_7
+    title: Peer listing and the cloud client
+    status: complete
+  - id: phase_8
+    title: The outbox, the sender's checks and the per-peer queue
+    status: complete
+  - id: phase_9
+    title: afx send across Towers, end to end
+    status: complete
+  - id: phase_10
+    title: Discovery across Towers
+    status: complete
+  - id: phase_11
+    title: Inbox, status and record surfaces
+    status: complete
+  - id: phase_12
+    title: 'Dashboard: Peers panel and three-count indicator'
+    status: complete
+  - id: phase_13
+    title: Docs in both trees, the walkthrough end to end, and Windows
+    status: complete
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-11-25T21:03:55.218Z'
+    approved_at: '2026-11-25T23:41:48.065Z'
+  plan-approval:
+    status: approved
+    requested_at: '2026-11-26T00:11:54.086Z'
+    approved_at: '2026-11-26T22:15:48.359Z'
+  pr:
+    status: pending
+    requested_at: '2026-11-27T14:28:36.668Z'
+  verify-approval:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-11-25T20:40:02.357Z'
+updated_at: '2026-11-27T14:28:36.668Z'
+force_advanced:
+  phase: phase_12
+  iteration: 3
+  max_iterations: 3
+  rebuttal_file: 1967-phase_12-iter3-rebuttals.md
+  at: '2026-11-27T12:53:41.055Z'
+context_refreshes:
+  - boundary: enter:implement
+    at: '2026-11-26T22:15:50.632Z'
+    acknowledged_at: '2026-11-26T22:16:29.099Z'
+  - boundary: plan-phase:phase_2
+    at: '2026-11-26T23:09:18.715Z'
+    acknowledged_at: '2026-11-26T23:10:17.727Z'
+  - boundary: plan-phase:phase_3
+    at: '2026-11-27T00:22:02.885Z'
+    acknowledged_at: '2026-11-27T00:23:34.190Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-11-27T01:18:08.180Z'
+    acknowledged_at: '2026-11-27T01:19:12.333Z'
+  - boundary: plan-phase:phase_5
+    at: '2026-11-27T01:55:39.714Z'
+    acknowledged_at: '2026-11-27T02:03:18.289Z'
+  - boundary: plan-phase:phase_6
+    at: '2026-11-27T03:29:57.928Z'
+    acknowledged_at: '2026-11-27T03:30:07.992Z'
+  - boundary: plan-phase:phase_7
+    at: '2026-11-27T04:51:15.288Z'
+    acknowledged_at: '2026-11-27T04:53:59.901Z'
+  - boundary: plan-phase:phase_8
+    at: '2026-11-27T06:35:50.992Z'
+    acknowledged_at: '2026-11-27T06:38:25.688Z'
+  - boundary: plan-phase:phase_9
+    at: '2026-11-27T07:26:44.029Z'
+    acknowledged_at: '2026-11-27T07:27:57.643Z'
+  - boundary: plan-phase:phase_10
+    at: '2026-11-27T09:31:01.054Z'
+    acknowledged_at: '2026-11-27T09:34:02.873Z'
+  - boundary: plan-phase:phase_11
+    at: '2026-11-27T10:27:16.676Z'
+    acknowledged_at: '2026-11-27T10:28:36.907Z'
+  - boundary: plan-phase:phase_12
+    at: '2026-11-27T11:22:02.386Z'
+    acknowledged_at: '2026-11-27T11:23:33.436Z'
+  - boundary: plan-phase:phase_13
+    at: '2026-11-27T12:53:44.050Z'
+    acknowledged_at: '2026-11-27T12:55:26.137Z'
+  - boundary: enter:review
+    at: '2026-11-27T14:09:30.782Z'
+    acknowledged_at: '2026-11-27T14:10:32.318Z'
+pr_history:
+  - phase: review
+    pr_number: 2007
+    branch: builder/spir-1967
+    created_at: '2026-11-27T14:21:51.744Z'
+pr_ready_for_human: true

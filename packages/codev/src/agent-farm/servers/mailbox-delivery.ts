@@ -46,11 +46,13 @@ import {
   markEscalated,
   markEscalatedDelivered,
   findStarvingAgents,
+  holdForRelease,
 } from '../db/mailbox.js';
+import { PEER_MIN_RETENTION_DAYS, prunePeerStorage } from '../peer/store.js';
 import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js';
 import type { GateProfile, GateVerdict } from './render-gate.js';
 import { writeStrategyForApp, type PacedSubmitResult, type WriteStrategy } from './message-write.js';
-import { KeyedSerializer } from './write-queue.js';
+import { KeyedSerializer, type WithinResult } from './write-queue.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 /**
@@ -299,6 +301,14 @@ export interface DeliveryPorts {
    * as `verified: false`. This watch is evidence for a REPORT, never a retry decision.
    */
   watchEcho(session: DeliverySession, needle: string): Promise<EchoWatch>;
+  /**
+   * Spec 1967: may this REMOTE row be delivered now? Asked at the delivery instant of every
+   * row from another Tower, because the switch and the grants can change while it is held.
+   * False when the switch is off or no grant admits the delivery any longer (or a grant now
+   * holds it), and the row then moves to held for release instead of being written. Always
+   * true for a row its owner released (`released_at`): that is the owner's decision.
+   */
+  remoteDeliveryAllowed(row: DbMailbox): boolean;
   /**
    * Raise a human-visible notice for a delivery whose write completed but whose echo never
    * confirmed (Issue #1584). The row is marked `delivered` + `escalated`, and a DELIVERED row
@@ -1001,8 +1011,17 @@ export async function deliverAgentMail(
   // committed up to now; the irreducible residual (a resolve during the paced write
   // itself) is the accepted gate→write race in the spec's Risks table.
   const current = getById(db, row.id);
-  if (!current || current.status !== 'held') {
+  if (!current || current.status !== 'held' || current.release_hold === 1) {
     ports.onHeldStateChange(); // the held set changed under us → refresh the indicator
+    return { delivered: [], reason: null };
+  }
+  // Spec 1967: a row from another Tower is delivered only while the switch and a grant still
+  // allow it, or its owner released it, asked now, at the instant of the write. Otherwise it is
+  // held for release: a human decides what happens to mail whose permission was withdrawn
+  // while it waited.
+  if (current.remote_tower_id !== null && !ports.remoteDeliveryAllowed(current)) {
+    holdForRelease(db, current.id, ports.now());
+    ports.onHeldStateChange();
     return { delivered: [], reason: null };
   }
 
@@ -1333,6 +1352,24 @@ export function deliverAgentMailSerialized(
   );
 }
 
+/**
+ * {@link deliverAgentMailSerialized} with a deadline on the wait for the agent's turn (Spec
+ * 1967, the receiver's 5-second answer). Queued on the same serializer, so the lock order is
+ * unchanged. If the turn has not come within `ms`, it resolves `{ started: false }` and the
+ * pass never runs: the row stays held, and the backstop delivers it once the agent is free.
+ */
+export function deliverAgentMailSerializedWithin(
+  ports: DeliveryPorts,
+  db: Database.Database,
+  workspacePath: string,
+  toAgent: string,
+  ms: number,
+): Promise<WithinResult<DeliveryOutcome>> {
+  return deliverySerializer.runWithin(agentKey(workspacePath, toAgent), ms, () =>
+    deliverAgentMail(ports, db, workspacePath, toAgent)
+  );
+}
+
 const DEFAULT_BACKSTOP_INTERVAL_MS = 1500;
 // Spec 1313 (baked decision 7): terminal rows are pruned after a bounded window,
 // default 30 days, configurable via `.codev/config.json` (mailbox.retentionDays) —
@@ -1401,6 +1438,9 @@ export class MailboxDrainer {
   private db: Database.Database | undefined;
   private readonly intervalMs: number;
   private readonly retentionDays: number;
+  // Spec 1967: the peer tables' retention (`peer.recordRetentionDays`), pruned in the same pass
+  // as terminal mailbox rows. `prunePeerStorage` raises it to 30 days whatever is passed.
+  private readonly peerRecordRetentionDays: number;
   private readonly escalationMs: number;
   private readonly ownerNoticeMs: number;
   private readonly notCleanStreak = new Map<string, number>();
@@ -1435,9 +1475,18 @@ export class MailboxDrainer {
   // this generation's state.
   private generation = 0;
 
-  constructor(opts: { intervalMs?: number; pruneRetentionDays?: number; escalationMs?: number; ownerNoticeMs?: number } = {}) {
+  constructor(
+    opts: {
+      intervalMs?: number;
+      pruneRetentionDays?: number;
+      peerRecordRetentionDays?: number;
+      escalationMs?: number;
+      ownerNoticeMs?: number;
+    } = {},
+  ) {
     this.intervalMs = opts.intervalMs ?? DEFAULT_BACKSTOP_INTERVAL_MS;
     this.retentionDays = opts.pruneRetentionDays ?? DEFAULT_PRUNE_RETENTION_DAYS;
+    this.peerRecordRetentionDays = opts.peerRecordRetentionDays ?? PEER_MIN_RETENTION_DAYS;
     this.escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
     this.ownerNoticeMs = opts.ownerNoticeMs ?? this.escalationMs * DEFAULT_OWNER_NOTICE_MULTIPLE;
   }
@@ -1447,6 +1496,7 @@ export class MailboxDrainer {
     this.ports = ports;
     this.db = db;
     pruneTerminal(db, this.retentionDays, ports.now()); // boot prune
+    prunePeerStorage(db, this.peerRecordRetentionDays, ports.now());
     this.timer = setInterval(() => void this.tick(), this.intervalMs);
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
@@ -1652,6 +1702,7 @@ export class MailboxDrainer {
       this.escalateOverdue(ports, db);
       this.noticeOverdue(ports, db);
       pruneTerminal(db, this.retentionDays, ports.now());
+      prunePeerStorage(db, this.peerRecordRetentionDays, ports.now());
     } catch (err) {
       // Backstop for escalateOverdue/pruneTerminal (DB ops) or anything the per-agent guard missed:
       // a tick runs under setInterval, so an unhandled throw becomes an unhandledRejection → exit(1)

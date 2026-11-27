@@ -22,6 +22,9 @@
  * - The per-key tail is dropped once it settles with no successor queued, so the
  *   map never grows unbounded across many short-lived keys (one per agent).
  */
+/** What {@link KeyedSerializer.runWithin} resolves with: the function's result, or that it never ran. */
+export type WithinResult<T> = { started: true; value: T } | { started: false };
+
 export class KeyedSerializer {
   private readonly tails = new Map<string, Promise<unknown>>();
 
@@ -50,6 +53,37 @@ export class KeyedSerializer {
       if (this.tails.get(key) === tail) this.tails.delete(key);
     });
     return result;
+  }
+
+  /**
+   * {@link run} with a deadline on the WAIT (Spec 1967, the receiver's 5-second answer).
+   * `fn` is queued exactly as `run` queues it. If its turn comes within `ms`, it runs and the
+   * promise resolves `{ started: true, value }` once it settles (or rejects with its
+   * rejection). If its turn has not come by then, the promise resolves `{ started: false }`
+   * at once, and `fn` is skipped when its turn arrives, so it never runs late. The key's
+   * order is unchanged either way: a skipped turn still waits for its predecessor and still
+   * holds back its successor until then.
+   */
+  runWithin<T>(key: string, ms: number, fn: () => Promise<T>): Promise<WithinResult<T>> {
+    return new Promise((resolve, reject) => {
+      let started = false;
+      let expired = false;
+      const timer = setTimeout(() => {
+        if (started) return;
+        expired = true;
+        resolve({ started: false });
+      }, Math.max(0, ms));
+      void this.run(key, async () => {
+        if (expired) return;
+        started = true;
+        clearTimeout(timer);
+        try {
+          resolve({ started: true, value: await fn() });
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
   }
 
   /** True while any work is queued or in flight for `key` (tests/telemetry). */

@@ -14,6 +14,8 @@
  * same-named formatters with different output in one `lib/` is a trap.
  */
 
+import type { HeldMessage, PeerQueuePause } from '@cluesmith/codev-types';
+
 /**
  * Compact human duration ("5s", "3m", "2h", "1d") from a millisecond delta.
  * Second-granularity, matching the CLI — held mail is often seconds old, and "<1m"
@@ -45,4 +47,58 @@ export function formatHeldAge(createdAt: number, now: number): string {
  */
 export function isScheduled(notBefore: number | null, now: number): boolean {
   return notBefore != null && notBefore > now;
+}
+
+/**
+ * Spec 1967: is this row mail from another Tower held for a human's release? It waits for
+ * `afx inbox release`, not for an agent, so it is counted apart from `heldCount` (as
+ * `heldForReleaseCount`) and listed in a group of its own.
+ */
+export function isHeldForRelease(message: Pick<HeldMessage, 'reason'>): boolean {
+  return message.reason === 'held-for-release';
+}
+
+/** The workspace's mailbox rows as the popover groups them. */
+export interface HeldMailGroups {
+  /** Waiting for a local agent: exactly the rows `OverviewData.heldCount` counts. */
+  held: HeldMessage[];
+  /** Pre-due `--delay` sends: listed, never counted. */
+  scheduled: HeldMessage[];
+  /** From another Tower, held for a human's release: `OverviewData.heldForReleaseCount`. */
+  forRelease: HeldMessage[];
+}
+
+/**
+ * Split the rows `GET /api/inbox` lists into the popover's groups, each row into exactly one.
+ * Held for release is decided first: such a row waits for a human whatever else it carries.
+ * The rest split on {@link isScheduled}, as before. So each group's length is the count the
+ * badge shows for it, which is what lets a reader check one against the other.
+ */
+export function groupHeldMail(messages: readonly HeldMessage[], now: number): HeldMailGroups {
+  const groups: HeldMailGroups = { held: [], scheduled: [], forRelease: [] };
+  for (const message of messages) {
+    if (isHeldForRelease(message)) groups.forRelease.push(message);
+    else if (isScheduled(message.notBefore, now)) groups.scheduled.push(message);
+    else groups.held.push(message);
+  }
+  return groups;
+}
+
+/** Who a row is from, as `afx inbox` names it: a remote sender's full address, else the agent, else `?`. */
+export function heldSenderOf(message: Pick<HeldMessage, 'fromAgent' | 'remoteSender'>): string {
+  return message.remoteSender ?? message.fromAgent ?? '?';
+}
+
+/** Why no mail for another Tower leaves now, as `afx inbox` says it, without the command. */
+export function peerPauseText(pause: PeerQueuePause): string {
+  switch (pause) {
+    case 'remote-off':
+      return 'Not sent now: remote messaging is off on this Tower.';
+    case 'not-connected':
+      return 'Not sent now: this Tower is not connected to Codev Cloud.';
+    case 'not-registered':
+      return "Not sent now: this Tower's registration was removed from Codev Cloud.";
+    case 'no-relay':
+      return 'Not sent now: this Codev Cloud has no relay.';
+  }
 }

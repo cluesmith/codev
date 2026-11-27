@@ -88,14 +88,32 @@ export function parseAgentName(name: string): { protocol: string; id: string } |
   return { protocol: match[1], id: match[2] };
 }
 
+/** The builder rule (Spec 755): a builder naming an architect that is not its own. */
+export function addressSpoofingErrorMessage(builderId: string): string {
+  return `builder ${builderId} may only address its own spawning architect`;
+}
+
 /**
- * Why an `afx://` address is refused (Spec 1940, stage 1). Said the same way by Tower, by
- * the cron loader and by the commands that refuse before calling Tower. It holds whether
- * or not the Tower is connected to Codev Cloud.
+ * The builder rule for an architect in another workspace, or on another Tower (Spec 1940,
+ * Spec 1967): refused, with the way in, that workspace's front door.
  */
-export const CROSS_TOWER_UNAVAILABLE_MESSAGE =
-  'Cross-Tower messaging is not available in this version: an afx:// address cannot be delivered yet. ' +
-  'Use a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.';
+export function crossWorkspaceBuilderErrorMessage(builderId: string, frontDoor: string): string {
+  return `${addressSpoofingErrorMessage(builderId)}; reach that workspace through its front door: afx send ${frontDoor} "…"`;
+}
+
+/**
+ * Why something that acts on this Tower's own terminals refuses an `afx://` address (Spec
+ * 1940; Spec 1967): an interrupt, a refresh and a cron task's target reach only agents on
+ * this Tower. Only `afx send` delivers to another Tower. Said the same way by Tower, by the
+ * cron loader and by the commands that refuse before calling Tower. `what` names the one
+ * refusing (`afx interrupt`, `A cron task's target`).
+ */
+export function localAddressOnlyMessage(what: string): string {
+  return (
+    `${what} takes a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>. ` +
+    'An afx:// address names an agent on another Tower, and only afx send reaches one.'
+  );
+}
 
 /**
  * Is `target` a well-formed address that names a Tower? A malformed one is not: it is

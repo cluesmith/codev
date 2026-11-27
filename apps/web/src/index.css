@@ -931,13 +931,20 @@ body {
   padding: 0;
   font-family: inherit;
   cursor: pointer;
-  /* The affordance: dotted underline reads as "expands to reveal", not as a link. */
+}
+
+/* The affordance: dotted underline reads as "expands to reveal", not as a link. On each count's
+   text rather than the button (Spec 1967), so it does not run under the dots between counts. */
+.held-count-text {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
 
 .held-badge:hover {
   color: var(--text-primary);
+}
+
+.held-badge:hover .held-count-text {
   text-decoration: underline solid;
 }
 
@@ -952,6 +959,17 @@ body {
   font-weight: 600;
 }
 
+/* Spec 1967: one segment per kind of held mail that has any, separated by a middle dot. */
+.held-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.held-count-sep {
+  color: var(--text-muted);
+}
+
 /* The popover sits at the 1000 tier (with the modal backdrop): xterm's WebGL/canvas panes
    paint over anything at the lower 20/100 tiers. */
 .held-popover {
@@ -961,7 +979,8 @@ body {
   z-index: 1000;
   min-width: 280px;
   max-width: 380px;
-  max-height: 320px;
+  /* Spec 1967: up to four groups now, so taller than #1450's 320px, within the viewport. */
+  max-height: min(480px, calc(100vh - 80px));
   overflow-y: auto;
   padding: 10px 12px;
   background: var(--bg-secondary);
@@ -1043,6 +1062,12 @@ body {
   border-top: 1px solid var(--border-color);
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.held-group-note code {
+  font-family: ui-monospace, monospace;
+  font-style: normal;
+  font-size: 11px;
 }
 
 .held-popover-foot code {

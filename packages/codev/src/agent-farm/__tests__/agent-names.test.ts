@@ -9,7 +9,7 @@ import {
   parseAgentName,
   parseAddress,
   namesATower,
-  CROSS_TOWER_UNAVAILABLE_MESSAGE,
+  localAddressOnlyMessage,
   resolveAgentName,
   taskBuilderId,
 } from '../utils/agent-names.js';
@@ -155,9 +155,13 @@ describe('namesATower', () => {
     }
   });
 
-  it('has one refusal text, which says cross-Tower messaging is not available', () => {
-    expect(CROSS_TOWER_UNAVAILABLE_MESSAGE).toMatch(/^Cross-Tower messaging is not available/);
-    expect(CROSS_TOWER_UNAVAILABLE_MESSAGE).toContain('[<workspace>:]architect[:<name>]');
+  // Spec 1967: cross-Tower messaging exists now, so the refusal no longer says it does not.
+  // What refuses an afx:// address is something that reaches only this Tower's agents.
+  it('has one refusal text for what takes only a local address, naming afx send for another Tower', () => {
+    const message = localAddressOnlyMessage('afx interrupt');
+    expect(message).toMatch(/^afx interrupt takes a local address: \[<workspace>:\]architect\[:<name>\]/);
+    expect(message).toContain('only afx send reaches one');
+    expect(message).not.toMatch(/not available/);
   });
 });
 

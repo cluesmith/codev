@@ -41,6 +41,8 @@ vi.mock('../lib/tower-client.js', () => ({
     getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
     // Spec 1313 round 3: status reads the overview for held-mail awareness; null → "no held info".
     getOverview: async () => null,
+    // Spec 1967: the remote-messaging line; this suite's Tower predates it.
+    getPeerStatus: async () => ({ ok: false, status: 404, error: 'Not found', unknownRoute: true }),
   }),
 }));
 

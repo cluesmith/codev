@@ -17,8 +17,20 @@ import {
   AUTH_RETRY_FAILED_MARKER,
   type TunnelState,
   type TunnelIdentity,
+  type TunnelPeerOptions,
+  type TunnelPeerSession,
   type TowerMetadata,
 } from '../lib/tunnel-client.js';
+import type { PeerSwitchState } from '@cluesmith/codev-types';
+import { getGlobalDb } from '../db/index.js';
+import { readSwitch } from '../peer/switch.js';
+import { createReceiver } from '../peer/receiver.js';
+import { recordEntryEvent } from '../peer/records.js';
+import { onTunnelAuthOk, setTunnelSessionSource, shutdownPeerCloud, startPeerOutbox } from '../peer/cloud-wiring.js';
+import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
+import { liveGrantWorld, resolveRemoteRecipient } from './tower-messages.js';
+import { discoverableWorkspaces } from './tower-address-book.js';
+import { deliverRemoteWithin, notifyHeldStateChanged } from './mailbox-wiring.js';
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -105,8 +117,9 @@ async function gatherMetadata(): Promise<TowerMetadata> {
 }
 
 /**
- * Start periodic metadata refresh — re-gathers metadata and pushes to codevos.ai
- * every METADATA_REFRESH_MS while the tunnel is connected.
+ * Start periodic metadata refresh: re-gathers metadata every METADATA_REFRESH_MS while
+ * the tunnel is connected, into the cache `GET /__tower/metadata` serves (nothing is
+ * pushed to the cloud since #1986).
  */
 function startMetadataRefresh(): void {
   stopMetadataRefresh();
@@ -132,6 +145,90 @@ function stopMetadataRefresh(): void {
   }
 }
 
+/** Whether the last read of the switch for `auth` failed, so its ERROR is logged once per failing run. */
+let switchReadFailing = false;
+
+/** A database error as a log line may name it: its class, and its code when it has the shape of one. */
+function describeDbError(err: unknown): string {
+  if (!(err instanceof Error)) return typeof err;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? `${err.constructor.name} ${code}` : err.constructor.name;
+}
+
+/**
+ * The switch as `auth` states it. A read that fails fails the connect attempt, and the
+ * back-off retries it: Tower states only what it knows, with no fallback (architect ruling,
+ * 2026-11-27). The failure is loud: an ERROR line naming the cause the first time in a
+ * failing run, and the tunnel's last failure, which `afx tower status` shows while the
+ * connection is down.
+ */
+function readSwitchForAuth(): PeerSwitchState {
+  try {
+    const state = readSwitch(getGlobalDb()).state;
+    switchReadFailing = false;
+    return state;
+  } catch (err) {
+    const cause = `global.db could not be read (${describeDbError(err)})`;
+    if (!switchReadFailing) {
+      _deps?.log('ERROR', `Cloud connection not made: the remote-messaging switch is unreadable: ${cause}. Retrying on back-off.`);
+    }
+    switchReadFailing = true;
+    throw new Error(cause);
+  }
+}
+
+/**
+ * The tunnel's peer entry point, as this Tower supplies it (Spec 1967). The switch is read
+ * from the database for every `auth`, so a reconnect states it as it stands. A verified
+ * request goes to the receiver (steps 9 to 16), which stores mail in the mailbox and makes
+ * one gate attempt, or answers a discovery query from the grants; every request at the
+ * entry point is written to the inbound record,
+ * which is also what the clock surface reads.
+ */
+const PEER_OPTIONS: TunnelPeerOptions = {
+  remoteMessaging: readSwitchForAuth,
+  onVerifiedRequest: createReceiver({
+    db: getGlobalDb,
+    now: Date.now,
+    world: liveGrantWorld,
+    // Tower-global, from the user-global layer, as the mailbox settings are read.
+    limits: () => resolvePeerSettings(loadConfig(os.homedir())).limits,
+    resolveRecipient: resolveRemoteRecipient,
+    discoverable: discoverableWorkspaces,
+    deliverWithin: (workspacePath, toAgent, ms) => deliverRemoteWithin(logToTower, workspacePath, toAgent, ms),
+    onHeldChanged: notifyHeldStateChanged,
+    log: logToTower,
+  }),
+  onEntryEvent: (event) => recordEntryEvent(getGlobalDb(), event),
+};
+
+/** The Tower log, once the orchestrator has wired it. */
+function logToTower(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
+  _deps?.log(level, message);
+}
+
+/** What each `auth_ok` let this Tower take of the cloud's relay, for the log. Never the secret. */
+function logRelay(config: CloudConfig, identity: TunnelIdentity): void {
+  switch (identity.relay) {
+    case 'available':
+      _deps?.log('INFO', 'Codev Cloud relay available: remote messaging can reach this Tower');
+      return;
+    case 'absent':
+    case 'null':
+      _deps?.log('INFO', 'This Codev Cloud has no relay: remote messaging is unavailable');
+      return;
+    case 'insecure':
+      _deps?.log('WARN', `Codev Cloud offered a relay over a tunnel without TLS (${logSafe(config.server_url)}); its session secret was refused and remote messaging is unavailable. Use an https: server URL.`);
+      return;
+    case 'malformed':
+    case 'unsupported':
+      _deps?.log('WARN', `Codev Cloud's relay was ${identity.relay === 'malformed' ? 'not in the expected form' : 'for no protocol version this Tower speaks'}; remote messaging is unavailable`);
+      return;
+    case 'not-stated':
+      return;
+  }
+}
+
 /**
  * Create or reconnect the tunnel client using the given config.
  * Sets up state change listeners and sends initial metadata.
@@ -144,11 +241,20 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     tunnelClient.disconnect();
   }
 
+  // The switch as this client's last `auth` stated it, for the `auth_ok` that answers it.
+  let statedSwitch: PeerSwitchState | null = null;
   const client = new TunnelClient({
     serverUrl: config.server_url,
     apiKey: config.api_key,
     towerId: config.tower_id,
     localPort: _deps.port,
+    peer: {
+      ...PEER_OPTIONS,
+      remoteMessaging: () => {
+        statedSwitch = readSwitchForAuth();
+        return statedSwitch;
+      },
+    },
   });
 
   client.onStateChange((state: TunnelState, prev: TunnelState, reason?: string) => {
@@ -170,7 +276,17 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
     }
   });
 
-  client.onAuthOk((identity) => adoptCloudIdentity(config, identity));
+  client.onAuthOk((identity) => {
+    adoptCloudIdentity(config, identity);
+    logRelay(config, identity);
+    // The peer list learns what this session stated of a relay; a switch change made while
+    // the `auth` was in flight is reported now (Spec 1967, contract sections 1 and 2).
+    try {
+      onTunnelAuthOk(identity.relay, statedSwitch, { serverUrl: config.server_url, towerId: config.tower_id });
+    } catch (err) {
+      _deps?.log('ERROR', `Peer: could not take in the connection's relay state: ${(err as Error).message}`);
+    }
+  });
 
   // Gather and set initial metadata before connecting
   const metadata = await gatherMetadata();
@@ -316,6 +432,15 @@ export async function initTunnel(
 ): Promise<void> {
   _deps = deps;
   _getInstances = callbacks.getInstances;
+  switchReadFailing = false;
+  setTunnelSessionSource(getTunnelPeerSession, logToTower);
+  // Mail this Tower holds for its peers resumes from its rows, whether or not it is
+  // registered now: until it can leave, the outbox only looks at it again (Spec 1967).
+  try {
+    startPeerOutbox(notifyHeldStateChanged);
+  } catch (err) {
+    deps.log('ERROR', `Peer: mail held for other Towers could not be resumed at start (${(err as Error).message})`);
+  }
 
   // Auto-connect tunnel if registered
   try {
@@ -337,11 +462,21 @@ export async function initTunnel(
 }
 
 /**
+ * The connected tunnel session's identity and relay (Spec 1967): this Tower's own name
+ * while connected, and whether the cloud's relay can reach it. `null` while not connected.
+ * Never the session secret, which stays inside the tunnel client.
+ */
+export function getTunnelPeerSession(): TunnelPeerSession | null {
+  return tunnelClient?.getPeerSession() ?? null;
+}
+
+/**
  * Shut down the tunnel module. Disconnects client, stops watchers.
  */
 export function shutdownTunnel(): void {
   stopMetadataRefresh();
   stopConfigWatcher();
+  shutdownPeerCloud();
   if (tunnelClient) {
     _deps?.log('INFO', 'Disconnecting tunnel...');
     tunnelClient.disconnect();
@@ -676,6 +811,8 @@ export async function handleTunnelEndpoint(
       state,
       uptime,
       hostname: os.hostname(),
+      // Why the connection is down, while it is (the client's last failure; already sanitized).
+      lastFailure: deregistered || state === 'connected' ? null : (tunnelClient?.getLastFailure() ?? null),
     };
 
     if (config) {

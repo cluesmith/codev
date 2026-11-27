@@ -24,6 +24,8 @@ const { TEST_DIR, PREV_AGENT_FARM_DIR_ENV } = vi.hoisted(() => {
 });
 
 afterAll(() => {
+  // Windows will not unlink an open database file (EBUSY).
+  closeGlobalDb();
   if (PREV_AGENT_FARM_DIR_ENV === undefined) delete process.env.CODEV_AGENT_FARM_DIR;
   else process.env.CODEV_AGENT_FARM_DIR = PREV_AGENT_FARM_DIR_ENV;
   rmSync(TEST_DIR, { recursive: true, force: true });
@@ -36,6 +38,7 @@ import { redeemToken } from '../lib/token-exchange.js';
 import { getPublicAuthority } from '../servers/ide-forward.js';
 import { AUTH_RETRY_INTERVAL_MS, calculateBackoff } from '../lib/tunnel-client.js';
 import { MockTunnelServer } from './helpers/mock-tunnel-server.js';
+import { closeGlobalDb } from '../db/index.js';
 
 const API_KEY = 'ctk_Bugfix1871Key0001';
 
@@ -98,6 +101,10 @@ describe('Issue #1871: Tower follows the cloud identity', () => {
 
   afterEach(async () => {
     shutdownTunnel();
+    // Every `auth` the tunnel client sends states the remote-messaging switch, read from the
+    // real global db (Spec 1967), which opens it under TEST_DIR; close it so each test, and
+    // the final rmSync, starts clean.
+    closeGlobalDb();
     vi.useRealTimers();
     vi.restoreAllMocks();
     await cloud.stop();

@@ -30,7 +30,7 @@ import { loadForgeConfig } from '../../lib/forge.js';
 import { fetchIssue as fetchForgeIssue } from '../../lib/github.js';
 import { buildPromptFromTemplate, buildResumeNotice } from './spawn-roles.js';
 import { detectWorkspaceRoot, detectCurrentBuilderId, architectSenderId } from './send.js';
-import { namesATower, CROSS_TOWER_UNAVAILABLE_MESSAGE } from '../utils/agent-names.js';
+import { namesATower, localAddressOnlyMessage } from '../utils/agent-names.js';
 import { buildContextFsPort, resolveBuilderContext } from './reset/context.js';
 import {
   formatResetReport,
@@ -80,7 +80,7 @@ export async function refresh(options: ResetOptions): Promise<void> {
   // Spec 1940: a refresh acts on a builder of this machine. Refused here, before the
   // registry or Tower is asked, and again by Tower.
   if (namesATower(target)) {
-    fatal(`afx refresh takes a local address. ${CROSS_TOWER_UNAVAILABLE_MESSAGE}`);
+    fatal(localAddressOnlyMessage('afx refresh'));
   }
 
   logger.header('Builder Context Refresh');

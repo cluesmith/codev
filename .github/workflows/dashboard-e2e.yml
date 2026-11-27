@@ -68,3 +68,13 @@ jobs:
           CODEV_AGENT_FARM_DIR: ${{ runner.temp }}/decisions-agent-farm
           SHELLPER_SOCKET_DIR: ${{ runner.temp }}/decisions-shellper
         run: pnpm exec playwright test --config playwright.decisions.config.ts --retries 3
+
+      # Spec 1967: the Peers panel suite and the held-count suite (#1313/#1450) run only through
+      # their own config, on a fresh Tower that shares nothing with those above: its own port, and
+      # a state, socket and home directory the config makes under the temp directory and removes.
+      - name: Run Peers panel and held-count tests
+        if: ${{ !cancelled() && steps.install-browsers.outcome == 'success' }}
+        working-directory: packages/codev
+        env:
+          TOWER_TEST_PORT: '14102'
+        run: pnpm exec playwright test --config playwright.peers.config.ts --retries 3

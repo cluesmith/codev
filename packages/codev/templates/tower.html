@@ -450,6 +450,100 @@
       color: var(--text-muted);
     }
 
+    /* Peers panel (Spec 1967): my other Towers, read-only */
+    .peers-section {
+      margin-top: 32px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border);
+    }
+
+    .peers-switch {
+      font-size: 15px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .peers-switch strong {
+      color: var(--text-primary);
+    }
+
+    .peers-note {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+
+    .peers-note--warn {
+      color: #fbbf24;
+    }
+
+    .peers-note code,
+    .peers-switch code,
+    .peers-foot code {
+      background: var(--bg-tertiary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .peers-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .peer-row {
+      padding: 14px 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .peer-row--marked {
+      border-color: #a16207;
+    }
+
+    .peer-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .peer-name {
+      font-size: 16px;
+      font-weight: 500;
+      font-family: monospace;
+    }
+
+    .peer-online,
+    .peer-its-switch {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .peer-may {
+      margin-top: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-family: monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .peer-mark {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #fbbf24;
+      line-height: 1.4;
+    }
+
+    .peers-foot {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
     /* Launch section */
     .launch-section {
       margin-top: 32px;
@@ -943,6 +1037,8 @@
 
     <div id="recents-container"></div>
 
+    <div id="peers-container"></div>
+
     <div class="launch-section">
       <h3>
         <span>+</span>
@@ -1069,6 +1165,10 @@
       await refresh();
       // Poll every 5 seconds
       setInterval(refresh, 5000);
+
+      // The Peers panel asks less often: its route may fetch the peer list from Codev Cloud.
+      refreshPeers();
+      setInterval(refreshPeers, PEERS_REFRESH_MS);
     }
 
     // SSE subscription for real-time notifications
@@ -1744,6 +1844,210 @@
         hideConnectDialog();
       }
     });
+
+    // ========================================================================
+    // Peers panel (Spec 1967, Decision 9): my other Towers, read-only
+    // ========================================================================
+    //
+    // What `afx peer list` shows: the switch, each of my other Towers with the online hint
+    // and what it may message here, the marks on a peer (not verifying, clock out of range,
+    // cloud error) and why the list is not a fresh one. It has no controls. Turning remote
+    // messaging on and granting a peer are a human's acts at this Tower's own machine: the
+    // panel names the commands, and through Codev Cloud says they are not available there
+    // rather than offer something that would be refused. Every text from the route is
+    // escaped before it is written into the page.
+
+    // The panel's route may fetch the peer list from Codev Cloud, within the call budget
+    // `afx peer list` keeps, so it is asked every 30 seconds rather than with each refresh.
+    const PEERS_REFRESH_MS = 30000;
+
+    // Each request's number: an answer slower than the next poll is dropped when a later request
+    // has been made, so an older list never replaces a newer one.
+    let peersGeneration = 0;
+
+    async function refreshPeers() {
+      const generation = ++peersGeneration;
+      let state;
+      try {
+        const res = await authFetch('./api/peer/panel');
+        state = res.ok ? { kind: 'ready', panel: await res.json() } : { kind: 'error', why: 'Tower answered ' + res.status };
+      } catch (err) {
+        state = { kind: 'error', why: err.message };
+      }
+      if (generation === peersGeneration) renderPeers(state);
+    }
+
+    // A time as the panel shows it: the viewer's local time, with the exact instant on hover.
+    function peerTime(epochMs) {
+      const d = new Date(epochMs);
+      // A time the route did not give as a number reads as unknown, never breaks the panel's render.
+      if (typeof epochMs !== 'number' || Number.isNaN(d.getTime())) return 'an unknown time';
+      return `<time datetime="${d.toISOString()}" title="${d.toISOString()}">${escapeHtml(d.toLocaleString())}</time>`;
+    }
+
+    function peerModeText(mode) {
+      if (mode === 'hold') return 'hold for release';
+      if (mode === 'deliver') return 'deliver';
+      // A mode this page does not know is shown as it is, never relabelled.
+      return escapeHtml(String(mode));
+    }
+
+    // What one Tower may message here: its grants, or nothing.
+    function peerMayMessage(tower) {
+      if (!tower.mayMessage || tower.mayMessage.length === 0) return 'nothing';
+      return tower.mayMessage.map((g) => `${escapeHtml(String(g.recipient))} (${peerModeText(g.mode)})`).join(', ');
+    }
+
+    // What a mark on a peer says, as `afx peer list` words it (gaps G10, G12, G15).
+    function peerMarkText(mark) {
+      switch (mark.mark) {
+        case 'not-verifying':
+          return `Not verifying: its last ${escapeHtml(String(mark.run))} messages from here were not verified there, since ${peerTime(mark.since)}. The two Towers may disagree about the contract; this Tower keeps retrying.`;
+        case 'cloud-error':
+          return `Cloud error: Codev Cloud failed the last ${escapeHtml(String(mark.run))} messages to it, since ${peerTime(mark.since)}, as it cannot build a valid statement for this pair. This Tower keeps retrying.`;
+        case 'clock-out-of-range':
+          return `Clock out of range: it refused a message from here as clock-skew at ${peerTime(mark.lastAt)}. Its clock may be wrong (Codev Cloud's clock is the reference); this Tower keeps retrying.`;
+        default:
+          return escapeHtml(String(mark.mark));
+      }
+    }
+
+    // Its own switch, as the cloud last heard it.
+    function peerItsSwitch(state) {
+      if (state === 'on') return 'remote messaging on';
+      if (state === 'off') return 'remote messaging off';
+      return 'remote messaging unknown';
+    }
+
+    function renderPeerRow(tower) {
+      const marks = tower.marks || [];
+      const online = !!tower.online;
+      return `
+        <div class="peer-row${marks.length > 0 ? ' peer-row--marked' : ''}" data-testid="peer-row" data-peer="${escapeHtml(String(tower.name))}">
+          <div class="peer-head">
+            <span class="status-dot ${online ? 'running' : 'stopped'}"></span>
+            <span class="peer-name">${escapeHtml(String(tower.name))}</span>
+            <span class="peer-online" data-testid="peer-online">${online ? 'online' : 'offline'}</span>
+            <span class="peer-its-switch">· ${peerItsSwitch(tower.remoteMessaging)}</span>
+          </div>
+          <div class="peer-may" data-testid="peer-may">May message this Tower: ${peerMayMessage(tower)}</div>
+          ${marks.map((m) => `<div class="peer-mark" data-testid="peer-mark" data-mark="${escapeHtml(String(m.mark))}">⚠ ${peerMarkText(m)}</div>`).join('')}
+        </div>
+      `;
+    }
+
+    // Why the list shown is not a fresh one, and what to do; null when it is fresh or recent.
+    function peersListingNote(panel) {
+      const listing = panel.listing || {};
+      const refreshedAt = listing.refreshedAt;
+      const from = refreshedAt == null ? 'and this Tower has not listed its peers yet' : `this is the list from ${peerTime(refreshedAt)}`;
+      const lastList = refreshedAt == null ? '' : `; the Towers above are from its last list, at ${peerTime(refreshedAt)}`;
+      switch (listing.problem) {
+        case 'not-connected':
+          return `This Tower is not connected to Codev Cloud${lastList}. Connect it with: <code>afx tower connect</code>`;
+        case 'not-registered':
+          return `This Tower's registration was removed from Codev Cloud${lastList}. Register it again with: <code>afx tower connect --reauth</code>`;
+        case 'registration-changed':
+          return "This Tower's Codev Cloud registration changed while its peer list was fetched; the panel asks again shortly.";
+        case 'unauthenticated':
+          return `Codev Cloud refused this Tower's key; ${from}. Run: <code>afx tower connect --reauth</code>`;
+        case 'cloud-unreachable':
+          return `Codev Cloud is unreachable; ${from}.`;
+        case 'rate-limited':
+          return `Codev Cloud is limiting this Tower's calls; ${from}.`;
+        case 'bad-listing':
+          return `Codev Cloud's peer list was not in the expected form (see the Tower log); ${from}.`;
+        default:
+          return null;
+      }
+    }
+
+    // Whether the cloud has a relay; null when it has one or has not said.
+    function peersRelayNote(relay) {
+      if (!relay || relay.state !== 'none') return null;
+      switch (relay.why) {
+        case 'insecure':
+          return 'This Codev Cloud has no relay here: its server URL is plain http: on a host that is not this machine, so no peer call is made.';
+        case 'unsupported':
+          return "This Codev Cloud's relay speaks no protocol version this Tower speaks: remote messaging is unavailable.";
+        case 'malformed':
+          return "This Codev Cloud's relay was not in the expected form: remote messaging is unavailable.";
+        default:
+          return 'This Codev Cloud has no relay: remote messaging is unavailable.';
+      }
+    }
+
+    // A Tower never registered with Codev Cloud, with remote messaging off, has no peers to
+    // show and nothing in reach: the section stays hidden until it is connected or switched on.
+    function peersPanelShown(panel) {
+      return panel.towerName !== null || panel.remoteMessaging === 'on';
+    }
+
+    function renderPeers(state) {
+      const container = document.getElementById('peers-container');
+      if (state.kind === 'ready' && !peersPanelShown(state.panel)) {
+        container.innerHTML = '';
+        return;
+      }
+      if (state.kind === 'error') {
+        container.innerHTML = `
+          <section class="peers-section" data-testid="peers-panel">
+            <h2 class="section-header">Peers</h2>
+            <p class="peers-note peers-note--warn" data-testid="peers-error">The peer list could not be loaded: ${escapeHtml(state.why)}</p>
+          </section>
+        `;
+        return;
+      }
+      const panel = state.panel;
+      const towers = panel.towers || [];
+      const on = panel.remoteMessaging === 'on';
+
+      // The switch, and how a human turns it on. Through Codev Cloud, turning it on and
+      // granting a peer are refused, so the panel says where they are done instead.
+      const switchLine = on
+        ? 'Remote messaging: <strong>on</strong>'
+        : `Remote messaging: <strong>off</strong>${panel.viaTunnel ? '' : ' — a human turns it on at this machine with: <code>afx peer on</code>'}`;
+      const viaCloudNote = panel.viaTunnel
+        ? `<p class="peers-note" data-testid="peers-via-cloud">Turning remote messaging on and granting a peer are not available through Codev Cloud: they widen who may write into an agent's prompt, so a human does them at this Tower's own machine (<code>afx peer on</code>, <code>afx peer grant</code>).</p>`
+        : '';
+
+      const notes = [];
+      const listingNote = peersListingNote(panel);
+      if (listingNote) notes.push({ text: listingNote, warn: false });
+      const relayNote = peersRelayNote(panel.relay);
+      if (relayNote) notes.push({ text: relayNote, warn: false });
+      const problem = panel.listing ? panel.listing.problem : null;
+      if (panel.tunnel === 'down' && problem !== 'not-connected' && problem !== 'not-registered') {
+        notes.push({ text: "This Tower's own tunnel is down: it can send, but cannot receive; mail for it waits at its senders.", warn: true });
+      }
+      if (panel.clockSkewSince != null) {
+        notes.push({
+          text: `This Tower's clock may be out of range: it refused a request from another Tower as clock-skew at ${peerTime(panel.clockSkewSince)}, and Codev Cloud's clock is the reference. Check this machine's clock.`,
+          warn: true,
+          testid: 'peers-clock',
+        });
+      }
+
+      let list;
+      if (towers.length > 0) {
+        list = `<div class="peers-list">${towers.map(renderPeerRow).join('')}</div>`;
+      } else if (panel.listing && panel.listing.refreshedAt != null) {
+        list = '<p class="peers-note" data-testid="peers-empty">No other Towers are on your Codev Cloud account.</p>';
+      } else {
+        list = '';
+      }
+
+      container.innerHTML = `
+        <section class="peers-section" data-testid="peers-panel">
+          <h2 class="section-header">Peers</h2>
+          <p class="peers-switch" data-testid="peers-switch" data-state="${on ? 'on' : 'off'}">${switchLine}</p>
+          ${viaCloudNote}
+          ${list}
+          ${notes.map((n) => `<p class="peers-note${n.warn ? ' peers-note--warn' : ''}" data-testid="${n.testid || 'peers-note'}">${n.text}</p>`).join('')}
+          <p class="peers-foot">More: <code>afx peer list</code> · <code>afx peer grants</code> · <code>afx peer log</code></p>
+        </section>
+      `;
+    }
 
     // Cloud status
     let cloudLoading = false;

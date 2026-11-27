@@ -19,6 +19,7 @@ import { formatAge } from '@cluesmith/codev-sdk/builder-helpers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../lib/config.js';
+import { renderRemoteMessagingLine } from './peer-status.js';
 import chalk from 'chalk';
 
 /**
@@ -514,6 +515,9 @@ export async function status(options: StatusOptions = {}): Promise<void> {
       }
       logger.blank();
       renderMailboxSummary(mailboxSummary.heldCount, mailboxSummary.escalated);
+      // Spec 1967: remote messaging in one line: the switch, peers online, and this
+      // workspace's mail held for release and waiting for a peer.
+      await renderRemoteMessagingLine(client, overview);
 
       return;
     }

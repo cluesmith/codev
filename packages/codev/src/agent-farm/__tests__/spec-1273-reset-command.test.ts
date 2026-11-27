@@ -154,7 +154,7 @@ describe('afx refresh — command surface (Spec 1273)', () => {
     const { refresh } = await import('../commands/reset.js');
 
     await expect(refresh({ builder: 'afx://devvm/codev:builder-aspir-1273' }))
-      .rejects.toThrow(/afx refresh takes a local address\. Cross-Tower messaging is not available/);
+      .rejects.toThrow(/afx refresh takes a local address: .*only afx send reaches one/);
     expect(mockFindBuilderById).not.toHaveBeenCalled();
     expect(mockIsRunning).not.toHaveBeenCalled();
     expect(mockRunReset).not.toHaveBeenCalled();

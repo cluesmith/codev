@@ -153,8 +153,9 @@ describe('Spec 1313 — mailbox table migration (v15) via runGlobalMigrations', 
     h.migrate();
 
     expect(h.tableExists('mailbox')).toBe(true);
-    // v15 creates the table; the same call then walks v16/v17/v18, so `not_before`
-    // (v17) and `detail` (v18) are present too — precisely the shape a real upgrade lands on.
+    // v15 creates the table; the same call then walks v16/v17/v18 and v21, so `not_before`
+    // (v17), `detail` (v18) and the remote columns and `release_hold` (v21, Spec 1967) are
+    // present too — precisely the shape a real upgrade lands on.
     expect(h.columns('mailbox')).toEqual(
       [
         'body',
@@ -168,6 +169,12 @@ describe('Spec 1313 — mailbox table migration (v15) via runGlobalMigrations', 
         'no_enter',
         'not_before',
         'reason',
+        'release_hold',
+        'released_at',
+        'remote_message_id',
+        'remote_owner_email',
+        'remote_sender',
+        'remote_tower_id',
         'resolved_at',
         'status',
         'supersede_key',
