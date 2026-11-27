@@ -43,7 +43,7 @@ cloud's share is on the list for the real-cloud run below.
   sender's address; the reply command works (Phases 6, 9; the builder footer rows in the review
   phase). Split: through the real cloud at verify-approval.
 - [x] 10. The sending Tower shown to the recipient comes only from the verified statement; no
-  payload field changes it (Phases 5, 6). Split: that the cloud builds the statement from its own
+  payload field changes it (Phases 5, 6; Gap 7's named cases in the review phase). Split: that the cloud builds the statement from its own
   records, at verify-approval.
 - [x] 11. Accepted only under a MAC that verifies with the current tunnel session's secret; the
   local caller, `/t/`-style headers, a replay and an earlier session's secret are each refused
@@ -119,7 +119,9 @@ Run on demand on the finished branch, after merging `origin/main` (`9f2048c78`, 
 #1992) and `npm run build`:
 
 - **Layer A** (porch's tests check, `npm test -- --exclude='**/e2e/**'`): 11 022 passed, 116
-  skipped, 242 s.
+  skipped, 242 s. Run again in the review phase on `a2f660715`, after the phase 13 review round's
+  rows, the gap 2 test and the PR review's fixes, with `npm run build` green first: 11 028
+  passed, 116 skipped, in 482 files, 244 s.
 - **Layer B**, the seven two-Tower files (`two-towers-harness`, `peer-entry-point`,
   `peer-receive`, `peer-send`, `peer-discovery`, `peer-surfaces`, `peer-walkthrough`, all
   `*.e2e.test.ts`) with `vitest.e2e.config.ts`: 63 passed in 59 s, at a load of 2.8. Nothing was
@@ -224,7 +226,7 @@ Each scenario in Spec 1967's Test Scenarios, and each stage 2 scenario in Spec 1
 | 1940 (inherited): A second message from the same peer reusing an accepted id with a different body, or a different recipient, is refused as a mismatch and recorded; the first row unchanged | packages/codev/src/agent-farm/__tests__/peer-receiver.test.ts | [peer-receiver] `refuses a different payload under the same id as mismatch, records it, and changes nothing` | A | Partly covered: only a different body is tested (see Gaps). |
 | 1940 (inherited): A message past its 30-day lifetime is refused as expired by the receiver, including one with a shorter mailbox retention; a sender-held row reaching that age is marked expired and not sent | packages/codev/src/agent-farm/__tests__/peer-receiver.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-contract.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-outbox.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-storage-migration.test.ts | [peer-receiver] `refuses a retry past the 30-day lifetime as expired, whether or not the prune has run`<br>[peer-receiver] `with a one-day mailbox retention, a day-5 retry of a day-1 delivery is a duplicate and creates no row`<br>[peer-receiver] `refuses ${label}, storing nothing` ("a sentAt 31 days old")<br>[peer-contract] `applies the clock: at most 5 minutes ahead, at most 30 days old, both inclusive`<br>[peer-outbox] `a row is marked expired at 30 days from sentAt and is not sent again`<br>[peer-outbox] `a row behind the head expires on time while the head waits`<br>[peer-outbox] `on start, a row already past its lifetime is expired without a call`<br>[peer-storage-migration] `pruneTerminal at 1 day removes a delivered remote row, and its accepted-once row lives to 30 days after sentAt` | A | The receiver lifetime test prunes with a 1-day retention (`pruneTerminal(f.db, 1, …)`). |
 | 1940 (inherited): A sender-held message is refused by the peer on retry (grant removed meanwhile): the row ends refused and is not retried | packages/codev/src/agent-farm/__tests__/peer-send.e2e.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-outbox.test.ts | [peer-send.e2e] `a message refused on retry, its grant removed meanwhile, ends refused`<br>[peer-outbox] `${name}: ${state}, and never sent again` ("R's refusal", which is `no-grant`) | B, A | |
-| 1940 (inherited): A message whose payload claims a different sending Tower is shown with the Tower the cloud authenticated | packages/codev/src/agent-farm/__tests__/peer-frame-invariant.test.ts | [peer-frame-invariant] `holds for ${CASES} arbitrary statements and payloads (seed ${SEED})` | A | Partly covered (see Gaps). About 5% of the generated addresses carry `{ tower: 'mbp', … }`. The invariant requires every stored header's sender Tower to be the statement's `fromTowerSlug`. By design a payload address that names a Tower is refused as `malformed` (`readWireAddress` in `peer/contract.ts`); no named test covers that case. |
+| 1940 (inherited): A message whose payload claims a different sending Tower is shown with the Tower the cloud authenticated | packages/codev/src/agent-farm/__tests__/peer-frame-invariant.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-receiver.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-contract.test.ts | [peer-frame-invariant] `holds for ${CASES} arbitrary statements and payloads (seed ${SEED})`<br>[peer-receiver] `refuses ${label}, storing nothing` ("a payload whose sender claims another sending Tower")<br>[peer-contract] `refuses %s as malformed` ("from naming a Tower", "from naming an owner") | A | By design a payload address that names a Tower is refused as `malformed` (`readWireAddress` in `peer/contract.ts`), so the claim never reaches a header. The named cases were added in the review phase (Gap 7). About 5% of the property test's generated addresses also carry `{ tower: 'mbp', … }`. |
 | 1940 (inherited): A relayed request is refused, nothing stored, when: from localhost with the local key and tunnel marker; MAC with another secret; payload altered after the MAC; names another receiving Tower; statement over five minutes old; same statement presented twice (incl. one first refused for want of a grant); secret of a tunnel session since reconnected | packages/codev/src/agent-farm/__tests__/peer-entry-point.e2e.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-entry-point.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-receive.e2e.test.ts | localhost: [peer-entry-point.e2e] `POST /__tower/peer on the local port, with the local key and the tunnel marker, reaches no handler`<br>another secret: [peer-entry-point] `a MAC under another secret`; [peer-entry-point.e2e] `verifies a forward down the real tunnel and hands it to the Tower's handler; replays and /t/-style requests are not verified`<br>altered: [peer-entry-point] `step 6: a body other than the one the statement was issued for`<br>other Tower: [peer-entry-point] `step 5: addressed to another Tower, with the sender and the request id`<br>stale: [peer-entry-point] `step 7: issued more than 5 minutes either side of this clock, refused as clock-skew; 5 minutes exactly passes`<br>twice: [peer-entry-point] `a statement is used up by its first presentation, even one the handler refused`; [peer-receive.e2e] `without a grant: refused no-grant, nothing stored; the statement is then used up; a new one after the grant is accepted`<br>reconnected: [peer-entry-point] `a statement from an earlier session fails after a reconnect, at step 2; a new one verifies`; [peer-entry-point.e2e] `a human turning the switch on is stated on the next reconnect; a statement from the earlier session then fails` | A, B | Same tests as 1967 "R's checks" and "The local listener". The Tower-side refusal of a `/t/`-style request is also tested here, in [peer-entry-point] `a /t/-style request: arbitrary headers, the local key and the tunnel marker, a real statement, no valid MAC`. |
 | 1940 (inherited): On the cloud side: a request through the `/t/` proxy to the relay's path is refused, and an attestation header sent by a browser does not reach the Tower | — | — | at verify-approval | Real cloud only. The Tower's own refusal is covered in the row above. |
 | 1940 (inherited): A statement made with the secret of a tunnel session that just reconnected is reported to its sender as held, not refused; the retry is accepted under the new secret; a retry of an already-accepted message finds the existing mailbox row | packages/codev/src/agent-farm/__tests__/peer-send.e2e.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-outbox.test.ts<br>packages/codev/src/agent-farm/__tests__/peer-receiver.test.ts | [peer-send.e2e] `a session that has just reconnected`<br>[peer-send.e2e] `a deploy mid-send: the tunnels drop and the secrets change; the retry is a new statement for the same message`<br>[peer-outbox] `${name}: still held here, retried with the same id and bytes` ("not-verified")<br>[peer-receiver] `answers a second arrival with the first message state, marked duplicate, and stores nothing new` | B, A | `a session that has just reconnected` asserts one row, sent over the new session, but not that the first answer was `held`. The deploy test asserts the held answer. |
@@ -255,7 +257,7 @@ Every scenario has some covering test. None is entirely untested. The 11 items b
 4. **1940 Offline then online: "raises no escalation after the escalation age."** No test waits past the escalation age with mail waiting for a peer. The behaviour holds only because the row is never in the sender's mailbox (asserted in B), and the badge never enters the attention state for such mail. Searched for `escalat` in `peer-*.test.ts`, `inbox-*.test.ts`, `spec-1313*.test.ts` and `overview.test.ts`.
 5. **1940 50 waiting: "after one is dismissed, a send is held again."** Not found. Searched for `dismiss` in `peer-sender`, `peer-outbox`, `peer-pipeline`, `peer-send.e2e`, `peer-surfaces.e2e` and `peer-inbox`. The receiver's own undelivered cap has a dismissal case (`with 50 undelivered from one peer, refuses the next with no retryAfterSec until one is delivered or dismissed`), but that is R's limit, not the sender's waiting cap.
 6. **1940 Mismatch: "or a different recipient."** Only a different body is tested. Searched for `mismatch` across `__tests__/`.
-7. **1940 A payload claiming a different sending Tower.** No named case. It is reached only by the property test's random draws, and the outcome is a `malformed` refusal rather than the message being shown under the authenticated Tower. Searched for `from: { tower`, `claims` and `authenticated` in the peer tests, and the `refuses %s as malformed` rows (which include `to naming a Tower` but not `from` naming one).
+7. **1940 A payload claiming a different sending Tower.** Closed in the review phase, after the claude review of the PR (`a2f660715`). `peer-receiver.test.ts`'s `refuses ${label}, storing nothing` has the row "a payload whose sender claims another sending Tower": the statement names `mbp`, the payload's sender names `devvm`, and the message is refused as `malformed` with nothing stored. `peer-contract.test.ts`'s `refuses %s as malformed` has "from naming a Tower" and "from naming an owner". The outcome is a refusal, not the message shown under the authenticated Tower: Spec 1967's payload rules let no payload address name a Tower. Before this, the case was reached only by the property test's random draws.
 8. **1940 Cloud unreachable at send time, then reconnect.** No test takes the stand-in down at send time and brings it back. A uses a scripted "no answer at all". Searched for `cloud-unreachable` and `relay.stop` in the e2e files and `peer-pipeline`.
 9. **1940 Renamed recipient: "mail already held for it still reaches it."** Not found. Searched for `renameTower|rename` in the peer tests. There are no rename cases in `peer-outbox` or `peer-send.e2e`.
 10. **1940 Hostile bodies: a leading `!` or `/`, and the bracketed-paste terminator.** No named case. These are covered only through ESC removal and the property test's header-first check. Searched for `u001b`, `x1b`, `201~`, `leading` and `'!` in the peer tests.
@@ -333,8 +335,10 @@ subsections.
     off (architect ruling at phase 12 close, done as its own commit in phase 13, `7dc60fd54`).
 - **Phase 13.**
   - `overview.md` in both trees needed the same edits, though the plan did not list it.
-  - The `CLAUDE.md`/`AGENTS.md` template pairs keep their two by-design differences (the title line
-    and the AGENTS.md note); every edit is identical in both.
+  - The plan asked for each `CLAUDE.md`/`AGENTS.md` template pair to be byte-identical. Each keeps
+    the two differences it already has on `main` by design (the title line and the AGENTS.md
+    note), and every edit is identical in both. The architect confirmed this reading of the
+    criterion (2026-11-27T13:35Z).
   - The full `afx status` cannot run on a harness Tower, because Tower leaves temp-directory
     workspaces out of what it reports. It moved to the verify-approval list.
   - `peer-pipeline.test.ts` has a Windows-only 120 s per-test limit, with the measured cause in its
@@ -442,7 +446,7 @@ in phase 12 round 1. Plan round 3 ended with both reviewers at REQUEST_CHANGES; 
 plan-approval gate, where the owner approved the thirteen-phase plan (decision main-58). The rebuttal files are committed in
 `codev/projects/1967-tower-to-tower-messaging-stage/`; the raw outputs are not.
 
-The review phase's own consultation runs after this document and the PR exist.
+The last round, "Review (Round 1)", is the PR-level consultation on PR #2007.
 
 ### Specify (Round 1)
 
@@ -869,6 +873,23 @@ No blocking concerns. This round has no rebuttals file; dispositions of its non-
 - **Concern**: The template-pair "empty diff" criterion was adapted (two by-design hunks kept) and needs the architect's confirmation. → **N/A**: the architect already confirmed that reading (2026-11-27T13:35Z), recorded in the thread.
 - **Concern**: Nits: redundant Windows `vi.setConfig({ testTimeout })` beside per-test `TEST_TIMEOUT`; the held line prints the full UUID where the spec shows `7c1e52aa`. → **Rebutted**: the two timeouts cover different tests (those with no timeout, and four that need one on POSIX too); the spec's id is illustrative and the walkthrough asserts the full id printed.
 
+### Review (Round 1)
+
+The PR-level consultation, on PR #2007. Responses are in `1967-review-iter1-rebuttals.md`; the code
+changes are in `a2f660715`.
+
+#### Codex — COMMENT
+- **Concern**: Phase 13's criterion that each `CLAUDE.md`/`AGENTS.md` template pair be byte-identical was adapted, not met as written. → **Addressed**: Deviations (phase 13) now says so and records the architect's confirmation of the reading (2026-11-27T13:35Z).
+- **Concern**: The review's Layer A count predates the review phase's gap 2 test. → **Addressed**: the build and porch's test command were run again on `a2f660715`; the runs section records the result.
+- **Concern**: `PeerAcceptedRow` declares `mailboxId` twice in `peer/store.ts`. → **Rebutted**: it declares it once (`store.ts:720`); the other (`store.ts:774`) is in `AcceptedInsert`, a separate interface.
+
+#### Claude — APPROVE
+- **Concern**: `outbox.ts`'s `errorKind()` logged `err.message`, where every sibling logs the class for the no-secrets-in-logs rule. → **Addressed**: it returns `err.constructor.name` (`a2f660715`).
+- **Concern**: Gap 7 (a payload claiming a different sending Tower) is one table row from closed. → **Addressed**: named cases in `peer-receiver.test.ts` (refused `malformed`, nothing stored) and `peer-contract.test.ts` (`from` naming a Tower or an owner) (`a2f660715`).
+- **Concern**: The no-break-space marker residual should be carried into stage 3, which admits other owners' Towers. → **Addressed** (documented): in Follow-up Items, and raised with the architect; the rule stays as Decision 7 states it.
+- **Concern**: `readRelayRequestHeaders` has no production caller. → **Addressed**: its doc comment says it is the cloud's step 2, never called by Tower code, kept so the contract's tests pin it (`a2f660715`).
+- **Concern**: `held-group--release` and `held-group--peer` have no CSS rules. → **N/A**, checked: `held-count-three-groups.png` shows each group distinct by its heading and count, the for-release group with its own line naming the human action; the existing `held-group--scheduled` has no rule either.
+
 ## Lessons Learned
 
 ### What Went Well
@@ -885,8 +906,8 @@ No blocking concerns. This round has no rebuttals file; dispositions of its non-
 - **A seeded property test with no new dependency.** The frame invariant holds for 600 generated
   statements and payloads (seed 1967), so a failure reproduces exactly from its printed case.
 - **The scenario-to-test table paid for itself.** Written at phase 13, it named 11 partial gaps with
-  what was searched. Two were closed before the PR: the rate refusal's exit code, and the builder
-  footer's reply round trip.
+  what was searched. Three are closed: the rate refusal's exit code and the builder footer's reply
+  round trip before the PR, and a payload claiming another sending Tower after its review.
 - **An additive migration.** v21 adds columns and tables only, so held mail is never copied or
   rebuilt on upgrade.
 
@@ -966,9 +987,13 @@ Challenges); neither was intermittent.
 
 - **The real-cloud run at verify-approval**, the list under Spec Compliance, once codev-cloud #22
   ships.
-- **The gaps still open** (Gaps 3 to 11 under Spec Compliance): each is a named part of a scenario
+- **The gaps still open** (Gaps 3 to 6 and 8 to 11 under Spec Compliance): each is a named part of a scenario
   with no direct test, though every scenario has some covering test.
 - **Issue #2006** (apps/web on Node 26 needs `NODE_OPTIONS=--no-experimental-webstorage`): seen
   here, not changed in this PR.
 - **Issue #1870** (the status route's symlink observation): already filed, not changed here.
 - **Stage 3** (another owner's Towers) is the design's next stage, not this issue.
+- **The no-break-space marker line, for stage 3.** Decision 7 leaves a body line led by U+00A0
+  and then `###` unescaped (Known residuals). In stage 2 only the owner's own Towers can send, but
+  stage 3 admits other owners'. The stage 3 design should decide whether to widen the rule (the
+  claude review of the PR; raised with the architect).
