@@ -33,7 +33,7 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T06:27:57.425Z'
+updated_at: '2026-11-27T06:36:55.515Z'
 force_advanced:
   phase: specify
   iteration: 3
@@ -59,3 +59,8 @@ context_refreshes:
   - boundary: enter:review
     at: '2026-11-27T06:27:04.394Z'
     acknowledged_at: '2026-11-27T06:27:57.425Z'
+pr_history:
+  - phase: review
+    pr_number: 2004
+    branch: builder/spir-1647
+    created_at: '2026-11-27T06:36:55.515Z'
