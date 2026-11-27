@@ -1,7 +1,7 @@
 id: '1977'
 title: tower-a-cheap-liveness-route-w
 protocol: air
-phase: pr
+phase: verified
 plan_phases: []
 current_plan_phase: null
 gates:
@@ -13,5 +13,5 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-26T22:46:46.290Z'
-updated_at: '2026-11-27T07:03:59.712Z'
+updated_at: '2026-11-27T07:04:02.130Z'
 pr_ready_for_human: false
