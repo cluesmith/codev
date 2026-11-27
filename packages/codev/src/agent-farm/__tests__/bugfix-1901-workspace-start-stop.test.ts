@@ -47,7 +47,7 @@ vi.mock('../utils/logger.js', () => ({
 const { start } = await import('../commands/start.js');
 const { stop } = await import('../commands/stop.js');
 
-const unresponsive = { state: 'unresponsive', error: 'Request timeout' };
+const unresponsive = { state: 'unresponsive', route: '/health/live', error: 'Request timeout' };
 
 beforeEach(() => {
   for (const mock of [mockProbe, mockDeactivate, mockActivate, mockClearRuntime, mockTowerStart]) mock.mockReset();
@@ -58,7 +58,7 @@ describe('afx workspace start against a busy Tower (#1901)', () => {
   it('exits with the reason and never starts (or replaces) a Tower', async () => {
     mockProbe.mockResolvedValue(unresponsive);
 
-    await expect(start({ noBrowser: true })).rejects.toThrow(/FATAL: Tower did not answer \/health \(Request timeout\)/);
+    await expect(start({ noBrowser: true })).rejects.toThrow(/FATAL: Tower did not answer \/health\/live \(Request timeout\)/);
     expect(mockTowerStart).not.toHaveBeenCalled();
     expect(mockActivate).not.toHaveBeenCalled();
   });
@@ -73,10 +73,10 @@ describe('afx workspace start against a busy Tower (#1901)', () => {
 });
 
 describe('afx workspace stop against a busy Tower (#1901)', () => {
-  it('aborts without clearing anything when /health is not answered', async () => {
+  it('aborts without clearing anything when the liveness probe is not answered', async () => {
     mockProbe.mockResolvedValue(unresponsive);
 
-    await expect(stop()).rejects.toThrow(/FATAL: Tower did not answer \/health \(Request timeout\)/);
+    await expect(stop()).rejects.toThrow(/FATAL: Tower did not answer \/health\/live \(Request timeout\)/);
     expect(mockDeactivate).not.toHaveBeenCalled();
     expect(mockClearRuntime).not.toHaveBeenCalled();
   });

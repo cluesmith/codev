@@ -3,53 +3,13 @@
  *
  * Task builders use worktree names like "task-bEPd" but their state DB IDs
  * are "builder-task-bepd" (via buildAgentName). Cleanup must normalize
- * these lookups correctly.
+ * these lookups correctly. These drive cleanup.ts's own lookups, the ones
+ * `afx cleanup --task` / `--project` call, which touch no DB or git.
  */
 
 import { describe, it, expect } from 'vitest';
 import type { Builder } from '../types.js';
-
-/**
- * Re-implement the cleanup lookup logic for testing.
- * Mirrors the task lookup in cleanup.ts without requiring DB or git side effects.
- */
-function findTaskBuilder(builders: Builder[], taskName: string): Builder | undefined {
-  // Task builder IDs are "builder-task-<lowercased shortId>" (via buildAgentName)
-  // Extract the shortId from the worktree name (e.g., "task-bEPd" → "bEPd" → "bepd")
-  const shortId = taskName.startsWith('task-') ? taskName.slice(5) : taskName;
-  const normalizedId = `builder-task-${shortId.toLowerCase()}`;
-  let builder = builders.find((b) => b.id === normalizedId);
-
-  if (!builder) {
-    // Fallback: check by worktree path containing the task name
-    builder = builders.find((b) => b.worktree.endsWith(`/${taskName}`) || b.worktree.endsWith(`/${taskName}/`));
-  }
-
-  return builder;
-}
-
-/**
- * Re-implement the --project lookup for task IDs.
- * Mirrors the project lookup in cleanup.ts.
- */
-function findByProject(builders: Builder[], projectId: string): Builder | undefined {
-  // Direct ID match
-  let builder = builders.find((b) => b.id === projectId);
-
-  if (!builder && projectId.startsWith('task-')) {
-    // Normalized task ID
-    const shortId = projectId.slice(5);
-    const normalizedId = `builder-task-${shortId.toLowerCase()}`;
-    builder = builders.find((b) => b.id === normalizedId);
-  }
-
-  if (!builder) {
-    // Name pattern match
-    builder = builders.find((b) => b.name.includes(projectId));
-  }
-
-  return builder;
-}
+import { findTaskBuilder, findProjectBuilder as findByProject } from '../commands/cleanup.js';
 
 // Helper to create a minimal Builder for testing
 function makeBuilder(overrides: Partial<Builder>): Builder {
@@ -101,6 +61,12 @@ describe('Cleanup — Task builder lookup (Bugfix #347)', () => {
       expect(found).toBe(taskBuilder);
     });
 
+    it('finds an all-digit task builder via --task 0123 (#1992)', () => {
+      // spawn names it buildAgentName('task', '0123') = builder-task-123: leading zeros stripped.
+      const digitBuilder = makeBuilder({ id: 'builder-task-123', worktree: '/workspace/.builders/task-0123' });
+      expect(findTaskBuilder([digitBuilder], '0123')).toBe(digitBuilder);
+    });
+
     it('returns undefined for non-existent task', () => {
       const found = findTaskBuilder(builders, 'task-XyZw');
       expect(found).toBeUndefined();
@@ -141,6 +107,17 @@ describe('Cleanup — Task builder lookup (Bugfix #347)', () => {
     it('returns undefined for non-existent project', () => {
       const found = findByProject(builders, 'task-ZZZZ');
       expect(found).toBeUndefined();
+    });
+
+    it('finds an all-digit task builder via --project task-0123 (#1992)', () => {
+      // spawn names it buildAgentName('task', '0123') = builder-task-123: leading zeros stripped.
+      const digitBuilder = makeBuilder({
+        id: 'builder-task-123',
+        name: 'Task: Quick fix for auth',
+        worktree: '/workspace/.builders/task-0123',
+        type: 'task',
+      });
+      expect(findByProject([digitBuilder], 'task-0123')).toBe(digitBuilder);
     });
   });
 
