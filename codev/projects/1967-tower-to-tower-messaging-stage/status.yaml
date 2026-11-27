@@ -38,11 +38,11 @@ plan_phases:
     status: complete
   - id: phase_12
     title: 'Dashboard: Peers panel and three-count indicator'
-    status: in_progress
+    status: complete
   - id: phase_13
     title: Docs in both trees, the walkthrough end to end, and Windows
-    status: pending
-current_plan_phase: phase_12
+    status: in_progress
+current_plan_phase: phase_13
 gates:
   spec-approval:
     status: approved
@@ -56,8 +56,8 @@ gates:
     status: pending
   verify-approval:
     status: pending
-iteration: 3
-build_complete: true
+iteration: 1
+build_complete: false
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -276,7 +276,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_12-iter3-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-27T12:53:41.055Z'
+updated_at: '2026-11-27T12:53:44.051Z'
 force_advanced:
   phase: phase_12
   iteration: 3
@@ -320,3 +320,5 @@ context_refreshes:
   - boundary: plan-phase:phase_12
     at: '2026-11-27T11:22:02.386Z'
     acknowledged_at: '2026-11-27T11:23:33.436Z'
+  - boundary: plan-phase:phase_13
+    at: '2026-11-27T12:53:44.050Z'
