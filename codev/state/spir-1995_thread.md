@@ -313,3 +313,9 @@ Claude's non-blocking notes:
   hot-tier change.
 - Spec test 21's dashboard render stays in verify (needs the merged build in Tower, so a
   human-approved restart).
+- PR #2005 opened. PR consultation: codex COMMENT (Windows run to finish; it passed, run
+  45953072427), claude APPROVE with non-blocking notes. Taken: the two `gh` harnesses pin
+  HOME/USERPROFILE to an empty fake home (the old quota harness fails under a HOME whose global
+  config disables overview-bundle; the pinned one passes), one script-header line, and a
+  `deepMerge` docstring pointer. Targeted Windows re-run 45954062073 for the HOME change.
+- `pr` gate pending — waiting for the human decision, relayed by the architect.
