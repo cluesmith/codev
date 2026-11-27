@@ -54,6 +54,26 @@ REQUEST_CHANGES. The fix for that round then gets no consult review before the n
   (`REQUEST_TOO_LARGE`). It was not re-reviewed by consult. The architect read its source diff,
   ran the two test files it touches (26 and 19 passed) and found nothing to change; the
   PR-level review covers it (main, 2026-11-27T09:31Z).
+- **Phase 12 (the Peers panel and the three-count indicator).** Iteration 3's codex point was
+  right: a caller could mark a folder with its own pid and `exec` Playwright, keeping the pid, and
+  the teardown would then remove that folder. The fix, `a38f0f2b0`, has the main process own its
+  run by an in-memory record, and the teardown refuse a run it holds no record of. It was not
+  re-reviewed by consult. The architect read it, checked that `removePeersDirs` removes only a
+  direct child of the temp directory with the run prefix, and found nothing to change, with no
+  consult round before phase 13 (main, 2026-11-27T12:54Z).
+
+## For the real-cloud run at verify-approval
+
+Each of these is checked here only against the stand-in or a mocked answer, and waits for the
+real Codev Cloud and real Towers:
+
+- the same Tower name on another account; the cloud's refusal of a relay request through `/t/`;
+  the cloud's per-peer limit; both Towers behind NAT (the plan's four);
+- a recipient's terminal that itself survived a Tower restart, receiving the mail held across it
+  (layer B shows the database, `peer_outbox` and `peer_accepted` surviving, and delivery resuming
+  to an agent activated again);
+- the Peers panel's no-relay state, browser-checked only with a mocked answer (the architect's
+  note at phase 12 close, 2026-11-27T12:54Z).
 
 ## Known residuals
 
