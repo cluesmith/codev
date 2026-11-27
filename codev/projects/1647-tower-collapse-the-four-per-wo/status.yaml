@@ -11,11 +11,11 @@ plan_phases:
     status: complete
   - id: phase_3
     title: Overview cache bundle path
-    status: in_progress
+    status: complete
   - id: phase_4
     title: Adopter documentation
-    status: pending
-current_plan_phase: phase_3
+    status: in_progress
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -30,10 +30,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T06:06:05.311Z'
+updated_at: '2026-11-27T06:11:05.582Z'
 force_advanced:
   phase: specify
   iteration: 3
@@ -53,3 +53,5 @@ context_refreshes:
   - boundary: plan-phase:phase_3
     at: '2026-11-27T05:42:35.004Z'
     acknowledged_at: '2026-11-27T05:43:29.940Z'
+  - boundary: plan-phase:phase_4
+    at: '2026-11-27T06:11:05.582Z'
