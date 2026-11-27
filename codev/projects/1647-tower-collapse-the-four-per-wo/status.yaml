@@ -30,10 +30,10 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: false
+build_complete: true
 history: []
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T04:42:52.555Z'
+updated_at: '2026-11-27T05:14:37.087Z'
 force_advanced:
   phase: specify
   iteration: 3
