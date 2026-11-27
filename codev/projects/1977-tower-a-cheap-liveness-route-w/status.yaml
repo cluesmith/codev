@@ -13,5 +13,10 @@ iteration: 1
 build_complete: false
 history: []
 started_at: '2026-11-26T22:46:46.290Z'
-updated_at: '2026-11-27T07:04:02.130Z'
+updated_at: '2026-11-27T07:08:35.304Z'
 pr_ready_for_human: false
+pr_history:
+  - phase: verified
+    pr_number: 2001
+    branch: builder/air-1977
+    created_at: '2026-11-27T07:08:35.303Z'
