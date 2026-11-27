@@ -436,8 +436,9 @@ function unreadableAuthResponse(text: string): string {
  *
  * The spellings compared come from what was sent, whatever becomes of the offer (taken,
  * refused as insecure, unsupported or malformed): the sent text itself, and the bytes it
- * decodes to, tolerantly, as base64 of either alphabet and, when it is hex, as hex, each
- * written as base64url, base64 with and without padding, and hex in either case.
+ * decodes to, written as base64url, base64 with and without padding, and hex in either case.
+ * It is decoded one way only: as hex when it is written in hex, otherwise tolerantly as
+ * base64 of either alphabet (hex text read as base64 is bytes nobody sent).
  */
 function authOkRepeatsSecret(authOk: Readonly<Record<string, unknown>>): boolean {
   const relay = authOk.relay;
@@ -445,29 +446,21 @@ function authOkRepeatsSecret(authOk: Readonly<Record<string, unknown>>): boolean
   // Shorter than any secret could be written: it could match ordinary text.
   if (typeof sent !== 'string' || sent.length < 16) return false;
   const forms = [sent];
-  const hexForms: string[] = [];
-  const decoded = [Buffer.from(sent, 'base64')];
-  if (/^[0-9a-fA-F]+$/.test(sent) && sent.length % 2 === 0) decoded.push(Buffer.from(sent, 'hex'));
-  for (const bytes of decoded) {
-    if (bytes.length < 16) continue;
+  let hex: string | null = null;
+  const isHex = /^[0-9a-fA-F]+$/.test(sent) && sent.length % 2 === 0;
+  const bytes = Buffer.from(sent, isHex ? 'hex' : 'base64');
+  if (bytes.length >= 16) {
     const base64 = bytes.toString('base64');
     forms.push(bytes.toString('base64url'), base64, base64.replace(/=+$/, ''));
-    hexForms.push(bytes.toString('hex'));
+    hex = bytes.toString('hex');
   }
   return ['towerId', 'slug', 'name'].some((field) => {
     const value = authOk[field];
     if (typeof value !== 'string') return false;
     if (forms.some((form) => value.includes(form))) return true;
-    const lower = value.toLowerCase();
-    return hexForms.some((hex) => lower.includes(hex));
+    return hex !== null && value.toLowerCase().includes(hex);
   });
 }
-
-/** State-change reasons that are not a failed attempt, so they leave the last failure in place. */
-const REASON_DISCONNECT_CALLED = 'disconnect() called';
-const REASON_BREAKER_RESET = 'circuit breaker reset';
-const REASON_BREAKER_HALF_OPEN = 'auth circuit breaker half-open, retrying';
-const NOT_A_FAILURE: ReadonlySet<string> = new Set([REASON_DISCONNECT_CALLED, REASON_BREAKER_RESET, REASON_BREAKER_HALF_OPEN]);
 
 /** An auth response type, shown only when it has the shape of one. */
 function shownAuthType(type: unknown): string {
@@ -731,13 +724,14 @@ export class TunnelClient {
     this.authOkListeners.push(callback);
   }
 
-  private setState(newState: TunnelState, reason?: string): void {
-    // The last failure stays until the tunnel is up again (or disconnected on purpose); a
-    // state change that is not a failed attempt leaves it in place.
+  /**
+   * `failure: false` marks a move to `disconnected` that is not a failed attempt (the breaker
+   * reset, its half-open retry): it leaves the last failure in place.
+   */
+  private setState(newState: TunnelState, reason?: string, { failure = true }: { failure?: boolean } = {}): void {
+    // The last failure stays until the tunnel is up again (or disconnected on purpose).
     if (newState === 'connected') this.lastFailure = null;
-    else if ((newState === 'disconnected' || newState === 'auth_failed') && reason && !NOT_A_FAILURE.has(reason)) {
-      this.lastFailure = reason;
-    }
+    else if ((newState === 'disconnected' || newState === 'auth_failed') && reason && failure) this.lastFailure = reason;
     if (this.state === newState) return;
     const prev = this.state;
     this.state = newState;
@@ -779,7 +773,7 @@ export class TunnelClient {
     this.clearReconnectTimer();
     this.stopHeartbeat();
     this.cleanup();
-    this.setState('disconnected', REASON_DISCONNECT_CALLED);
+    this.setState('disconnected', 'disconnect() called');
     this.lastFailure = null;
   }
 
@@ -806,7 +800,7 @@ export class TunnelClient {
       // attempt would leave a standalone caller worse off than before, so
       // reconnect here rather than relying on the caller to build a new client.
       this.clearReconnectTimer();
-      this.setState('disconnected', REASON_BREAKER_RESET);
+      this.setState('disconnected', 'circuit breaker reset', { failure: false });
       this.scheduleReconnect();
     }
   }
@@ -1190,7 +1184,7 @@ export class TunnelClient {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.destroyed || this.state !== 'auth_failed') return;
-      this.setState('disconnected', REASON_BREAKER_HALF_OPEN);
+      this.setState('disconnected', 'auth circuit breaker half-open, retrying', { failure: false });
       this.doConnect();
     }, AUTH_RETRY_INTERVAL_MS);
   }

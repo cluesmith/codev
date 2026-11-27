@@ -567,3 +567,20 @@ above is struck through. A test breaks both invariants by hand and finds neither
     half-open retry or `disconnect()`.
   - Both new tests fail with their fix removed. Layer B rerun after a rebuild: 6/6, no test
     Tower left running.
+- **Architect, 2026-11-27T03:31Z and 03:36Z:** the architect ran the review of c21f5b932
+  themselves (codex APPROVE; claude COMMENT, both HIGH) and asked for one small phase 5
+  follow-up commit, with no review round. Done:
+  1. The reason-text set (`NOT_A_FAILURE` and its three constants) is replaced by an explicit
+     `{ failure: false }` on `setState` at the breaker reset and the half-open retry. The
+     disconnect case is dropped, since `disconnect()` clears the last failure on the next
+     line. A fake-timer test shows the last failure still reads the auth rejection after the
+     half-open retry fires.
+  2. `authOkRepeatsSecret` decodes a sent secret one way only: as hex when it is written in
+     hex, otherwise as base64. A control row (a hex secret, with a field holding the hex of
+     that text read as base64) is used, not refused.
+  3. The circuit-breaker test moved into its own `describe('the last failure')`, which the
+     file's header lists.
+
+  Each new test fails with its fix removed. Not done, by ruling: the cloud's close and
+  `auth_error` reasons are not echo-checked. That is recorded as a known residual in
+  `codev/reviews/1967-tower-to-tower-messaging-stage.md`, started now for it.

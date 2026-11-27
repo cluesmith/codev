@@ -10,6 +10,8 @@
  * What is checked:
  * - the handshake: `peer` from the switch, read afresh on every reconnect; `slug` and
  *   `relay` read from `auth_ok`; the TLS rule;
+ * - the last failure (`afx tower status`): kept through a circuit-breaker reset and the
+ *   half-open retry, which are not failed attempts;
  * - steps 1 to 8 of contract section 5, each failing alone, with nothing handed on, the
  *   contract's answer, and exactly one entry event that says no more than it may;
  * - the statement-id memory, scoped to the session;
@@ -31,6 +33,7 @@ import { WebSocketServer } from 'ws';
 import { PEER_FRESHNESS_MS, PEER_STATEMENT_ID_MEMORY_MS, type PeerSwitchState } from '@cluesmith/codev-types';
 import {
   TunnelClient,
+  AUTH_RETRY_INTERVAL_MS,
   isUnderPeerEntryPath,
   takeRelay,
   type PeerEntryEvent,
@@ -308,27 +311,6 @@ describe('the handshake', () => {
     expect(second.statementIds.size).toBe(0);
   });
 
-  it('keeps the last failure through a circuit-breaker reset, which is not a failed attempt', async () => {
-    const cloud = new WebSocketServer({ host: '127.0.0.1', port: 0, path: '/tunnel' });
-    await once(cloud, 'listening');
-    cloud.on('connection', (socket) => socket.once('message', () => socket.send(JSON.stringify({ type: 'auth_error', reason: 'invalid_api_key' }))));
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const tunnel = newClient({ serverUrl: `http://127.0.0.1:${(cloud.address() as { port: number }).port}` });
-    try {
-      tunnel.connect();
-      expect(await waitFor(async () => tunnel.getState() === 'auth_failed', 10_000, 5)).toBe(true);
-      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
-      tunnel.resetCircuitBreaker();
-      expect(tunnel.getState()).toBe('disconnected');
-      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
-    } finally {
-      tunnel.disconnect();
-      for (const socket of cloud.clients) socket.terminate();
-      await new Promise<void>((resolve) => cloud.close(() => resolve()));
-    }
-    expect(tunnel.getLastFailure()).toBeNull();
-  });
-
   it('a client given no peer options states nothing, takes no relay, and verifies nothing', async () => {
     const tunnel = newClient({ peer: null });
     await connected(tunnel);
@@ -358,6 +340,56 @@ describe('the handshake', () => {
     expect(tunnel.getLastFailure()).toBe('connection error: remote-messaging switch unreadable: database is locked');
     tunnel.disconnect();
     expect(tunnel.getLastFailure()).toBeNull();
+  });
+});
+
+// ===========================================================================
+// The last failure, which `afx tower status` shows while the tunnel is down
+// ===========================================================================
+
+describe('the last failure', () => {
+  it('keeps the last failure through a circuit-breaker reset, which is not a failed attempt', async () => {
+    const cloud = new WebSocketServer({ host: '127.0.0.1', port: 0, path: '/tunnel' });
+    await once(cloud, 'listening');
+    cloud.on('connection', (socket) => socket.once('message', () => socket.send(JSON.stringify({ type: 'auth_error', reason: 'invalid_api_key' }))));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const tunnel = newClient({ serverUrl: `http://127.0.0.1:${(cloud.address() as { port: number }).port}` });
+    try {
+      tunnel.connect();
+      expect(await waitFor(async () => tunnel.getState() === 'auth_failed', 10_000, 5)).toBe(true);
+      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
+      tunnel.resetCircuitBreaker();
+      expect(tunnel.getState()).toBe('disconnected');
+      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
+    } finally {
+      tunnel.disconnect();
+      for (const socket of cloud.clients) socket.terminate();
+      await new Promise<void>((resolve) => cloud.close(() => resolve()));
+    }
+    expect(tunnel.getLastFailure()).toBeNull();
+  });
+
+  it('keeps the auth rejection through the half-open retry, which is not a failed attempt', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const tunnel = newClient();
+      // Driven through the private handlers, as tunnel-client.test.ts drives the breaker, so
+      // the 15-minute interval runs on the fake clock and no connection is made.
+      const priv = tunnel as unknown as { handleAuthError: (reason: string) => void; doConnect: () => void };
+      const doConnect = vi.spyOn(priv, 'doConnect').mockImplementation(() => {});
+      priv.handleAuthError('invalid_api_key');
+      expect(tunnel.getState()).toBe('auth_failed');
+      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
+
+      vi.advanceTimersByTime(AUTH_RETRY_INTERVAL_MS);
+      expect(doConnect).toHaveBeenCalledTimes(1);
+      expect(tunnel.getState()).toBe('disconnected');
+      expect(tunnel.getLastFailure()).toBe('auth rejected: invalid_api_key');
+      tunnel.disconnect();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -890,6 +922,9 @@ describe('the secret never reaches a log', () => {
     const port = (cloud.address() as { port: number }).port;
     const secret = randomBytes(32);
     const [b64url, b64, hex] = secretForms(secret);
+    // A hex-spelled secret is decoded as hex only: read as base64 its text is other bytes,
+    // whose spellings are no repeat of anything the cloud sent.
+    const hexReadAsBase64 = Buffer.from(hex, 'base64').toString('hex');
     const authOk = (fields: Record<string, unknown>) =>
       JSON.stringify({ type: 'auth_ok', towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: { protocols: [1], sessionSecret: b64url }, ...fields });
     try {
@@ -904,6 +939,7 @@ describe('the secret never reaches a log', () => {
         [{ slug: hex }, null],
         [{ slug: b64.replace(/=+$/, '') }, null],
         [{ towerId: `${r.towerId}${b64}` }, null],
+        [{ relay: { protocols: [1], sessionSecret: hex }, name: hexReadAsBase64 }, 'malformed'],
         // A secret the client would not take is still never kept, in any spelling:
         // an offer for a version it does not speak,
         [{ relay: unsupported, name: hex }, null],
@@ -931,7 +967,8 @@ describe('the secret never reaches a log', () => {
           tunnel.disconnect();
         });
         if (usedWithRelay !== null) {
-          expect(identities, JSON.stringify(fields)).toEqual([{ towerId: r.towerId, slug: 'devvm', name: 'devvm', relay: usedWithRelay }]);
+          const name = 'name' in fields ? fields.name : 'devvm';
+          expect(identities, JSON.stringify(fields)).toEqual([{ towerId: r.towerId, slug: 'devvm', name, relay: usedWithRelay }]);
         } else {
           expect(identities, JSON.stringify(fields)).toEqual([]);
           expect(reasons).toContain('connection error: auth_ok not used: a field repeats its session secret (not shown)');
