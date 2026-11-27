@@ -1529,3 +1529,25 @@ a line this phase wrote.
   trip (Testing), Windows SQLite commit cost before raising a limit (Testing), and the contract,
   vectors and stand-in for a two-repository feature (Architecture). Arch was routed in phase 13
   (cold section 10). The hot files are at their caps and unchanged.
+- **`porch done` and the PR.** PR #2007 opened. Porch's first `porch done --pr` recorded it in a
+  commit, then failed its own `git push` (SSH to GitHub timed out); I pushed by hand and ran
+  `porch done` again: `pr_exists` and both review headings passed.
+- **PR review, iteration 1: codex COMMENT, claude APPROVE.** Porch then requested the `pr` gate
+  (`173b28a12`). Responses: `1967-review-iter1-rebuttals.md`. Fixed in place before reporting the
+  gate (`a2f660715`, `963c50b75`):
+  - claude 1: `outbox.ts`'s `errorKind` logs an error's class, as its siblings do;
+  - claude 2: Gap 7 closed with named cases (receiver: refused `malformed`, nothing stored;
+    contract: `from` naming a Tower or an owner);
+  - claude 4: `readRelayRequestHeaders` says it is the cloud's check, never called by Tower;
+  - codex 1: the template-pair adaptation and the architect's 13:35Z confirmation are in the
+    review's Deviations;
+  - codex 2: build and Layer A run again on `a2f660715`: 11 028 passed, 116 skipped, 244 s.
+  - Rebutted codex 3: `mailboxId` is declared once in `PeerAcceptedRow`; the other is
+    `AcceptedInsert`.
+  - claude 3, the no-break-space marker residual for stage 3: in Follow-up Items, for the
+    architect.
+  - claude 5, the CSS of the held groups: checked against `held-count-three-groups.png`; distinct
+    by heading, no change.
+- `a2f660715` changes one line of production code since the green Windows run (`errorKind` in
+  `outbox.ts`, not platform code). Whether that needs a Windows run is the architect's call; it is
+  named in the PR body.
