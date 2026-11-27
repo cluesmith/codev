@@ -276,7 +276,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1967/codev/projects/1967-tower-to-tower-messaging-stage/1967-phase_12-iter3-claude.txt
 started_at: '2026-11-25T20:40:02.357Z'
-updated_at: '2026-11-27T14:10:32.318Z'
+updated_at: '2026-11-27T14:21:51.745Z'
 force_advanced:
   phase: phase_12
   iteration: 3
@@ -326,3 +326,8 @@ context_refreshes:
   - boundary: enter:review
     at: '2026-11-27T14:09:30.782Z'
     acknowledged_at: '2026-11-27T14:10:32.318Z'
+pr_history:
+  - phase: review
+    pr_number: 2007
+    branch: builder/spir-1967
+    created_at: '2026-11-27T14:21:51.744Z'
