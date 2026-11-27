@@ -5,17 +5,17 @@ phase: implement
 plan_phases:
   - id: overview_bundle_concept
     title: overview-bundle forge concept, behind a cost gate
-    status: in_progress
+    status: complete
   - id: forge_config_null_disables
     title: Forge concept disables survive config layering
-    status: pending
+    status: in_progress
   - id: bundle_cache_path
     title: OverviewCache bundle path with ride-along windows
     status: pending
   - id: projection_doctor_docs
     title: Overview spend projection, doctor line and docs
     status: pending
-current_plan_phase: overview_bundle_concept
+current_plan_phase: forge_config_null_disables
 gates:
   spec-approval:
     status: approved
@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 1
-build_complete: true
+build_complete: false
 history:
   - iteration: 1
     build_output: ''
@@ -44,8 +44,10 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-claude.txt
 started_at: '2026-11-26T01:28:07.091Z'
-updated_at: '2026-11-27T05:07:00.036Z'
+updated_at: '2026-11-27T05:14:23.887Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-26T22:13:27.161Z'
     acknowledged_at: '2026-11-26T22:14:13.555Z'
+  - boundary: plan-phase:forge_config_null_disables
+    at: '2026-11-27T05:14:23.886Z'
