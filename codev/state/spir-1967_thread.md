@@ -525,3 +525,6 @@ above is struck through. A test breaks both invariants by hand and finds neither
 
   Audited every test naming tower-tunnel; only bugfix-1871 opens a real global db through
   `auth_ok`, so it is the only file changed.
+- Windows re-dispatch (the one the ruling allows) at 94b6bd1a2, with the review fixes and the
+  bugfix-1871 close together, `suites=true`:
+  https://github.com/cluesmith/codev/actions/runs/45930869011
