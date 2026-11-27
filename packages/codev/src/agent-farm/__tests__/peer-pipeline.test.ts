@@ -52,149 +52,16 @@ const T0 = Date.UTC(2026, 10, 21, 3, 34, 0, 0);
 const CODEV = '/work/codev';
 
 /**
- * Windows only (phase 13): on the Windows runner this file ran about 90 times slower than on
- * macOS (172 s against 1.9 s), and the first 50-message backlog passed its 30 s limit. Each
- * test there gets 120 s; POSIX keeps 30 s.
+ * Windows only: on the Windows runner this file runs about 75 times slower than on macOS
+ * (145 s against 1.9 s); a 50-message backlog took about 16 s in one run there and passed its
+ * former 30 s limit in another. The time is in SQLite commits: each message's transactions
+ * at S and R wait on a sync to disk, and these test databases use SQLite's default rollback
+ * journal (production's global.db is WAL). Measured per message on the runner: about 120 ms
+ * in R's writes, 70 ms in S's outbox writes, 45 ms in the send, 5 ms in the stand-in's
+ * loopback HTTP (phase 13). Each test there gets 120 s; POSIX keeps 30 s.
  */
 const TEST_TIMEOUT = process.platform === 'win32' ? 120_000 : 30_000;
 if (process.platform === 'win32') vi.setConfig({ testTimeout: TEST_TIMEOUT });
-
-// ===========================================================================
-// TEMPORARY (phase 13, the architect's ask): where each message's wall time goes on the
-// Windows runner, in S's relay calls (HTTP, including C's forward and R's receiver), in R's
-// receiver, and in each Tower's SQLite. Test-side only: it wraps the two test databases, the
-// cloud client's fetch and the receiver this file hands the tunnel. Printed with the prefix
-// `[pipeline-timing]` and removed once the Windows run has answered it.
-// ===========================================================================
-
-type TimedCat = 'http' | 'receiver' | 's-write' | 's-read' | 'r-write' | 'r-read';
-
-interface TimedSeg {
-  cat: TimedCat;
-  start: number;
-  ms: number;
-  /** For `http`: the method and path, and the answer's status (0 when it threw). */
-  what?: string;
-  status?: number;
-}
-
-class Timing {
-  readonly segs: TimedSeg[] = [];
-  readonly sends: Array<{ i: number; start: number; ms: number }> = [];
-  drainStart = Infinity;
-  /** The pipeline's start (the stand-in, both Towers' databases, R's tunnel up), in ms. */
-  setupMs = 0;
-  private readonly created = performance.now();
-  private depth = { s: 0, r: 0 };
-
-  constructor(readonly label: string) {}
-
-  time<T>(cat: TimedCat, fn: () => T): T {
-    const start = performance.now();
-    try {
-      return fn();
-    } finally {
-      this.segs.push({ cat, start, ms: performance.now() - start });
-    }
-  }
-
-  async timeAsync<T>(cat: TimedCat, fn: () => Promise<T>, what?: string): Promise<T> {
-    const start = performance.now();
-    const seg: TimedSeg = { cat, start, ms: 0, what };
-    try {
-      const result = await fn();
-      if (result instanceof Response) seg.status = result.status;
-      return result;
-    } catch (err) {
-      seg.status = 0;
-      throw err;
-    } finally {
-      seg.ms = performance.now() - start;
-      this.segs.push(seg);
-    }
-  }
-
-  /** Time every statement and transaction on a test database; a transaction counts as a write. */
-  wrapDb(db: Database.Database, side: 's' | 'r'): void {
-    const prepare = db.prepare.bind(db);
-    const write = `${side}-write` as TimedCat;
-    const read = `${side}-read` as TimedCat;
-    db.prepare = ((sql: string) => {
-      const stmt = prepare(sql);
-      for (const [method, cat] of [['run', write], ['get', read], ['all', read]] as const) {
-        const original = (stmt[method] as (...args: unknown[]) => unknown).bind(stmt);
-        (stmt as unknown as Record<string, unknown>)[method] = (...args: unknown[]) =>
-          this.depth[side] > 0 ? original(...args) : this.time(cat, () => original(...args));
-      }
-      return stmt;
-    }) as typeof db.prepare;
-    const transaction = db.transaction.bind(db);
-    db.transaction = ((fn: (...args: unknown[]) => unknown) => {
-      const txn = transaction(fn);
-      const timed = (...args: unknown[]) => {
-        if (this.depth[side] > 0) return txn(...args);
-        this.depth[side]++;
-        try {
-          return this.time(write, () => txn(...args));
-        } finally {
-          this.depth[side]--;
-        }
-      };
-      return Object.assign(timed, { default: txn.default, deferred: txn.deferred, immediate: txn.immediate, exclusive: txn.exclusive });
-    }) as unknown as typeof db.transaction;
-  }
-
-  private sum(from: number, to: number, cats: TimedCat[]): number {
-    return this.segs.filter((g) => cats.includes(g.cat) && g.start >= from && g.start < to).reduce((n, g) => n + g.ms, 0);
-  }
-
-  report(): void {
-    const f = (ms: number) => ms.toFixed(1);
-    const out = (line: string) => console.log(`[pipeline-timing] ${this.label}: ${line}`);
-    for (const send of this.sends) {
-      const end = send.start + send.ms;
-      out(
-        `send ${send.i}: ${f(send.ms)} ms; http ${f(this.sum(send.start, end, ['http']))}, ` +
-          `S sqlite write ${f(this.sum(send.start, end, ['s-write']))} read ${f(this.sum(send.start, end, ['s-read']))}`,
-      );
-    }
-    const relays = this.segs.filter((g) => g.cat === 'http' && g.what === 'POST /api/peer/relay' && g.start >= this.drainStart);
-    const lastEnd = Math.max(...this.segs.map((g) => g.start + g.ms));
-    const totals = { window: 0, http: 0, receiver: 0, rWrite: 0, rRead: 0, sWrite: 0, sRead: 0 };
-    relays.forEach((call, n) => {
-      const to = relays[n + 1]?.start ?? lastEnd;
-      const inCall = call.start + call.ms;
-      const row = {
-        window: to - call.start,
-        http: call.ms,
-        receiver: this.sum(call.start, inCall, ['receiver']),
-        rWrite: this.sum(call.start, inCall, ['r-write']),
-        rRead: this.sum(call.start, inCall, ['r-read']),
-        sWrite: this.sum(call.start, to, ['s-write']),
-        sRead: this.sum(call.start, to, ['s-read']),
-      };
-      for (const key of Object.keys(totals) as Array<keyof typeof totals>) totals[key] += row[key];
-      out(
-        `relay ${n} (${call.status}): window ${f(row.window)} ms; http ${f(row.http)} ` +
-          `(R receiver ${f(row.receiver)}, R sqlite write ${f(row.rWrite)} read ${f(row.rRead)}); ` +
-          `S sqlite write ${f(row.sWrite)} read ${f(row.sRead)}`,
-      );
-    });
-    const other = this.segs.filter((g) => g.cat === 'http' && !(g.what === 'POST /api/peer/relay' && g.start >= this.drainStart));
-    const sendTotal = this.sends.reduce((n, x) => n + x.ms, 0);
-    out(`test so far ${f(performance.now() - this.created)} ms, of which set-up ${f(this.setupMs)} ms`);
-    out(
-      `summary: ${this.sends.length} sends ${f(sendTotal)} ms (mean ${f(sendTotal / Math.max(1, this.sends.length))}); ` +
-        `${relays.length} drain relay calls: window ${f(totals.window)}, http ${f(totals.http)}, R receiver ${f(totals.receiver)}, ` +
-        `R sqlite write ${f(totals.rWrite)} read ${f(totals.rRead)}, S sqlite write ${f(totals.sWrite)} read ${f(totals.sRead)} ms; ` +
-        `per relay call mean http ${f(totals.http / Math.max(1, relays.length))} ms, max ${f(Math.max(0, ...relays.map((r) => r.ms)))} ms; ` +
-        `other http calls ${other.length}, ${f(other.reduce((n, g) => n + g.ms, 0))} ms (${[...new Set(other.map((g) => g.what))].join(', ')})`,
-    );
-  }
-}
-
-let timing: Timing | null = null;
-// =========================================================================== (end TEMPORARY)
 
 /** The two Towers and the cloud between them. */
 class Pipeline {
@@ -223,7 +90,7 @@ class Pipeline {
   private local!: http.Server;
   readonly localRequests: string[] = [];
 
-  constructor(limits: Partial<StandInLimits> = {}, readonly timing: Timing | null = null) {
+  constructor(limits: Partial<StandInLimits> = {}) {
     this.relay = new StandInRelay({ now: () => this.clock.now, limits });
   }
 
@@ -247,8 +114,6 @@ class Pipeline {
 
   private startS(): void {
     this.dbS = this.tempDb('s');
-    this.timing?.wrapDb(this.dbS, 's');
-    const timing = this.timing;
     this.registration = { serverUrl: this.relay.url, towerId: this.s.towerId, towerName: 'mbp', deregistered: false };
     this.apiKey = this.s.apiKey;
     const log = (level: string, message: string) => this.logs.push(`S ${level} ${message}`);
@@ -257,9 +122,6 @@ class Pipeline {
       relayStated: () => this.list.relayStated(),
       now: () => this.clock.now,
       timers: this.clock.timers,
-      ...(timing
-        ? { fetch: (url: string, init: RequestInit) => timing.timeAsync('http', () => fetch(url, init), `${init.method ?? 'GET'} ${new URL(url).pathname}`) }
-        : {}),
       log,
     });
     this.list = new PeerList({
@@ -300,7 +162,6 @@ class Pipeline {
 
   private async startR(): Promise<void> {
     this.dbR = this.tempDb('r');
-    this.timing?.wrapDb(this.dbR, 'r');
     store.putGrant(this.dbR, { peerTowerId: this.s.towerId, scope: 'front-door', workspacePath: CODEV, architect: null, mode: 'deliver' }, T0);
     const world: GrantWorld = { registered: [{ workspacePath: CODEV, explicitName: null }], running: [CODEV], architectsOf: () => ['main'] };
     const receiver = createReceiver({
@@ -333,12 +194,7 @@ class Pipeline {
       apiKey: this.r.apiKey,
       towerId: this.r.towerId,
       localPort: (this.local.address() as AddressInfo).port,
-      peer: {
-        remoteMessaging: () => 'on',
-        onVerifiedRequest: this.timing ? (request) => this.timing!.timeAsync('receiver', async () => receiver(request)) : receiver,
-        onEntryEvent: () => {},
-        now: () => this.clock.now,
-      },
+      peer: { remoteMessaging: () => 'on', onVerifiedRequest: receiver, onEntryEvent: () => {}, now: () => this.clock.now },
     });
     this.tunnel.connect();
     const up = await waitFor(async () => this.tunnel.getState() === 'connected' && this.relay.session(this.r.towerId) !== null, 10_000, 10);
@@ -405,16 +261,12 @@ class Pipeline {
 let p: Pipeline | null = null;
 
 async function pipeline(limits: Partial<StandInLimits> = {}): Promise<Pipeline> {
-  p = new Pipeline(limits, timing);
-  const setupStart = performance.now();
+  p = new Pipeline(limits);
   await p.start();
-  if (timing) timing.setupMs = performance.now() - setupStart;
   return p;
 }
 
 afterEach(async () => {
-  timing?.report();
-  timing = null;
   await p?.stop();
   p = null;
 });
@@ -424,15 +276,12 @@ async function backlog(t: Pipeline, n: number): Promise<string[]> {
   t.relay.setOffline(t.r.towerId, true);
   const ids: string[] = [];
   for (let i = 0; i < n; i++) {
-    const sendStart = performance.now();
     const result = await t.send(`message ${i}`);
-    t.timing?.sends.push({ i, start: sendStart, ms: performance.now() - sendStart });
     expect(result).toMatchObject({ outcome: 'held', where: 'this-tower', reason: 'tower-offline', ahead: i });
     ids.push((result as { messageId: string }).messageId);
   }
   expect(t.relayCalls()).toHaveLength(1);
   t.relay.setOffline(t.r.towerId, false);
-  if (t.timing) t.timing.drainStart = performance.now();
   return ids;
 }
 
@@ -442,7 +291,6 @@ async function backlog(t: Pipeline, n: number): Promise<string[]> {
 
 describe('a backlog of held mail', () => {
   it("drains in order against C's per-pair limit, none refused; this Tower's own cap holds it at 50", async () => {
-    timing = new Timing("C's per-pair limit");
     const t = await pipeline();
     const ids = await backlog(t, 50);
     expect(await t.send('one too many')).toMatchObject({ outcome: 'refused', by: 'this-tower', reason: 'rate-limited' });
@@ -465,7 +313,6 @@ describe('a backlog of held mail', () => {
   }, TEST_TIMEOUT);
 
   it("drains in order against R's own limit with C's raised, none refused", async () => {
-    timing = new Timing("R's own limit");
     const t = await pipeline({ messagesPerPairPerMinute: 1000, messagesPerTowerPerMinute: 1000 });
     const ids = await backlog(t, 50);
     await t.advance(5 * SECOND);
