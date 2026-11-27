@@ -109,6 +109,7 @@ import {
   listHeld as listHeldMailbox,
   dismiss as dismissMailbox,
   reportedReason as reportedMailboxReason,
+  reportedDetail as reportedMailboxDetail,
   type EnqueueInput,
 } from '../db/mailbox.js';
 import type { MailboxReason } from '../db/types.js';
@@ -3022,7 +3023,8 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
     reason: reportedMailboxReason(r),
     // Issue #1482: the gate verdict behind a `busy` hold, so `afx inbox` and the dashboard
     // popover can distinguish an occupied composer from one the classifier could not read.
-    detail: r.detail,
+    // Spec 1967: none while held for release, which is never paired with a gate detail.
+    detail: reportedMailboxDetail(r),
     escalated: r.escalated === 1,
     createdAt: r.created_at,
     // Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
@@ -3099,7 +3101,7 @@ function handleInboxShow(
     fromWorkspace: row.from_workspace,
     status: row.status,
     reason: reportedMailboxReason(row),  // Spec 1967: `held-for-release` while held for release
-    detail: row.detail,  // Issue #1482: the gate verdict behind a `busy` hold
+    detail: reportedMailboxDetail(row),  // Issue #1482: the gate verdict behind a `busy` hold; none while held for release
     escalated: row.escalated === 1,
     body: row.body,
     createdAt: row.created_at,

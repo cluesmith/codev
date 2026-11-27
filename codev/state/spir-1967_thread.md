@@ -324,3 +324,28 @@
   v20 runner on a v1 database and dumping `sqlite_master`.
 - Existing tests updated for the new version: `send-architect-identity.test.ts` (version pin
   20 to 21) and `spec-1313-migration.test.ts` (the v15 column list now includes v21's columns).
+
+### Phase 3, review round 1 (codex REQUEST_CHANGES, claude APPROVE)
+
+All three codex points were right; fixed:
+- **Held for release reports no gate detail.** `reportedDetail` sits next to `reportedReason`,
+  and the inbox list and show routes use both, so a row that was `busy:user-text` reads
+  `held-for-release` alone while held and `busy:user-text` again once released (route-level
+  test in `inbox-routes.test.ts`).
+- **An answer that resolves an outbox row replaces the last pair, a null reason included**
+  (`resolveOutbox` no longer COALESCEs). A resolution no answer made (dismissal, expiry) keeps
+  the last answer's pair, and may not carry a reason of its own.
+- **Back to the plan's representation:** mail held for release is stored `reason = NULL,
+  release_hold = 1` (`enqueueRemote` refuses a reason with `releaseHold`), and
+  `RemoteEnqueueInput.reason` is nullable again. What a duplicate is told for a held row with no
+  gate verdict yet (accepted and not attempted, or released and not attempted) is `busy`, the
+  contract's answer for an accepted message whose write has not started; the mailbox keeps the
+  NULL. This replaces my earlier "phase 6 passes busy at insert" note: **phase 6 inserts with
+  `reason: null`** and the first gate attempt sets the reason.
+From claude's notes: `checkedState` now refuses `held` without a reason on write and on read
+(so a bad row fails where it is written); `payloadSize` has its own non-negative-integer check.
+Handoffs kept for later: **phase 7** normalises the cloud listing before `writeListing` (the
+store throws on an unknown switch state or a non-integer protocol, so raw cloud JSON would fail
+a whole refresh); **phase 12** re-checks that the dashboard badge (which excludes held-for-release
+rows) and its popover list (which includes them) agree once phases 11 and 12 land.
+Layer A wall time is in the phase 3 commit: 45 tests, 1.36 to 1.50 s over three runs; now 51.

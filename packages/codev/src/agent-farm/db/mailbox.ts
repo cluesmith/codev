@@ -158,6 +158,19 @@ export function reportedReason(
 }
 
 /**
+ * The gate detail this module reports beside {@link reportedReason}: none while a row is held
+ * for release, since `held-for-release` is a human's hold and never paired with a gate detail;
+ * else the row's own `detail`. The row keeps its detail underneath, reported again once it is
+ * released, as its reason is.
+ */
+export function reportedDetail(
+  row: Pick<DbMailbox, 'status' | 'detail' | 'release_hold'>
+): MailboxGateDetail | null {
+  if (row.status === 'held' && row.release_hold === 1) return null;
+  return row.detail;
+}
+
+/**
  * What a duplicate of a remote row's message is told, derived from the row alone.
  * `superseded` cannot happen to a remote row (it never has a `supersede_key`, and only rows
  * with one are superseded), so meeting it is an invariant broken and throws.
@@ -167,7 +180,11 @@ function acceptedStateOf(
 ): { state: PeerAcceptedState; reason: PeerHeldReason | null } {
   switch (row.status) {
     case 'held':
-      return { state: 'held', reason: reportedReason(row) };
+      // A held row with no gate verdict yet (accepted and not yet attempted, or released and
+      // not yet attempted) keeps reason NULL in the mailbox, which is the truth there. What a
+      // duplicate is told is `busy`: the contract's answer for an accepted message whose write
+      // has not started (section 5, "R answers held with reason busy").
+      return { state: 'held', reason: reportedReason(row) ?? NOT_YET_ATTEMPTED };
     case 'delivered':
       return { state: 'delivered', reason: null };
     case 'dismissed':
@@ -176,6 +193,9 @@ function acceptedStateOf(
       throw new Error(`mailbox: remote row ${row.id} is superseded, which no remote row can be`);
   }
 }
+
+/** What a duplicate of a remote row with no gate verdict yet is told (see acceptedStateOf). */
+const NOT_YET_ATTEMPTED: PeerHeldReason = 'busy';
 
 /** The post-image a mirrored write returns for each row it changed. */
 const RETURNING_CHANGED = 'RETURNING id, status, reason, release_hold, remote_tower_id';
@@ -245,11 +265,11 @@ export interface RemoteEnqueueInput {
   formattedMessage: string;
   terminalId?: string | null;
   /**
-   * The row's own why-held reason at insert, which a duplicate is told until the first gate
-   * attempt replaces it. Required: a `held` answer always carries a reason, and no later
-   * writer clears it while the row is held.
+   * The row's own why-held reason at insert: null until a gate attempt sets one. Mail held for
+   * release has had no attempt, so it is always null there (stored as `reason = NULL`,
+   * `release_hold = 1`).
    */
-  reason: MailboxReason;
+  reason: MailboxReason | null;
   /** Admitted by a hold-for-release grant: stored with `release_hold = 1`, never drained. */
   releaseHold: boolean;
   remote: {
@@ -285,6 +305,9 @@ export function enqueueRemote(
   now: number = Date.now()
 ): RemoteEnqueueResult {
   const sender = checkRemoteSender(input.remote.sender);
+  if (input.releaseHold && input.reason !== null) {
+    throw new Error('mailbox: mail held for release has had no gate attempt, so it has no reason');
+  }
   if (typeof input.remote.messageId !== 'string' || input.remote.messageId.length === 0) {
     throw new Error('mailbox: a remote row needs its message id');
   }

@@ -87,9 +87,13 @@ function reasonToken(value: unknown, what: string): string | null {
   throw new Error(`peer store: unrecognised ${what} ${JSON.stringify(value)}`);
 }
 
-function epochMs(value: unknown, what: string): number {
+function nonNegativeInt(value: unknown, what: string): number {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
-  throw new Error(`peer store: ${what} must be a non-negative integer epoch-ms value, got ${JSON.stringify(value)}`);
+  throw new Error(`peer store: ${what} must be a non-negative integer, got ${JSON.stringify(value)}`);
+}
+
+function epochMs(value: unknown, what: string): number {
+  return nonNegativeInt(value, `${what} (epoch ms)`);
 }
 
 function nonEmpty(value: unknown, what: string): string {
@@ -532,9 +536,10 @@ export function recordOutboxAttempt(
 /**
  * End a held row: `accepted` (the peer took it, delivered or held there), `refused`,
  * `dismissed` (by a human, before it was sent) or `expired` (its lifetime ran out).
- * `outcome` is the answer that ended it, `null` when no answer did (a dismissal, an expiry).
- * Only a held row can be resolved, so a resolved row never changes again. Returns true if it
- * was resolved.
+ * `outcome` and `reason` are the answer that ended it, and replace the last answer's pair
+ * (a `null` reason included). When no answer ended it (a dismissal, an expiry), both are
+ * `null` and the last answer's pair is kept. Only a held row can be resolved, so a resolved
+ * row never changes again. Returns true if it was resolved.
  */
 export function resolveOutbox(
   db: Database.Database,
@@ -544,18 +549,25 @@ export function resolveOutbox(
 ): boolean {
   const state = oneOf(resolution.state, PEER_OUTBOX_STATES, 'outbox state');
   if (state === 'held') throw new Error("peer store: resolveOutbox ends a row; 'held' is not a resolution");
+  if (resolution.outcome === null && resolution.reason !== null) {
+    throw new Error('peer store: a resolution with no answer has no reason either');
+  }
+  const answered = resolution.outcome === null ? 0 : 1;
   const at = epochMs(now, 'now');
   const info = db
     .prepare(
       `UPDATE peer_outbox SET state = ?, attempts = attempts + ?,
-              last_outcome = COALESCE(?, last_outcome), last_reason = COALESCE(?, last_reason),
+              last_outcome = CASE WHEN ? = 1 THEN ? ELSE last_outcome END,
+              last_reason = CASE WHEN ? = 1 THEN ? ELSE last_reason END,
               next_attempt_at = NULL, updated_at = ?, resolved_at = ?
        WHERE message_id = ? AND state = 'held'`,
     )
     .run(
       state,
       resolution.attempted ? 1 : 0,
+      answered,
       resolution.outcome === null ? null : oneOf(resolution.outcome, OUTCOMES, 'outbox outcome'),
+      answered,
       reasonToken(resolution.reason, 'outbox reason'),
       at,
       at,
@@ -595,24 +607,30 @@ interface DbPeerAccepted {
 }
 
 function toAccepted(row: DbPeerAccepted): PeerAcceptedRow {
+  const { state, reason } = checkedState(row.state, row.reason);
   return {
     peerTowerId: row.peer_tower_id,
     messageId: row.message_id,
     payloadSha256: row.payload_sha256,
     mailboxId: row.mailbox_id,
-    state: oneOf(row.state, PEER_ACCEPTED_STATES, 'accepted state'),
-    reason: row.reason === null ? null : oneOf(row.reason, HELD_REASONS, 'accepted reason'),
+    state,
+    reason,
     expiresAt: row.expires_at,
     acceptedAt: row.accepted_at,
     updatedAt: row.updated_at,
   };
 }
 
-/** A state and reason as a duplicate is told them: a reason only with `held`. */
-function checkedState(state: PeerAcceptedState, reason: PeerHeldReason | null): { state: PeerAcceptedState; reason: PeerHeldReason | null } {
+/**
+ * A state and reason as a duplicate is told them: a reason with `held` and only with `held`,
+ * since a `held` answer always carries one. Checked on every write and every read, so a row
+ * that breaks it fails where it is written, not when a duplicate arrives.
+ */
+function checkedState(state: unknown, reason: unknown): { state: PeerAcceptedState; reason: PeerHeldReason | null } {
   const s = oneOf(state, PEER_ACCEPTED_STATES, 'accepted state');
   const r = reason === null ? null : oneOf(reason, HELD_REASONS, 'accepted reason');
   if (s !== 'held' && r !== null) throw new Error(`peer store: an accepted message that is ${s} has no reason`);
+  if (s === 'held' && r === null) throw new Error('peer store: an accepted message that is held needs its reason');
   return { state: s, reason: r };
 }
 
@@ -676,9 +694,8 @@ export function duplicateAnswer(row: PeerAcceptedRow): ReceiverAnswer {
     case 'delivered':
       return { outcome: 'delivered', duplicate: true };
     case 'held':
-      if (row.reason === null) {
-        throw new Error(`peer store: accepted message ${row.messageId} is held with no reason to answer`);
-      }
+      // checkedState refuses a held row without a reason on write and on read.
+      if (row.reason === null) throw new Error(`peer store: accepted message ${row.messageId} is held with no reason`);
       return { outcome: 'held', reason: row.reason, duplicate: true };
     case 'dismissed':
       return { outcome: 'refused', reason: 'dismissed', duplicate: true };
@@ -820,7 +837,7 @@ export function insertRecord(db: Database.Database, record: PeerRecordInput): nu
       record.messageId,
       record.fromAddress,
       record.toAddress,
-      record.payloadSize === null ? null : epochMs(record.payloadSize, 'payload size'),
+      record.payloadSize === null ? null : nonNegativeInt(record.payloadSize, 'payload size'),
       oneOf(record.outcome, OUTCOMES, 'record outcome'),
       reasonToken(record.reason, 'record reason'),
     );

@@ -28,6 +28,7 @@ import { GLOBAL_CURRENT_VERSION, runGlobalMigrations } from '../db/migrations.js
 import * as mailbox from '../db/mailbox.js';
 import * as store from '../peer/store.js';
 import type { DbMailbox, MailboxGateDetail, MailboxReason } from '../db/types.js';
+import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 
 const DAY = 24 * 60 * 60 * 1000;
 /** The injected clock: every time in this file is relative to it. */
@@ -423,7 +424,9 @@ function remoteInput(overrides: Partial<mailbox.RemoteEnqueueInput> & { messageI
     toAgent: overrides.toAgent ?? 'main',
     body,
     formattedMessage: `[remote, from ana-s-mbp] ${body}`,
-    reason: 'busy',
+    // Mail held for release has had no gate attempt, so it has no reason (the plan's
+    // representation); other rows here start as if their first attempt had held them busy.
+    reason: overrides.releaseHold ? null : 'busy',
     releaseHold: false,
     remote: {
       sender: { towerId: PEER, towerSlug: 'ana-s-mbp', address: { workspace: 'codev', kind: 'architect', name: 'local' } },
@@ -478,7 +481,23 @@ describe('a row held for release', () => {
     expect(mailbox.release(db, forRelease.id, T0)).toBe(true);
     expect(mailbox.findHeldForAgent(db, WS, 'main', T0)).toHaveLength(3);
     expect(mailbox.heldSummaryForWorkspace(db, WS, T0)).toMatchObject({ total: 3 });
-    expect(mailbox.reportedReason(mailbox.getById(db, forRelease.id)!)).toBe('busy');
+    expect(mailbox.reportedReason(mailbox.getById(db, forRelease.id)!)).toBeNull();
+  });
+
+  it('reports no gate detail while held for release, and its own again once released', () => {
+    const db = freshDb();
+    const row = addRemote(db);
+    mailbox.setHeldVerdict(db, row.id, 'busy', 'user-text', T0 + 1);
+    mailbox.holdForRelease(db, row.id, T0 + 2);
+    const held = mailbox.getById(db, row.id)!;
+    expect(held).toMatchObject({ reason: 'busy', detail: 'user-text', release_hold: 1 });
+    expect([mailbox.reportedReason(held), mailbox.reportedDetail(held)]).toEqual(['held-for-release', null]);
+    expect(formatVerdict(mailbox.reportedReason(held), mailbox.reportedDetail(held))).toBe('held-for-release');
+
+    mailbox.release(db, row.id, T0 + 3);
+    const released = mailbox.getById(db, row.id)!;
+    expect([mailbox.reportedReason(released), mailbox.reportedDetail(released)]).toEqual(['busy', 'user-text']);
+    expect(formatVerdict(mailbox.reportedReason(released), mailbox.reportedDetail(released))).toBe('busy:user-text');
   });
 });
 
@@ -513,7 +532,22 @@ describe('mirror: enqueueRemote', () => {
       updatedAt: T0,
     });
     const forRelease = addRemote(db, { releaseHold: true });
+    expect(forRelease).toMatchObject({ status: 'held', reason: null, release_hold: 1 });
     expect(acceptedOf(db, forRelease)).toMatchObject({ state: 'held', reason: 'held-for-release' });
+  });
+
+  it('a row with no gate verdict yet is NULL in the mailbox and busy to a duplicate', () => {
+    const db = freshDb();
+    const row = addRemote(db, { reason: null });
+    expect(row.reason).toBeNull();
+    expect(acceptedOf(db, row)).toMatchObject({ state: 'held', reason: 'busy' });
+    expect(store.duplicateAnswer(acceptedOf(db, row))).toEqual({ outcome: 'held', reason: 'busy', duplicate: true });
+  });
+
+  it('refuses mail held for release that claims a gate reason', () => {
+    const db = freshDb();
+    expect(() => mailbox.enqueueRemote(db, { ...remoteInput({ releaseHold: true }), reason: 'busy' }, T0)).toThrow(/no gate attempt/);
+    expect(acceptedTable(db)).toEqual([]);
   });
 
   it('writes nothing for a second arrival of the same message, and returns the first one\'s row', () => {
@@ -646,6 +680,14 @@ describe('mirror: release', () => {
     expect(mailboxRow(db, row.id)).toMatchObject({ status: 'held', release_hold: 0, reason: 'no-live-pty' });
     expect(acceptedOf(db, row)).toMatchObject({ state: 'held', reason: 'no-live-pty', updatedAt: T0 + 6 });
     expect(mailbox.findHeldForAgent(db, WS, 'main', T0 + 6).map((r) => r.id)).toEqual([row.id]);
+  });
+
+  it('a row released before any gate attempt keeps no reason, and a duplicate is told busy', () => {
+    const db = freshDb();
+    const row = addRemote(db, { releaseHold: true });
+    expect(mailbox.release(db, row.id, T0 + 7)).toBe(true);
+    expect(mailboxRow(db, row.id)).toMatchObject({ status: 'held', release_hold: 0, reason: null });
+    expect(acceptedOf(db, row)).toMatchObject({ state: 'held', reason: 'busy', updatedAt: T0 + 7 });
   });
 });
 
@@ -899,11 +941,18 @@ describe('peer store: the outbox', () => {
     expect(store.recordOutboxAttempt(db, a.messageId, { outcome: 'unavailable', reason: 'tower-offline', nextAttemptAt: T0 + 5000 }, T0 + 1)).toBe(true);
     expect(store.getOutbox(db, a.messageId)).toMatchObject({ attempts: 1, lastOutcome: 'unavailable', lastReason: 'tower-offline', nextAttemptAt: T0 + 5000 });
     expect(store.resolveOutbox(db, a.messageId, { state: 'accepted', outcome: 'delivered', reason: null, attempted: true }, T0 + 6000)).toBe(true);
-    expect(store.getOutbox(db, a.messageId)).toMatchObject({ state: 'accepted', attempts: 2, lastOutcome: 'delivered', lastReason: 'tower-offline', resolvedAt: T0 + 6000, nextAttemptAt: null });
+    // The answer that resolved it replaces the last answer's pair, its null reason included.
+    expect(store.getOutbox(db, a.messageId)).toMatchObject({ state: 'accepted', attempts: 2, lastOutcome: 'delivered', lastReason: null, resolvedAt: T0 + 6000, nextAttemptAt: null });
     expect(store.resolveOutbox(db, a.messageId, { state: 'refused', outcome: 'refused', reason: 'no-grant', attempted: true }, T0 + 7000)).toBe(false);
     expect(store.recordOutboxAttempt(db, a.messageId, { outcome: 'held', reason: 'busy', nextAttemptAt: T0 }, T0 + 7000)).toBe(false);
     expect(store.listHeldOutbox(db, PEER).map((r) => r.messageId)).toEqual([c.messageId]);
     expect(() => store.recordOutboxAttempt(db, c.messageId, { outcome: 'held', reason: 'Not A Token', nextAttemptAt: T0 }, T0)).toThrow(/reason/);
+
+    // A resolution no answer made (a dismissal, an expiry) keeps the last answer's pair.
+    store.recordOutboxAttempt(db, c.messageId, { outcome: 'unavailable', reason: 'no-answer', nextAttemptAt: T0 + 5000 }, T0 + 1);
+    expect(() => store.resolveOutbox(db, c.messageId, { state: 'dismissed', outcome: null, reason: 'no-answer', attempted: false }, T0 + 2)).toThrow(/no answer/);
+    expect(store.resolveOutbox(db, c.messageId, { state: 'dismissed', outcome: null, reason: null, attempted: false }, T0 + 2)).toBe(true);
+    expect(store.getOutbox(db, c.messageId)).toMatchObject({ state: 'dismissed', attempts: 1, lastOutcome: 'unavailable', lastReason: 'no-answer' });
   });
 });
 
@@ -928,6 +977,30 @@ describe('peer store: the record', () => {
       outcome: 'held', reason: 'busy',
     });
     expect(store.listRecords(db, { peerTowerId: PEER, limit: 1 })).toEqual([expect.objectContaining({ id, count: 1, aggregate: false })]);
+  });
+});
+
+describe('peer store: accepted-once rows', () => {
+  it('refuses a held state without a reason, and a reason without held, on write and on read', () => {
+    const db = freshDb();
+    const row = addRemote(db);
+    const base = { peerTowerId: PEER, messageId: randomUUID(), payloadSha256: 'a'.repeat(64), mailboxId: 'mbx-1', sentAt: T0 };
+    expect(() => store.insertAccepted(db, { ...base, state: 'held', reason: null }, T0)).toThrow(/needs its reason/);
+    expect(() => store.insertAccepted(db, { ...base, state: 'delivered', reason: 'busy' }, T0)).toThrow(/has no reason/);
+    expect(() => store.mirrorAcceptedState(db, [row.id], 'held', null, T0)).toThrow(/needs its reason/);
+    expect(acceptedOf(db, row)).toMatchObject({ state: 'held', reason: 'busy' });
+    db.prepare("UPDATE peer_accepted SET reason = NULL WHERE mailbox_id = ?").run(row.id);
+    expect(() => store.getAccepted(db, PEER, row.remote_message_id!)).toThrow(/needs its reason/);
+  });
+
+  it('names a bad payload size as a size', () => {
+    const db = freshDb();
+    expect(() =>
+      store.insertRecord(db, {
+        direction: 'outbound', at: T0, kind: 'message', peerTowerId: PEER, peerSlug: null, tunnelSession: null, messageId: null,
+        fromAddress: null, toAddress: null, payloadSize: -1, outcome: 'refused', reason: 'too-large',
+      }),
+    ).toThrow('peer store: payload size must be a non-negative integer, got -1');
   });
 });
 
