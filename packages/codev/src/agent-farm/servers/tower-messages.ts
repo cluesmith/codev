@@ -15,7 +15,7 @@ import {
   parseAddress,
   isRemoteAddress,
   stripLeadingZeros,
-  CROSS_TOWER_UNAVAILABLE_MESSAGE,
+  localAddressOnlyMessage,
   addressSpoofingErrorMessage,
   crossWorkspaceBuilderErrorMessage,
 } from '../utils/agent-names.js';
@@ -38,9 +38,10 @@ import {
 } from '../utils/workspace-address.js';
 import { isAddressComponent, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import type { CrossWorkspaceOrigin, ReplyRoute } from '../utils/message-format.js';
-import type { PeerWireAddress } from '@cluesmith/codev-types';
+import type { PeerWireAddress, PeerWireSenderAddress } from '@cluesmith/codev-types';
 import type { GrantWorld } from '../peer/grants.js';
 import type { RecipientLookup } from '../peer/receiver.js';
+import type { PeerSender } from '../peer/sender.js';
 
 // ============================================================================
 // Spec 755 error messages — exported as constants so producer and asserter
@@ -149,13 +150,17 @@ export interface ResolveResult {
 /**
  * Error from address resolution. `NOT_FOUND`, `AMBIGUOUS` and `NO_CONTEXT` are as they
  * were. Spec 1940 adds three: the text is not an address (`MALFORMED_ADDRESS`), this
- * sender may not name that recipient (`REFUSED`), and the address names a Tower
- * (`CROSS_TOWER_UNAVAILABLE`).
+ * sender may not name that recipient (`REFUSED`), and the address names a Tower, which
+ * these resolvers never reach (`LOCAL_ADDRESS_ONLY`; only `/api/send` hands such an
+ * address to the sender, Spec 1967).
  */
 export interface ResolveError {
-  code: 'NOT_FOUND' | 'AMBIGUOUS' | 'NO_CONTEXT' | 'MALFORMED_ADDRESS' | 'REFUSED' | 'CROSS_TOWER_UNAVAILABLE';
+  code: 'NOT_FOUND' | 'AMBIGUOUS' | 'NO_CONTEXT' | 'MALFORMED_ADDRESS' | 'REFUSED' | 'LOCAL_ADDRESS_ONLY';
   message: string;
 }
+
+/** What the resolvers say of an address that names a Tower. */
+export const LOCAL_ADDRESS_ONLY_MESSAGE = localAddressOnlyMessage('This');
 
 /**
  * Who is asking (Spec 1940). `id` is the sender's local id, as `/api/send`'s `from`
@@ -222,11 +227,12 @@ interface TargetWorkspace {
 /**
  * The one workspace lookup, shared by the live and the registry resolver so they cannot
  * disagree about where an address points. An address that names a Tower is refused here:
- * until stage 2 a Tower delivers only to itself, and does not yet know its own name.
+ * these resolvers find agents on this Tower. `/api/send` gives such an address to the
+ * sender instead, which hands one naming this Tower back as a local address (Spec 1967).
  */
 function locateWorkspace(address: AgentAddress, sender: SenderContext): TargetWorkspace | ResolveError {
   if (isRemoteAddress(address)) {
-    return { code: 'CROSS_TOWER_UNAVAILABLE', message: CROSS_TOWER_UNAVAILABLE_MESSAGE };
+    return { code: 'LOCAL_ADDRESS_ONLY', message: LOCAL_ADDRESS_ONLY_MESSAGE };
   }
   const sendersWorkspace = sender.workspace;
 
@@ -785,6 +791,42 @@ export function crossWorkspaceOrigin(sender: MessageSender, recipient: MessageRe
   if (allowed !== null) reply = { how: 'address', address: allowed };
   else reply = recipient.isArchitect ? { how: 'none' } : { how: 'through-architect' };
   return { sender: senderAddress, reply };
+}
+
+/**
+ * The sender of a message to another Tower (Spec 1967), as the send route knows it here:
+ * the payload's statement of who sends, and whether the builder rule applies.
+ *
+ * - `agentId` is the sender's local id when it is an agent; `undefined` for a send with no
+ *   sender, and for the senders that are not agents (cron, the UIs relaying the owner).
+ *   Such a send states `from: null`, and its recipient gets no reply address (G7).
+ * - The address names the sending workspace by its address name, as stage 1's reply line
+ *   does, and leaves the workspace out when that name cannot be used (ambiguous, shadowed,
+ *   or not an address component): a directory name is never stated unchecked.
+ * - Whether it is a builder is asked of the sender's own workspace, as both resolvers ask it.
+ */
+export function peerSenderOf(
+  agentId: string | undefined,
+  sender: SenderContext,
+  workspacePath: string,
+): PeerSender {
+  const canonical = canonicalSender(sender);
+  const agent = agentId === undefined ? null : senderAgent(agentId);
+  let address: PeerWireSenderAddress | null = null;
+  if (agent !== null) {
+    address = agent as PeerWireSenderAddress;
+    if (canonical.workspace) {
+      const named = printableAddressName(canonical.workspace, getRegisteredWorkspaces(), runningWorkspacePaths());
+      const withWorkspace: AgentAddress = { ...agent, workspace: named.name ?? undefined };
+      if (named.name !== null && tryFormatAddress(withWorkspace).ok) address = withWorkspace as PeerWireSenderAddress;
+    }
+  }
+  return {
+    workspacePath,
+    agent: sender.id ?? null,
+    address,
+    isBuilder: sendersSpawningArchitect(canonical) !== undefined,
+  };
 }
 
 /**

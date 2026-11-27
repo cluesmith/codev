@@ -27,6 +27,7 @@ import { ARCHITECT_NAME_PATTERN, MAX_ARCHITECT_NAME_LENGTH } from '../utils/arch
 import { MAX_MESSAGE_BYTES, messageLimitError } from '../utils/message-format.js';
 import { formatVerdict, isUnverifiableVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { parseAddress } from '@cluesmith/codev-sdk/address';
+import type { RemoteSendAnswer } from '@cluesmith/codev-types';
 import { olderTowerError } from '../utils/older-tower.js';
 
 /**
@@ -379,6 +380,50 @@ async function explainNotFound(
 }
 
 /**
+ * The stage 1 carry-over hint (Spec 1940, "Helpful failures"; Spec 1967): `devvm:codev:architect`
+ * is malformed, since a local address has at most a workspace before `architect`. When the
+ * first of the two components before `architect` is one of my Towers, the address meant is
+ * `afx://devvm/codev:architect`, and the failure says so.
+ *
+ * Only on that failure: Tower's peer list is asked then, and not otherwise. Returns what to
+ * report in place of Tower's error, or null when it stands.
+ */
+async function explainMalformed(client: TowerClient, to: string, result: SendResult): Promise<string | null> {
+  if (result.errorCode !== 'MALFORMED_ADDRESS') return null;
+  const parsed = parseAddress(to);
+  if (parsed.ok || parsed.error.code !== 'TOO_MANY_BEFORE_ARCHITECT') return null;
+  const [first, ...rest] = to.trim().toLowerCase().split(':');
+  const meant = `afx://${first}/${rest.join(':')}`;
+  if (!parseAddress(meant).ok) return null;
+  const peers = await client.getPeerTowers();
+  if (!peers.ok) return null;
+  const mine = peers.result.towerName === first || peers.result.towers.some((tower) => tower.name === first);
+  if (!mine) return null;
+  return `Malformed address: ${parsed.error.message}; \`${first}\` is one of your Towers, so write ${meant}`;
+}
+
+/**
+ * A send to another Tower that is held, for the person who sent it (Spec 1967, Decision 5):
+ * where it waits, why, and what happens next.
+ */
+export function remoteHeldLine(resolvedTo: string, remote: RemoteSendAnswer, reason?: string, mailboxId?: string): string {
+  const id = mailboxId ? ` — mailbox id ${mailboxId}` : '';
+  if (remote.heldWhere === 'this-tower') {
+    const ahead = remote.ahead ? ` ${remote.ahead} held message(s) for ${remote.peer} go before it.` : '';
+    const next =
+      reason === 'tower-offline'
+        ? `It is sent when ${remote.peer} returns.`
+        : `It is sent to ${remote.peer} when it can be, within 30 days.`;
+    return `Message held on this Tower (${reason ?? 'queued'})${id}.${ahead} ${next}`;
+  }
+  const next =
+    reason === 'held-for-release'
+      ? `It waits there until a human on ${remote.peer} releases it.`
+      : `${remote.peer} delivers it when the recipient's prompt is clear.`;
+  return `Message held on ${remote.peer} for ${resolvedTo} (${reason ?? 'pending'})${id}. ${next}`;
+}
+
+/**
  * Read message from stdin
  */
 async function readStdin(): Promise<string> {
@@ -602,7 +647,9 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
       }, retry);
 
       if (!result.ok) {
-        const explained = await explainNotFound(client, target!, result, { workspace, from });
+        const explained =
+          (await explainNotFound(client, target!, result, { workspace, from })) ??
+          (await explainMalformed(client, target!, result));
         throw new Error(explained ?? (result.error || 'Unknown error'));
       }
 
@@ -617,6 +664,8 @@ export async function send(options: SendOptions): Promise<SendOutcome> {
             `${result.mailboxId ? ` — mailbox id ${result.mailboxId}` : ''}`,
         );
         logger.info('Persisted and durable across a Tower restart; delivers onto a clear prompt when due. Inspect/cancel: afx inbox.');
+      } else if (result.held && result.remote) {
+        logger.info(remoteHeldLine(result.resolvedTo ?? target!, result.remote, result.reason, result.mailboxId));
       } else if (result.held) {
         logger.info(
           `Message held for ${result.resolvedTo ?? target} (${formatVerdict(result.reason, result.detail, 'pending')})` +

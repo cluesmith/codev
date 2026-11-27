@@ -83,6 +83,8 @@ export interface PeerCloudRouteDeps {
   reportSwitch(state: PeerSwitchState): PeerSwitchReport;
   /** Is this Tower's own tunnel up? */
   tunnelUp(): boolean;
+  /** Look at held mail now: the switch has just turned on, which may let it leave. */
+  wakeOutbox(): void;
 }
 
 /** What the handlers read. Each is called per request, so a test can change the world between calls. */
@@ -289,7 +291,10 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     })();
     if (change.changed) deps.log('INFO', `Peer: remote messaging turned ${state}`);
     logWithdrawn(withdrawn);
-    return switchResponse(change.changed, change.changed ? reportSwitch(state) : null);
+    const response = switchResponse(change.changed, change.changed ? reportSwitch(state) : null);
+    // Mail held here while the switch was off paused, and may leave now.
+    if (change.changed && state === 'on') deps.cloud().wakeOutbox();
+    return response;
   }
 
   async function postGrants(req: http.IncomingMessage): Promise<PeerGrantResponse> {

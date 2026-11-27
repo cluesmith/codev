@@ -100,6 +100,7 @@ vi.mock('../peer/cloud-wiring.js', () => ({
   onTunnelAuthOk: mockOnTunnelAuthOk,
   setTunnelSessionSource: vi.fn(),
   shutdownPeerCloud: vi.fn(),
+  startPeerOutbox: vi.fn(),
 }));
 
 vi.mock('../lib/nonce-store.js', () => ({

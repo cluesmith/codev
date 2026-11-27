@@ -13,7 +13,7 @@ import { parseCronExpression, isDue } from './tower-cron-parser.js';
 import { sanitizeAgentEnv } from '../../lib/agent-env.js';
 import type { CronSchedule } from './tower-cron-parser.js';
 import { CRON_SENDER, type CronDeliveryResult } from './cron-delivery.js';
-import { namesATower, CROSS_TOWER_UNAVAILABLE_MESSAGE } from '../utils/agent-names.js';
+import { namesATower, localAddressOnlyMessage } from '../utils/agent-names.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { getGlobalDb } from '../db/index.js';
 
@@ -143,7 +143,7 @@ export function loadWorkspaceTasks(workspacePath: string): CronTask[] {
       // the task fires, as an unknown one does.
       const target = typeof doc.target === 'string' ? doc.target : 'architect';
       if (namesATower(target)) {
-        deps?.log('WARN', `Skipping task '${name}' (${file}) in ${workspacePath}: its target is an afx:// address. ${CROSS_TOWER_UNAVAILABLE_MESSAGE}`);
+        deps?.log('WARN', `Skipping task '${name}' (${file}) in ${workspacePath}: its target is an afx:// address. ${localAddressOnlyMessage("A cron task's target")}`);
         continue;
       }
 

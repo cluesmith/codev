@@ -903,3 +903,54 @@ Surprises:
     out from this Tower's state. A blocked look writes nothing to the row.
   - **Carried to phase 11 (claude 4).** `afx peer log` shows a discarded answer as what the
     call got. The row shows the discard (`registration-changed`).
+
+## Phase 9: afx send across Towers, end to end
+
+- **Routing.** `POST /api/send` reads the address once. An `afx://` address goes to the
+  phase 8 sender (`peerSender()` in `peer/cloud-wiring.ts`). The sender answers `local` for
+  this Tower's own name, and the route then resolves that address as any local one, on the
+  immediate and the delayed path. `afx://owner@…` is still refused, at the sender's check 0.
+- **Production wiring.** Tower starts the outbox in `initTunnel` and resumes held mail from
+  its rows. The outbox is woken by every `auth_ok` it takes in and by the switch turning on,
+  and stopped with Tower. `AF_TEST_PEER_BACKOFF_MS` becomes `backoffBaseMs`, under
+  `NODE_ENV=test` only; a value that is not a positive whole number fails loudly.
+- **Who sends.** `peerSenderOf` (tower-messages.ts) gives the sender the workspace, the
+  agent, its address and whether it is a builder. A sender with no agent identity (G7), or
+  one that is not an agent (`vscode-user`), has a null address. The workspace is left out
+  of the address when its name cannot be written in one.
+- **The words.** The sender now composes every refusal's text: its own checks, Codev
+  Cloud's (`Refused by Codev Cloud: …`) and the receiving Tower's (`Refused by devvm: …`),
+  with the grant command for `no-grant`. The receiving Tower sends no `detail`.
+- **The CLI.** It prints delivered as step 7, held on this Tower with why and what happens
+  next, held on the receiving Tower with why, and a refusal in its own words, exiting 1.
+  The stage 1 hint: `devvm:codev:architect`, malformed, says to write
+  `afx://devvm/codev:architect` when `devvm` is one of my Towers (asking
+  `/api/peer/towers` only on that failure).
+- **Local-only commands.** `afx interrupt`, `afx refresh` and a cron target now say they take
+  a local address and that only `afx send` reaches another Tower
+  (`localAddressOnlyMessage`). The resolver's code is `LOCAL_ADDRESS_ONLY`.
+- **Readings I chose. Neither spec states these; each goes in the review document.**
+  - A refused send to another Tower is a `403` with `error: REMOTE_REFUSED`, the words in
+    `message`, and `refusedBy`, `reason`, `retryAfterSec`, `mailboxId` and `peer` beside it.
+    The SDK passes the words on without the code after them.
+  - An interrupt (`afx interrupt`, the route's `escape`) to any `afx://` address, this
+    Tower's own name included, is refused as `LOCAL_ADDRESS_ONLY` before the sender is asked.
+  - Mailbox ids are printed in full, as local holds and `afx inbox` print them (the
+    walkthrough shows eight characters).
+  - `bodyLength` is the body as typed, as for a local send.
+  - The SDK waits 65 s for an answer to a send naming another Tower (the sender's 20 s per
+    call, the cloud's 15 s for the receiver, and room for the route), or the client's own
+    timeout when that is longer.
+- **Tests.** Layer A: the route (`tower-routes.test.ts`, a scripted sender and the real one),
+  the wiring (`peer-cloud-wiring.test.ts`), the SDK (`tower-client-send.test.ts`), the CLI
+  (`peer-send-cli.test.ts`), the refusal words (`peer-sender.test.ts`). Layer B:
+  `peer-send.e2e.test.ts`, the plan's list. Its inert architects hold what reaches them as
+  `no-profile`, and the frame is read from the mailbox, as stage 1's e2e reads it. Two cases
+  (no answer, a deploy mid-send) need a receiving Tower slower than the relay: an echo
+  terminal named `agy` given an 800-line body, with the stand-in's relay timeout at 3 s.
+- **Verified.** Build green (17.3 s). Porch's tests check, run by hand before `porch done`:
+  10 873 passed, 116 skipped, in 477 files, 245.2 s. Layer B on demand at load 2.8, then 1.85:
+  `peer-send.e2e.test.ts` 20 of 20 in 54.9 s. Its first run was red in one case, by my
+  test's own mistake: I expected a reply footer naming the sender's front door, but an
+  architect recipient's footer names the sender itself (Decision 7; phase 6's recipient was
+  a builder, whose footer does name the front door). Fixed in the test, then green.

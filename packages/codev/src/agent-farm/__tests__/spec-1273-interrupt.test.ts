@@ -219,7 +219,7 @@ describe('afx interrupt (Spec 1273)', () => {
     const { interrupt } = await import('../commands/interrupt.js');
 
     await expect(interrupt({ builder: 'afx://devvm/codev:builder-spir-1273' }))
-      .rejects.toThrow(/afx interrupt takes a local address\. Cross-Tower messaging is not available/);
+      .rejects.toThrow(/afx interrupt takes a local address: .*only afx send reaches one/);
     expect(mockIsRunning).not.toHaveBeenCalled();
     expect(mockSendMessage).not.toHaveBeenCalled();
   });

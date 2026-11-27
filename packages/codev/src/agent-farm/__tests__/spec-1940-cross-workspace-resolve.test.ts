@@ -60,7 +60,7 @@ import {
   legacyBuilderErrorMessage,
   type ResolveError,
 } from '../servers/tower-messages.js';
-import { CROSS_TOWER_UNAVAILABLE_MESSAGE } from '../utils/agent-names.js';
+import { LOCAL_ADDRESS_ONLY_MESSAGE } from '../servers/tower-messages.js';
 
 const CODEV = '/home/user/codev';
 const CLOUD = '/home/user/codev-cloud';
@@ -399,12 +399,14 @@ describe('Spec 1940 phase 2 — addresses across workspaces', () => {
       'afx://devvm/codev:architect:local',
       'afx://devvm/codev:builder-spir-1940',
       'afx://sam@studio/codev-cloud:architect:data',
-      // Even one that might be this Tower: until stage 2 a Tower does not know its own name.
+      // Even one naming this Tower: the resolvers find agents by a local address. `/api/send`
+      // gives an afx:// address to the sender, which hands one naming this Tower back as the
+      // local address it is (Spec 1967).
       'afx://mbp/codev:architect',
-    ])('%s is refused as cross-Tower messaging not available', (address) => {
+    ])('%s is refused as taking only a local address', (address) => {
       expect(resolve(address, CODEV, 'architect:main').error).toEqual({
-        code: 'CROSS_TOWER_UNAVAILABLE',
-        message: CROSS_TOWER_UNAVAILABLE_MESSAGE,
+        code: 'LOCAL_ADDRESS_ONLY',
+        message: LOCAL_ADDRESS_ONLY_MESSAGE,
       });
     });
 

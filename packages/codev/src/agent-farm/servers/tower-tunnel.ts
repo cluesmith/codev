@@ -26,7 +26,7 @@ import { getGlobalDb } from '../db/index.js';
 import { readSwitch } from '../peer/switch.js';
 import { createReceiver } from '../peer/receiver.js';
 import { recordEntryEvent } from '../peer/records.js';
-import { onTunnelAuthOk, setTunnelSessionSource, shutdownPeerCloud } from '../peer/cloud-wiring.js';
+import { onTunnelAuthOk, setTunnelSessionSource, shutdownPeerCloud, startPeerOutbox } from '../peer/cloud-wiring.js';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import { liveGrantWorld, resolveRemoteRecipient } from './tower-messages.js';
 import { deliverRemoteWithin, notifyHeldStateChanged } from './mailbox-wiring.js';
@@ -431,6 +431,13 @@ export async function initTunnel(
   _getInstances = callbacks.getInstances;
   switchReadFailing = false;
   setTunnelSessionSource(getTunnelPeerSession, logToTower);
+  // Mail this Tower holds for its peers resumes from its rows, whether or not it is
+  // registered now: until it can leave, the outbox only looks at it again (Spec 1967).
+  try {
+    startPeerOutbox(notifyHeldStateChanged);
+  } catch (err) {
+    deps.log('ERROR', `Peer: mail held for other Towers could not be resumed at start (${(err as Error).message})`);
+  }
 
   // Auto-connect tunnel if registered
   try {

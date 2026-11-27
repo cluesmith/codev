@@ -41,6 +41,8 @@ import type { IShellperClient } from '../../terminal/shellper-client.js';
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
 import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
+import type { PeerSendRequest, PeerSendResult, Sender } from '../peer/sender.js';
+import { setSwitch } from '../peer/switch.js';
 
 // ============================================================================
 // Mocks
@@ -148,11 +150,21 @@ vi.mock('../servers/tower-messages.js', async (importOriginal) => ({
   refusalToAddress: (await importOriginal<typeof import('../servers/tower-messages.js')>()).refusalToAddress,
   // The real definition of a running workspace (Issue #1978), read off the faked terminal map.
   runningWorkspacePaths: (await importOriginal<typeof import('../servers/tower-messages.js')>()).runningWorkspacePaths,
+  // Spec 1967: who sends to another Tower, read off the registry and the faked terminal map.
+  peerSenderOf: (await importOriginal<typeof import('../servers/tower-messages.js')>()).peerSenderOf,
   resolveTarget: (...args: unknown[]) => mockResolveTarget(...args),
   resolveAgentInRegistry: (...args: unknown[]) => mockResolveAgentInRegistry(...args),
   broadcastMessage: (...args: unknown[]) => mockBroadcastMessage(...args),
   isResolveError: (r: any) => mockIsResolveError(r),
 }));
+
+// Spec 1967: a send to another Tower goes to the sender. A test may script it; otherwise
+// the real one runs (its first checks answer before any call to Codev Cloud).
+const peerSenderHolder = vi.hoisted(() => ({ sender: null as unknown }));
+vi.mock('../peer/cloud-wiring.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../peer/cloud-wiring.js')>();
+  return { ...actual, peerSender: () => (peerSenderHolder.sender ?? actual.peerSender()) };
+});
 
 // Spec 1313: handleSend persists every send to global.db and delivers through the
 // gate. Back it with a fresh in-memory DB per test so the mailbox ops are real
@@ -2764,31 +2776,217 @@ describe('tower-routes', () => {
         });
       });
 
+      // Spec 1967, phase 9: an afx:// address goes to the sender, which makes the sending
+      // Tower's checks, stores the message in the outbox and queues it. Most cases here hand
+      // the route a scripted sender, so what is asserted is the route's part: what it tells
+      // the sender, and how it answers each outcome. The real sender is used where its first
+      // checks answer before any call (the switch, the registration, an owner address).
       describe('an afx:// address', () => {
-        const UNAVAILABLE =
-          'Cross-Tower messaging is not available in this version: an afx:// address cannot be delivered yet. ' +
-          'Use a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.';
+        const PEER = { towerId: '01JDEVVM0000000000000000AA', name: 'devvm' };
+        let told: PeerSendRequest[];
+        const scripted = (result: PeerSendResult) => {
+          told = [];
+          peerSenderHolder.sender = {
+            send: async (request: PeerSendRequest) => {
+              told.push(request);
+              return result;
+            },
+          } as unknown as Sender;
+        };
 
-        it.each([
-          ['never connected to Codev Cloud', null],
-          ['connected to Codev Cloud', { tower_id: 't-1', tower_name: 'mbp', server_url: 'https://cloud.example', api_key: 'k' }],
-        ])('is refused as cross-Tower messaging not available on a Tower %s', async (_note, cloud) => {
-          mockReadCloudConfig.mockReturnValue(cloud);
-          for (const to of ['afx://devvm/codev:architect', 'afx://mbp/codev-cloud:architect:tunnel', 'afx://sam@studio/codev:architect:data']) {
-            const { status, body } = await send(to, 'architect:review');
-            expect(status).toBe(400);
-            expect(body).toEqual({ error: 'CROSS_TOWER_UNAVAILABLE', message: UNAVAILABLE });
-          }
+        beforeEach(() => {
+          told = [];
+        });
+
+        afterEach(() => {
+          peerSenderHolder.sender = null;
+        });
+
+        it('hands the sender the parsed address, the body, the options and who sends', async () => {
+          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          await send('afx://DevVM/codev:architect:local', 'architect:review', { options: { raw: true, noEnter: true } });
+          expect(told).toEqual([
+            {
+              to: { tower: 'devvm', workspace: 'codev', kind: 'architect', name: 'local' },
+              body: 'hello',
+              options: { raw: true, interrupt: false, noEnter: true, delay: false },
+              from: {
+                workspacePath: CODEV,
+                agent: 'architect:review',
+                address: { workspace: 'codev', kind: 'architect', name: 'review' },
+                isBuilder: false,
+              },
+            },
+          ]);
+          await send('afx://devvm/codev:architect:local', 'architect:review', { options: { interrupt: true, deliverAfter: 30 } });
+          expect(told[1].options).toEqual({ raw: false, interrupt: true, noEnter: false, delay: true });
+        });
+
+        it('says a builder is one, by its id, so the builder rule can apply', async () => {
+          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          await send('afx://devvm/codev:architect', BUILDER);
+          expect(told[0].from).toEqual({
+            workspacePath: CODEV,
+            agent: BUILDER,
+            address: { workspace: 'codev', kind: 'id', name: BUILDER },
+            isBuilder: true,
+          });
+        });
+
+        it('states no sender for a send with none, or from a sender that is not an agent (G7)', async () => {
+          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          await send('afx://devvm/codev:architect', undefined);
+          await send('afx://devvm/codev:architect', 'vscode-user');
+          expect(told.map((request) => [request.from.agent, request.from.address])).toEqual([
+            [null, null],
+            ['vscode-user', null],
+          ]);
+        });
+
+        it('leaves the workspace out of the sender when its directory name cannot be written in an address', async () => {
+          const spaced = path.join(root, 'my project');
+          fs.mkdirSync(spaced);
+          setArchitectByName(spaced, 'main', { name: 'main', cmd: 'claude', startedAt: '2026-11-23T00:00:00.000Z' });
+          liveAgents({ [CODEV]: { architects: ['main', 'review'] }, [spaced]: { architects: ['main'] } });
+          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          await send('afx://devvm/codev:architect', 'architect:main', { workspace: spaced, fromWorkspace: spaced });
+          expect(told[0].from.address).toEqual({ kind: 'architect', name: 'main' });
+        });
+
+        it('answers delivered with the full address, the message id and the bytes sent, and stores nothing in the mailbox', async () => {
+          scripted({ outcome: 'delivered', messageId: 'm-1', peer: PEER, detail: null, duplicate: false });
+          const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(status).toBe(200);
+          expect(body).toEqual({
+            ok: true,
+            resolvedTo: 'afx://devvm/codev:architect:local',
+            mailboxId: 'm-1',
+            bodyLength: 5,
+            delivered: true,
+            held: false,
+            detail: null,
+            remote: { peer: 'devvm', duplicate: false },
+          });
           expect(allRows()).toHaveLength(0);
         });
 
-        it('is refused on the delayed path, and for an interrupt (`afx interrupt`), by Tower itself', async () => {
-          for (const options of [{ deliverAfter: 30 }, { escape: true }, { interrupt: true }]) {
-            const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review', { options });
-            expect(status).toBe(400);
-            expect(body.error).toBe('CROSS_TOWER_UNAVAILABLE');
-          }
+        it('answers held with where it waits and why: on the receiving Tower, or here with how many are ahead', async () => {
+          scripted({ outcome: 'held', where: 'recipient', reason: 'busy', messageId: 'm-2', peer: PEER, detail: null, duplicate: true });
+          const there = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(there.status).toBe(200);
+          expect(there.body).toMatchObject({
+            ok: true,
+            delivered: false,
+            held: true,
+            reason: 'busy',
+            mailboxId: 'm-2',
+            remote: { peer: 'devvm', heldWhere: 'recipient', duplicate: true },
+          });
+
+          scripted({ outcome: 'held', where: 'this-tower', reason: 'tower-offline', messageId: 'm-3', peer: PEER, ahead: 2 });
+          const here = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(here.body).toMatchObject({
+            held: true,
+            reason: 'tower-offline',
+            mailboxId: 'm-3',
+            detail: null,
+            remote: { peer: 'devvm', heldWhere: 'this-tower', ahead: 2 },
+          });
           expect(allRows()).toHaveLength(0);
+        });
+
+        it('answers a refusal as a 403 with who refused, the reason and the words for a person', async () => {
+          scripted({
+            outcome: 'refused',
+            by: 'peer',
+            reason: 'no-grant',
+            message: 'Refused by devvm: mbp has no grant there for codev:architect:local. On devvm: afx peer grant mbp codev:architect:local',
+            detail: null,
+            retryAfterSec: null,
+            messageId: 'm-4',
+            peer: PEER,
+          });
+          const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(status).toBe(403);
+          expect(body).toEqual({
+            error: 'REMOTE_REFUSED',
+            message: 'Refused by devvm: mbp has no grant there for codev:architect:local. On devvm: afx peer grant mbp codev:architect:local',
+            refusedBy: 'peer',
+            reason: 'no-grant',
+            retryAfterSec: null,
+            mailboxId: 'm-4',
+            peer: 'devvm',
+          });
+        });
+
+        it("resolves an address naming this Tower as the local address the sender hands back, on the immediate and the delayed path", async () => {
+          const writes = liveAgents({
+            [CODEV]: { architects: ['main', 'review'] },
+            [CLOUD]: { architects: ['main', 'review', 'tunnel'] },
+          });
+          scripted({ outcome: 'local', address: { workspace: 'codev-cloud', kind: 'architect', name: 'tunnel' } });
+          const now = await send('afx://mbp/codev-cloud:architect:tunnel', 'architect:review');
+          expect(now.status).toBe(200);
+          expect(now.body.resolvedTo).toBe('tunnel');
+          expect(writes['codev-cloud/tunnel']).toHaveBeenCalled();
+
+          const later = await send('afx://mbp/codev-cloud:architect:tunnel', 'architect:review', { options: { deliverAfter: 30 } });
+          expect(later.status).toBe(200);
+          expect(later.body.scheduled).toBe(true);
+          expect(allRows().map((row) => row.to_agent)).toEqual(['tunnel', 'tunnel']);
+        });
+
+        it('refuses an interrupt (afx interrupt) to any afx:// address, as taking a local address, without asking the sender', async () => {
+          scripted({ outcome: 'local', address: { workspace: 'codev-cloud', kind: 'architect', name: 'tunnel' } });
+          for (const to of ['afx://devvm/codev:architect:local', 'afx://mbp/codev-cloud:architect:tunnel']) {
+            const { status, body } = await send(to, 'architect:review', { options: { escape: true } });
+            expect(status).toBe(400);
+            expect(body.error).toBe('LOCAL_ADDRESS_ONLY');
+            expect(body.message).toMatch(/^An interrupt takes a local address/);
+          }
+          expect(told).toHaveLength(0);
+        });
+
+        describe('with the real sender, whose first checks answer before any call', () => {
+          const CONNECTED = { tower_id: '01JMBP000000000000000000AA', tower_name: 'mbp', server_url: 'https://cloud.example', api_key: 'k' };
+
+          it('refuses while remote messaging is off, and says how a human turns it on (criterion 2)', async () => {
+            mockReadCloudConfig.mockReturnValue(CONNECTED);
+            const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review');
+            expect(status).toBe(403);
+            expect(body).toMatchObject({
+              error: 'REMOTE_REFUSED',
+              refusedBy: 'this-tower',
+              reason: 'remote-off',
+              message: 'Remote messaging is off on this Tower (mbp). A human turns it on with: afx peer on',
+              mailboxId: null,
+            });
+            expect(allRows()).toHaveLength(0);
+          });
+
+          it('refuses a Tower never connected to Codev Cloud, once the switch is on', async () => {
+            mockReadCloudConfig.mockReturnValue(null);
+            setSwitch(sendDbHolder.db, 'on', Date.now());
+            const { body } = await send('afx://devvm/codev:architect:local', 'architect:review');
+            expect(body).toMatchObject({ reason: 'not-connected', message: expect.stringMatching(/afx tower connect$/) });
+          });
+
+          it("still refuses an address with an owner as not available, on any Tower", async () => {
+            for (const cloud of [null, CONNECTED]) {
+              mockReadCloudConfig.mockReturnValue(cloud);
+              const { status, body } = await send('afx://sam@studio/codev:architect:data', 'architect:review');
+              expect(status).toBe(403);
+              expect(body).toMatchObject({ reason: 'address', message: expect.stringMatching(/^Messaging another owner's Tower is not available/) });
+            }
+            expect(allRows()).toHaveLength(0);
+          });
+
+          it("resolves this Tower's own name locally, with remote messaging off and no cloud asked", async () => {
+            mockReadCloudConfig.mockReturnValue(CONNECTED);
+            const { status, body } = await send('afx://mbp/codev-cloud:architect:tunnel', 'architect:review');
+            expect(status).toBe(200);
+            expect(body.resolvedTo).toBe('tunnel');
+          });
         });
 
         it.each(['afx://devvm', 'afx://devvm/architect', 'afx://devvm:4100/codev:architect', 'afx:/devvm/codev:architect'])(

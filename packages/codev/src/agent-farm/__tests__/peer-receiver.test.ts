@@ -717,6 +717,7 @@ describe('eager withdrawal through the peer routes', () => {
         relay: () => ({ state: 'unknown', why: null }),
         reportSwitch: () => 'not-connected',
         tunnelUp: () => false,
+        wakeOutbox: () => {},
       }),
       log: () => {},
     };

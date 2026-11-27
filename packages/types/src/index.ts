@@ -29,6 +29,11 @@ export {
   type AddressParseResult,
   type TowerRef,
   type TowerRefParseResult,
+  REMOTE_REFUSED_ERROR,
+  type RemoteRefuser,
+  type RemoteSendRefusal,
+  type RemoteHeldWhere,
+  type RemoteSendAnswer,
 } from './messaging.js';
 
 export {

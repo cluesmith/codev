@@ -451,12 +451,25 @@ describe('the persisted message and the answer the sender is told', () => {
     [
       'refused by the peer, in its own words made printable',
       () => ({ kind: 'resolved', state: 'refused', answer: fromR({ outcome: 'refused', reason: 'no-grant', detail: 'no grant\u001b[31m for mbp' }) }),
-      { outcome: 'refused', by: 'peer', reason: 'no-grant', detail: 'no grant[31m for mbp', message: null },
+      {
+        outcome: 'refused',
+        by: 'peer',
+        reason: 'no-grant',
+        detail: 'no grant[31m for mbp',
+        // The walkthrough's skipped step 4, in this Tower's words: R sends none of its own.
+        message: 'Refused by devvm: mbp has no grant there for codev:architect:local. On devvm: afx peer grant mbp codev:architect:local',
+      },
     ],
     [
       'refused by the cloud for rate, with when to try again',
       () => ({ kind: 'resolved', state: 'refused', answer: fromC(429, { outcome: 'refused', reason: 'rate-limited', retryAfterSec: 12 }) }),
-      { outcome: 'refused', by: 'cloud', reason: 'rate-limited', retryAfterSec: 12 },
+      {
+        outcome: 'refused',
+        by: 'cloud',
+        reason: 'rate-limited',
+        retryAfterSec: 12,
+        message: 'Refused by Codev Cloud: too many messages from this Tower; try again in 12 s.',
+      },
     ],
     ['expired before its first attempt', () => ({ kind: 'ended', state: 'expired' }), { outcome: 'refused', by: 'this-tower', reason: 'expired' }],
   ];
@@ -468,6 +481,74 @@ describe('the persisted message and the answer the sender is told', () => {
       expect((result as { messageId: string }).messageId).toBe(f.queued[0].messageId);
     });
   }
+});
+
+// ===========================================================================
+// The words of a refusal by another party (Spec 1967, phase 9)
+// ===========================================================================
+
+describe('the words a refusal by the cloud or the receiving Tower is told in', () => {
+  const refusedBy = async (
+    answer: ClassifiedAnswer,
+    change: Partial<PeerSendRequest> & { toChange?: Partial<AgentAddress> } = {},
+  ): Promise<string> => {
+    f.first = () => ({ kind: 'resolved', state: 'refused', answer });
+    const result = await f.sender.send(request(change));
+    if (result.outcome !== 'refused') throw new Error(`expected a refusal, got ${result.outcome}`);
+    return result.message;
+  };
+
+  it.each([
+    ['remote-off', 'Refused by devvm: remote messaging is off there.'],
+    ['no-such-agent', 'Refused by devvm: it has no agent codev:architect:local.'],
+    ['not-addressable', 'Refused by devvm: codev:architect:local cannot be messaged from another Tower (a shell never can).'],
+    ['too-large', 'Refused by devvm: the message is too large.'],
+    ['expired', 'Refused by devvm: the message was sent more than 30 days ago.'],
+    ['clock-skew', "Refused by devvm: the clocks differ by more than 5 minutes (devvm's, this Tower's or Codev Cloud's). Check the time on both machines."],
+    ['unsupported-version', "Refused by devvm: it does not speak this Tower's version of remote messaging."],
+    ['mismatch', 'Refused by devvm: it holds a different message under the same id.'],
+    ['dismissed', 'Refused by devvm: the message was dismissed there.'],
+    ['malformed', 'Refused by devvm: it could not read the message.'],
+  ])('the receiving Tower refusing %s', async (reason, words) => {
+    const supported = reason === 'unsupported-version' ? { supported: [2] } : {};
+    expect(await refusedBy(fromR({ outcome: 'refused', reason, ...supported }))).toBe(words);
+  });
+
+  it('a rate refusal by the receiving Tower says when to try again, or that mail waits there undelivered', async () => {
+    expect(await refusedBy(fromR({ outcome: 'refused', reason: 'rate-limited', retryAfterSec: 40 }))).toBe(
+      'Refused by devvm: mbp has sent it too many messages this minute; try again in 40 s.',
+    );
+    expect(await refusedBy(fromR({ outcome: 'refused', reason: 'rate-limited' }))).toBe(
+      'Refused by devvm: too many messages from mbp wait there undelivered.',
+    );
+  });
+
+  it('a missing grant names the grant to make: the front door as written, and --all for a builder, which no narrower grant covers', async () => {
+    expect(await refusedBy(fromR({ outcome: 'refused', reason: 'no-grant' }), { toChange: { name: undefined } })).toBe(
+      'Refused by devvm: mbp has no grant there for codev:architect. On devvm: afx peer grant mbp codev:architect',
+    );
+    expect(await refusedBy(fromR({ outcome: 'refused', reason: 'no-grant' }), { toChange: { kind: 'id', name: 'builder-spir-7' } })).toBe(
+      'Refused by devvm: mbp has no grant there for codev:builder-spir-7. On devvm: afx peer grant mbp --all',
+    );
+  });
+
+  it('names this Tower as "this Tower" while it has no name of its own yet', async () => {
+    f.registration = { ...f.registration!, towerName: null };
+    expect(await refusedBy(fromR({ outcome: 'refused', reason: 'no-grant' }))).toBe(
+      'Refused by devvm: this Tower has no grant there for codev:architect:local. On devvm: afx peer grant this Tower codev:architect:local',
+    );
+  });
+
+  it.each([
+    [404, 'unknown-tower', 'Refused by Codev Cloud: devvm is not one of your Towers there.'],
+    [409, 'peer-unsupported', 'Refused by Codev Cloud: devvm does not speak remote messaging. Upgrade Codev on devvm.'],
+    [413, 'too-large', 'Refused by Codev Cloud: the message is too large.'],
+    [400, 'malformed', "Refused by Codev Cloud: it could not read this Tower's call."],
+    [400, 'unsupported-version', "Refused by Codev Cloud: it does not relay this Tower's version of remote messaging."],
+  ])('Codev Cloud refusing with %i %s', async (status, reason, words) => {
+    const supported = reason === 'unsupported-version' ? { supported: [2] } : {};
+    expect(await refusedBy(fromC(status, { outcome: 'refused', reason, ...supported }))).toBe(words);
+  });
 });
 
 // ===========================================================================

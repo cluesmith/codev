@@ -43,7 +43,8 @@ import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER } from '@cluesmith/codev-types';
+import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER, REMOTE_REFUSED_ERROR } from '@cluesmith/codev-types';
+import type { RemoteSendAnswer, RemoteSendRefusal } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
 import { workspaceKey } from '../utils/workspace-path.js';
 import { expandHomePath } from '../../lib/host-paths.js';
@@ -78,6 +79,7 @@ import {
   isResolveError,
   crossWorkspaceOrigin,
   runningWorkspacePaths,
+  peerSenderOf,
   type MessageRecipient,
   type ResolveError,
   type ResolveResult,
@@ -87,7 +89,10 @@ import { addressBook } from './tower-address-book.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { createPeerRouteHandler, PEER_ROUTE_PREFIX, type PeerRouteDeps } from './peer-routes.js';
-import { peerCloudRouteDeps } from '../peer/cloud-wiring.js';
+import { peerCloudRouteDeps, peerSender } from '../peer/cloud-wiring.js';
+import type { PeerSendResult } from '../peer/sender.js';
+import { isRemoteAddress, localAddressOnlyMessage } from '../utils/agent-names.js';
+import { formatAddress } from '@cluesmith/codev-sdk/address';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
 import {
   formatArchitectMessage,
@@ -2050,18 +2055,60 @@ function architectNameForTerminal(workspacePath: string, terminalId: string): st
 /**
  * Answer a send whose address did not resolve. One mapping for every send path: 409 for
  * an ambiguous name, 400 for text that is not an address, for one that needs a workspace
- * the request did not give, and for one that names a Tower; 403 for a recipient this
- * sender may not name; 404 for a recipient that does not exist. `NO_CONTEXT` keeps its
- * older wire name, `INVALID_PARAMS`.
+ * the request did not give, and for one that names a Tower where only a local address is
+ * taken; 403 for a recipient this sender may not name; 404 for a recipient that does not
+ * exist. `NO_CONTEXT` keeps its older wire name, `INVALID_PARAMS`.
  */
 const RESOLVE_ERROR_STATUS: Record<ResolveError['code'], number> = {
   AMBIGUOUS: 409,
   NO_CONTEXT: 400,
   MALFORMED_ADDRESS: 400,
-  CROSS_TOWER_UNAVAILABLE: 400,
+  LOCAL_ADDRESS_ONLY: 400,
   REFUSED: 403,
   NOT_FOUND: 404,
 };
+
+/**
+ * Answer a send to another Tower (Spec 1967; Decision 5): `delivered`, `held` with where
+ * and why, or `refused` with who refused and the reason. A refusal is a 403 whose `message`
+ * is for a person, so the CLI exits non-zero printing it. `resolvedTo` is the recipient's
+ * full address; `mailboxId` is the message's id, under which this Tower holds it.
+ */
+function respondToRemoteSend(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  outcome: Exclude<PeerSendResult, { outcome: 'local' }>,
+  to: AgentAddress,
+  bodyLength: number,
+): void {
+  const resolvedTo = formatAddress(to);
+  if (outcome.outcome === 'refused') {
+    ctx.log('INFO', `Send to ${resolvedTo} refused by ${outcome.by} (${outcome.reason})`);
+    const refusal: RemoteSendRefusal = {
+      refusedBy: outcome.by,
+      reason: outcome.reason,
+      retryAfterSec: outcome.retryAfterSec,
+      mailboxId: outcome.messageId,
+      peer: outcome.peer?.name ?? null,
+    };
+    sendJson(res, 403, { error: REMOTE_REFUSED_ERROR, message: outcome.message, ...refusal });
+    return;
+  }
+  const answered = { ok: true, resolvedTo, mailboxId: outcome.messageId, bodyLength };
+  if (outcome.outcome === 'delivered') {
+    const remote: RemoteSendAnswer = { peer: outcome.peer.name, duplicate: outcome.duplicate };
+    ctx.log('INFO', `Message delivered to ${resolvedTo} (message ${outcome.messageId})`);
+    sendJson(res, 200, { ...answered, delivered: true, held: false, detail: outcome.detail, remote });
+    return;
+  }
+  const remote: RemoteSendAnswer =
+    outcome.where === 'recipient'
+      ? { peer: outcome.peer.name, heldWhere: 'recipient', duplicate: outcome.duplicate }
+      : { peer: outcome.peer.name, heldWhere: 'this-tower', ahead: outcome.ahead };
+  const detail = outcome.where === 'recipient' ? outcome.detail : null;
+  ctx.log('INFO', `Message to ${resolvedTo} held ${outcome.where === 'recipient' ? `on ${outcome.peer.name}` : 'here'} (${outcome.reason}; message ${outcome.messageId})`);
+  sendJson(res, 200, { ...answered, delivered: false, held: true, reason: outcome.reason, detail, remote });
+}
 
 function sendResolveError(res: http.ServerResponse, err: ResolveError): void {
   sendJson(res, RESOLVE_ERROR_STATUS[err.code], {
@@ -2619,15 +2666,39 @@ async function handleSend(
   // Spec 1940: the address is read once, here, by the one shared parser, and every path
   // below resolves the structured form. Text that is not an address is refused before
   // anything is resolved or stored, with the shape that was expected.
-  const address = parseTarget(to);
-  if (isResolveError(address)) {
-    sendResolveError(res, address);
+  const parsed = parseTarget(to);
+  if (isResolveError(parsed)) {
+    sendResolveError(res, parsed);
     return;
   }
+  let address: AgentAddress = parsed;
   // Who is asking. `workspace` is where the sender reads addresses from, which is its own
   // workspace; `fromWorkspace` says the same for provenance and stands in when the first
   // is absent.
   const sender: SenderContext = { id: from, workspace: workspace ?? fromWorkspace };
+
+  // Spec 1967: an address that names a Tower goes to the sender, which makes the sending
+  // Tower's checks, stores the message and queues it for that peer. One naming this Tower
+  // comes back as the local address it is, and is resolved below like any other.
+  if (isRemoteAddress(address)) {
+    // An interrupt (ESC, `afx interrupt`) acts on a terminal of this machine, as stage 1 left it.
+    if (escape) {
+      sendJson(res, 400, { error: 'LOCAL_ADDRESS_ONLY', message: localAddressOnlyMessage('An interrupt') });
+      return;
+    }
+    const outcome = await peerSender().send({
+      to: address,
+      body: message,
+      options: { raw, interrupt, noEnter, delay: deliverAfter !== undefined },
+      // A sender that is not an agent states no sender, as its frames name none (G7).
+      from: peerSenderOf(from !== undefined && !NON_AGENT_SENDERS.has(from) ? from : undefined, sender, senderWorkspace),
+    });
+    if (outcome.outcome !== 'local') {
+      respondToRemoteSend(res, ctx, outcome, address, bodyLength);
+      return;
+    }
+    address = outcome.address;
+  }
 
   // Spec 1313 round 3: a delayed send (`--delay`) is RESOLVED, authorized, formatted, and
   // PERSISTED here at REQUEST time, then deferred — it does NOT require a live session now,

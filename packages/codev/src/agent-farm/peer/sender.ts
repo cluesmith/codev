@@ -110,8 +110,8 @@ export type PeerSendResult =
       /** Who refused: this Tower's own checks, Codev Cloud, or the receiving Tower. */
       by: 'this-tower' | 'cloud' | 'peer';
       reason: string;
-      /** For a person, when this Tower can say what happened and what fixes it. */
-      message: string | null;
+      /** For a person: what happened and, where this Tower knows it, what fixes it. */
+      message: string;
       /** The receiving Tower's own words, made printable. */
       detail: string | null;
       retryAfterSec: number | null;
@@ -294,7 +294,8 @@ export class Sender {
       now,
     );
     const first = await this.deps.outbox.enqueue(row);
-    return this.answered(first, row.messageId, peer);
+    const words: RefusalWords = { own: this.deps.registration()?.towerName ?? 'this Tower', peer, recipient: local };
+    return this.answered(first, row.messageId, words);
   }
 
   /** Checks 1 to 4: this Tower's own state, read now. */
@@ -339,7 +340,8 @@ export class Sender {
   }
 
   /** The first answer, as the sender is told it. */
-  private answered(first: FirstAnswer, messageId: string, peer: PeerNamed): PeerSendResult {
+  private answered(first: FirstAnswer, messageId: string, words: RefusalWords): PeerSendResult {
+    const { peer } = words;
     switch (first.kind) {
       case 'held':
         return { outcome: 'held', where: 'this-tower', reason: first.reason, messageId, peer, ahead: first.ahead };
@@ -355,13 +357,97 @@ export class Sender {
           peer,
         };
       case 'resolved':
-        return fromAnswer(first.answer, messageId, peer);
+        return fromAnswer(first.answer, messageId, words);
     }
   }
 }
 
+/** What a refusal by Codev Cloud or the receiving Tower names, in words for a person. */
+interface RefusalWords {
+  /** This Tower's name, as its peers know it; "this Tower" while it has none. */
+  own: string;
+  peer: PeerNamed;
+  /** The recipient, as the receiving Tower writes it locally. */
+  recipient: AgentAddress;
+}
+
+function retryIn(retryAfterSec: number | null): string {
+  return retryAfterSec === null ? '' : `; try again in ${retryAfterSec} s`;
+}
+
+/**
+ * The receiving Tower's refusal, for a person (the stage 2 walkthrough's skipped-step
+ * table). Full reasons are shown because both Towers are the owner's (Decision 5). A
+ * grant cannot name a builder, so a builder is reached only under `--all`.
+ */
+function peerRefusalMessage(reason: string, retryAfterSec: number | null, words: RefusalWords): string {
+  const { own, recipient } = words;
+  const peer = words.peer.name;
+  const to = formatAddress(recipient);
+  const why = ((): string => {
+    switch (reason) {
+      case 'remote-off':
+        return 'remote messaging is off there.';
+      case 'no-grant': {
+        const target = recipient.kind === 'architect' ? to : '--all';
+        return `${own} has no grant there for ${to}. On ${peer}: afx peer grant ${own} ${target}`;
+      }
+      case 'no-such-agent':
+        return `it has no agent ${to}.`;
+      case 'not-addressable':
+        return `${to} cannot be messaged from another Tower (a shell never can).`;
+      case 'rate-limited':
+        return retryAfterSec === null
+          ? `too many messages from ${own} wait there undelivered.`
+          : `${own} has sent it too many messages this minute${retryIn(retryAfterSec)}.`;
+      case 'too-large':
+        return 'the message is too large.';
+      case 'expired':
+        return 'the message was sent more than 30 days ago.';
+      case 'clock-skew':
+        return `the clocks differ by more than 5 minutes (${peer}'s, this Tower's or Codev Cloud's). Check the time on both machines.`;
+      case 'unsupported-version':
+        return "it does not speak this Tower's version of remote messaging.";
+      case 'mismatch':
+        return 'it holds a different message under the same id.';
+      case 'dismissed':
+        return 'the message was dismissed there.';
+      case 'malformed':
+        return 'it could not read the message.';
+      default:
+        return `${reason}.`;
+    }
+  })();
+  return `Refused by ${peer}: ${why}`;
+}
+
+/** Codev Cloud's refusal, for a person (contract section 6, the answers from C). */
+function cloudRefusalMessage(reason: string, retryAfterSec: number | null, words: RefusalWords): string {
+  const peer = words.peer.name;
+  const why = ((): string => {
+    switch (reason) {
+      case 'unknown-tower':
+        return `${peer} is not one of your Towers there.`;
+      case 'peer-unsupported':
+        return `${peer} does not speak remote messaging. Upgrade Codev on ${peer}.`;
+      case 'rate-limited':
+        return `too many messages from this Tower${retryIn(retryAfterSec)}.`;
+      case 'too-large':
+        return 'the message is too large.';
+      case 'malformed':
+        return "it could not read this Tower's call.";
+      case 'unsupported-version':
+        return "it does not relay this Tower's version of remote messaging.";
+      default:
+        return `${reason}.`;
+    }
+  })();
+  return `Refused by Codev Cloud: ${why}`;
+}
+
 /** An answer that resolved the row, as the sender is told it. */
-function fromAnswer(answer: ClassifiedAnswer, messageId: string, peer: PeerNamed): PeerSendResult {
+function fromAnswer(answer: ClassifiedAnswer, messageId: string, words: RefusalWords): PeerSendResult {
+  const { peer } = words;
   const body = answer.answer;
   const detail = body?.detail === undefined ? null : printableDetail(body.detail);
   const duplicate = body?.duplicate === true;
@@ -377,8 +463,14 @@ function fromAnswer(answer: ClassifiedAnswer, messageId: string, peer: PeerNamed
       if (answer.reason === 'unauthenticated') {
         return { outcome: 'refused', by, reason: 'not-registered', message: NOT_REGISTERED_MESSAGE, detail, retryAfterSec, messageId, peer };
       }
-      const message = answer.reason === 'no-relay' ? noRelayMessage({ state: 'none', why: 'old-cloud' }) : null;
-      return { outcome: 'refused', by, reason: answer.reason ?? 'refused', message, detail, retryAfterSec, messageId, peer };
+      const reason = answer.reason ?? 'refused';
+      const message =
+        reason === 'no-relay'
+          ? noRelayMessage({ state: 'none', why: 'old-cloud' })
+          : by === 'peer'
+            ? peerRefusalMessage(reason, retryAfterSec, words)
+            : cloudRefusalMessage(reason, retryAfterSec, words);
+      return { outcome: 'refused', by, reason, message, detail, retryAfterSec, messageId, peer };
     }
     case 'not-verified':
     case 'unavailable':

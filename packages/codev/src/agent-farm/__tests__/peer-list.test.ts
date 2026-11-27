@@ -444,6 +444,7 @@ describe("walkthrough step 1: 'afx peer list' on mbp, with the switch off", () =
           return 'reporting';
         },
         tunnelUp: () => true,
+        wakeOutbox: () => {},
       }),
       log: (level, message) => logged.push(`${level} ${message}`),
     });

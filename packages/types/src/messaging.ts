@@ -113,3 +113,49 @@ export interface TowerRef {
 export type TowerRefParseResult =
   | { ok: true; ref: TowerRef }
   | { ok: false; error: AddressParseError };
+
+/**
+ * `POST /api/send`'s `error` for a send to another Tower that was refused (Spec 1967): by
+ * the sending Tower's own checks, by Codev Cloud, or by the receiving Tower. The answer is a
+ * 403 whose `message` is for a person and whose other fields are a {@link RemoteSendRefusal}.
+ */
+export const REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
+
+/** Who refused a send to another Tower. */
+export type RemoteRefuser = 'this-tower' | 'cloud' | 'peer';
+
+/** A refused send to another Tower, beside the refusal's `error` and `message`. */
+export interface RemoteSendRefusal {
+  refusedBy: RemoteRefuser;
+  /** The reason as the refusing party named it (contract section 6), or the sending Tower's check. */
+  reason: string;
+  /** With `rate-limited`, when the refusing party said: seconds until a send may be tried again. */
+  retryAfterSec: number | null;
+  /** The message's id, when it had been stored on this Tower before it was refused. */
+  mailboxId: string | null;
+  /** The receiving Tower's current name, once it was known. */
+  peer: string | null;
+}
+
+/**
+ * Where a message held for an agent on another Tower waits (Spec 1967, Decision 5): on the
+ * receiving Tower, which delivers it there, or here, on the sending Tower, which sends it
+ * when the route to that Tower works again.
+ */
+export type RemoteHeldWhere = 'recipient' | 'this-tower';
+
+/**
+ * A send to another Tower that was not refused, as `POST /api/send` answers it beside the
+ * fields every send has (`delivered`, `held`, `reason`, `mailboxId`, `bodyLength`).
+ * `resolvedTo` is the recipient's full address, and `mailboxId` the message's id.
+ */
+export interface RemoteSendAnswer {
+  /** The receiving Tower's current name. */
+  peer: string;
+  /** With `held`: where the message waits. */
+  heldWhere?: RemoteHeldWhere;
+  /** Held here: how many messages for that Tower are held ahead of this one. */
+  ahead?: number;
+  /** The receiving Tower had accepted this message before: its first answer was lost. */
+  duplicate?: boolean;
+}

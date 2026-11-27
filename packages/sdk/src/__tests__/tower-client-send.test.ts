@@ -153,7 +153,7 @@ describe('TowerClient.sendMessage — the error code of a failed send', () => {
 
   it.each([
     [400, 'MALFORMED_ADDRESS', 'Malformed address: a local address has at most a workspace before `architect`.'],
-    [400, 'CROSS_TOWER_UNAVAILABLE', 'Cross-Tower messaging is not available in this version.'],
+    [400, 'LOCAL_ADDRESS_ONLY', 'An interrupt takes a local address: [<workspace>:]architect[:<name>] or [<workspace>:]<builder-or-shell-id>.'],
     [403, 'REFUSED', 'builder builder-spir-100 may only address its own spawning architect'],
     [404, 'NOT_FOUND', "Architect 'ghost' not found in workspace 'codev-cloud'."],
     [409, 'AMBIGUOUS', "Project 'codev' is ambiguous"],
@@ -194,5 +194,89 @@ describe('TowerClient.sendMessage — the error code of a failed send', () => {
     const result = await new TowerClient().sendMessage('codev-cloud:architect:tunnel', 'hi');
     expect(result.ok).toBe(true);
     expect(result.errorCode).toBeUndefined();
+  });
+});
+
+/**
+ * Spec 1967: a send to another Tower. It may take longer than a local one to answer, its
+ * refusal carries who refused and why, and its answer says where a held message waits.
+ */
+describe('TowerClient.sendMessage — a send to another Tower', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A Tower that answers only after `ms`, unless the request is aborted first. */
+  function answeringAfter(ms: number): ReturnType<typeof vi.fn> {
+    return vi.fn(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(
+            () => resolve(new Response(JSON.stringify({ ok: true, resolvedTo: 'x' }), { status: 200, headers: { 'Content-Type': 'application/json' } })),
+            ms,
+          );
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('The operation was aborted due to timeout'));
+          });
+        }),
+    );
+  }
+
+  it('waits longer for an afx:// address than for a local one', async () => {
+    const fetchFn = answeringAfter(80);
+    const client = new TowerClient({ fetchFn: fetchFn as unknown as typeof fetch, requestTimeoutMs: 20 });
+    expect(await client.sendMessage('codev:architect:local', 'hi')).toMatchObject({ ok: false, error: 'Request timeout' });
+    expect(await client.sendMessage('afx://devvm/codev:architect:local', 'hi')).toMatchObject({ ok: true });
+    // Text that is not an address is Tower's to refuse, on the ordinary timeout.
+    expect(await client.sendMessage('afx://devvm', 'hi')).toMatchObject({ ok: false, error: 'Request timeout' });
+  });
+
+  it('gives a refusal in its own words, with who refused and why, and no code after the words', async () => {
+    const body = {
+      error: 'REMOTE_REFUSED',
+      message: 'Refused by devvm: remote messaging is off there.',
+      refusedBy: 'peer',
+      reason: 'remote-off',
+      retryAfterSec: null,
+      mailboxId: '7c1e52aa-0000-4000-8000-000000000001',
+      peer: 'devvm',
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, text: async () => JSON.stringify(body) }) as unknown as Response));
+
+    const result = await new TowerClient().sendMessage('afx://devvm/codev:architect:local', 'hi');
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Refused by devvm: remote messaging is off there.',
+      errorCode: 'REMOTE_REFUSED',
+      refusal: { refusedBy: 'peer', reason: 'remote-off', retryAfterSec: null, mailboxId: '7c1e52aa-0000-4000-8000-000000000001', peer: 'devvm' },
+    });
+  });
+
+  it('keeps the plain failure when a REMOTE_REFUSED body lacks its fields', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 403, text: async () => JSON.stringify({ error: 'REMOTE_REFUSED', message: 'no' }) }) as unknown as Response),
+    );
+    expect(await new TowerClient().sendMessage('afx://devvm/codev:architect', 'hi')).toEqual({
+      ok: false,
+      error: 'no (REMOTE_REFUSED)',
+      errorCode: 'REMOTE_REFUSED',
+    });
+  });
+
+  it('passes on where a held message waits, and leaves remote out of a local answer', async () => {
+    const remote = { peer: 'devvm', heldWhere: 'this-tower', ahead: 1 };
+    vi.stubGlobal('fetch', mockFetchReturning({ ok: true, resolvedTo: 'afx://devvm/codev:architect', held: true, reason: 'tower-offline', mailboxId: 'm-1', remote }));
+    expect(await new TowerClient().sendMessage('afx://devvm/codev:architect', 'hi')).toMatchObject({
+      ok: true,
+      held: true,
+      reason: 'tower-offline',
+      mailboxId: 'm-1',
+      remote,
+    });
+    vi.stubGlobal('fetch', mockFetchReturning({ ok: true, resolvedTo: 'main' }));
+    expect(await new TowerClient().sendMessage('architect', 'hi')).not.toHaveProperty('remote');
   });
 });

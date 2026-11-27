@@ -54,6 +54,8 @@ interface CloudStub {
   tunnelUp: boolean;
   report: PeerSwitchReport | 'throws';
   reported: PeerSwitchState[];
+  /** How many times the outbox was woken (Spec 1967, phase 9). */
+  wakes: number;
 }
 
 interface Harness {
@@ -106,6 +108,7 @@ beforeEach(async () => {
     tunnelUp: true,
     report: 'reporting',
     reported: [],
+    wakes: 0,
   };
   const logged: string[] = [];
   const deps: PeerRouteDeps = {
@@ -128,6 +131,9 @@ beforeEach(async () => {
         if (cloud.report === 'throws') throw new Error('cloud-config.json is not valid JSON');
         cloud.reported.push(state);
         return cloud.report;
+      },
+      wakeOutbox: () => {
+        cloud.wakes++;
       },
     }),
     log: (level, message) => logged.push(`${level} ${message}`),
@@ -234,6 +240,18 @@ describe('afx peer on / off', () => {
     const again = await run((d) => peerOn(HUMAN, d));
     expect(again.printed[0]).toContain('Remote messaging was already on for ana-s-mbp.');
     expect(store.readRemoteMessaging(harness.db).changedAt).toBe(T0 + 60_000);
+  });
+
+  // Spec 1967, phase 9: mail held here while the switch was off paused, and may leave now.
+  it('wakes the outbox when, and only when, the switch turns on', async () => {
+    await run((d) => peerOn(HUMAN, d));
+    expect(harness.cloud.wakes).toBe(1);
+    await run((d) => peerOn(HUMAN, d));
+    await run((d) => peerOff({}, d));
+    await run((d) => peerOff({}, d));
+    expect(harness.cloud.wakes).toBe(1);
+    await run((d) => peerOn(HUMAN, d));
+    expect(harness.cloud.wakes).toBe(2);
   });
 
   it('turns it off with no flag, and says how many grants apply when turned back on', async () => {

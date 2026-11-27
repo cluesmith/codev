@@ -13,8 +13,9 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_REFUSED_ERROR } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
+import { isRemoteAddress, parseAddress } from './address.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
 
 /*
@@ -25,6 +26,37 @@ import { parseSseText, type SseEnvelope } from './sse.js';
 export type { OverviewData } from '@cluesmith/codev-types';
 
 const REQUEST_TIMEOUT_MS = 10000;
+
+/**
+ * How long a send to another Tower may take to answer (Spec 1967). The sending Tower may
+ * fetch its peer list to resolve the name, wait for a relay call ahead of this one, and make
+ * this one, each bounded by its own 20-second timeout; the margin covers the rest.
+ */
+const REMOTE_SEND_TIMEOUT_MS = 65_000;
+
+/** `POST /api/send`'s code for a refused send to another Tower; the value itself, as the SDK carries no runtime import. */
+const REMOTE_REFUSED: typeof REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
+
+/** Is `to` an address that names a Tower? Text that is not an address is not, and Tower refuses it. */
+function namesATower(to: string): boolean {
+  const parsed = parseAddress(to);
+  return parsed.ok && isRemoteAddress(parsed.address);
+}
+
+/** The refusal fields of a `REMOTE_REFUSED` answer, each only if it has its type. */
+function readRemoteRefusal(body: Record<string, unknown> | undefined): RemoteSendRefusal | undefined {
+  if (body === undefined) return undefined;
+  const { refusedBy, reason, retryAfterSec, mailboxId, peer } = body;
+  if (refusedBy !== 'this-tower' && refusedBy !== 'cloud' && refusedBy !== 'peer') return undefined;
+  if (typeof reason !== 'string') return undefined;
+  return {
+    refusedBy,
+    reason,
+    retryAfterSec: typeof retryAfterSec === 'number' ? retryAfterSec : null,
+    mailboxId: typeof mailboxId === 'string' ? mailboxId : null,
+    peer: typeof peer === 'string' ? peer : null,
+  };
+}
 
 /**
  * The command-relay route. Mirrors `COMMAND_ROUTE` in `@cluesmith/codev-types`
@@ -415,6 +447,16 @@ function extractTowerErrorCode(text: string): string | undefined {
   }
 }
 
+/** A Tower error body as an object, when it is one. */
+function extractTowerErrorBody(text: string): Record<string, unknown> | undefined {
+  try {
+    const json: unknown = JSON.parse(text);
+    return typeof json === 'object' && json !== null && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * True for the answer a Tower gives to a route it does not have: its catch-all 404, which
  * is plain text and so carries no code. Asked only of routes whose own 404s carry one
@@ -422,6 +464,18 @@ function extractTowerErrorCode(text: string): string | undefined {
  */
 function isUnknownRoute(result: { status: number; errorCode?: string }): boolean {
   return result.status === 404 && result.errorCode === undefined;
+}
+
+/** What {@link TowerClient.request} returns. */
+export interface TowerRequestResult<T> {
+  ok: boolean;
+  status: number;
+  data?: T;
+  error?: string;
+  errorCode?: string;
+  /** A failed answer's body, when it was a JSON object. */
+  errorBody?: Record<string, unknown>;
+  connectionRefused?: boolean;
 }
 
 /** A refused or unanswered call to a peer route (Spec 1967). */
@@ -468,8 +522,9 @@ export class TowerClient {
    */
   async request<T>(
     path: string,
-    options: RequestInit = {}
-  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; errorCode?: string; connectionRefused?: boolean }> {
+    options: RequestInit = {},
+    timeoutMs: number = this.requestTimeoutMs,
+  ): Promise<TowerRequestResult<T>> {
     try {
       const authKey = this.getAuthKey();
       const headers: Record<string, string> = {
@@ -483,16 +538,21 @@ export class TowerClient {
       const response = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...options,
         headers,
-        signal: AbortSignal.timeout(this.requestTimeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) {
         const text = await response.text();
         const error = extractTowerError(text);
         const errorCode = extractTowerErrorCode(text);
-        return errorCode === undefined
-          ? { ok: false, status: response.status, error }
-          : { ok: false, status: response.status, error, errorCode };
+        const errorBody = extractTowerErrorBody(text);
+        return {
+          ok: false,
+          status: response.status,
+          error,
+          ...(errorCode === undefined ? {} : { errorCode }),
+          ...(errorBody === undefined ? {} : { errorBody }),
+        };
       }
 
       if (response.status === 204) {
@@ -1111,10 +1171,21 @@ export class TowerClient {
      * Spec 1940: Tower's code for a failed send, when it gave one, so a caller can tell the
      * failures apart without matching {@link error}'s text: `MALFORMED_ADDRESS` (the text
      * is not an address), `REFUSED` (this sender may not name that recipient),
-     * `CROSS_TOWER_UNAVAILABLE` (an `afx://` address), and the older `NOT_FOUND`,
+     * `REMOTE_REFUSED` (a send to another Tower was refused; see {@link refusal}),
+     * `LOCAL_ADDRESS_ONLY` (an interrupt names another Tower), and the older `NOT_FOUND`,
      * `AMBIGUOUS` and `INVALID_PARAMS`. Absent when Tower could not be reached.
      */
     errorCode?: string;
+    /**
+     * Spec 1967: with `REMOTE_REFUSED`, who refused the send to another Tower and why.
+     * {@link error} is then the refusal in words for a person, with no code after it.
+     */
+    refusal?: RemoteSendRefusal;
+    /**
+     * Spec 1967: a send to another Tower that was not refused. `resolvedTo` is the
+     * recipient's full address and `mailboxId` the message's id; `held` says where.
+     */
+    remote?: RemoteSendAnswer;
     /**
      * Spec 1313 mailbox-first delivery. `delivered` = written to the PTY now;
      * `held` = persisted to the durable mailbox and awaiting a clean prompt
@@ -1197,6 +1268,7 @@ export class TowerClient {
       bodyLength?: number;
       verified?: boolean;
       unverifiedCause?: 'no-echo' | 'input-raced';
+      remote?: RemoteSendAnswer;
     }>(
       '/api/send',
       {
@@ -1216,11 +1288,16 @@ export class TowerClient {
           },
         }),
       },
+      namesATower(to) ? Math.max(REMOTE_SEND_TIMEOUT_MS, this.requestTimeoutMs) : this.requestTimeoutMs,
     );
 
     if (!result.ok) {
       const failure = { ok: false, error: result.error, connectionRefused: result.connectionRefused };
-      return result.errorCode === undefined ? failure : { ...failure, errorCode: result.errorCode };
+      if (result.errorCode === undefined) return failure;
+      const refusal = result.errorCode === REMOTE_REFUSED ? readRemoteRefusal(result.errorBody) : undefined;
+      const message = result.errorBody?.message;
+      if (refusal === undefined || typeof message !== 'string') return { ...failure, errorCode: result.errorCode };
+      return { ...failure, error: message, errorCode: result.errorCode, refusal };
     }
 
     return {
@@ -1239,6 +1316,7 @@ export class TowerClient {
       bodyLength: result.data!.bodyLength,
       verified: result.data!.verified,
       unverifiedCause: result.data!.unverifiedCause,
+      ...(result.data!.remote === undefined ? {} : { remote: result.data!.remote }),
     };
   }
 
