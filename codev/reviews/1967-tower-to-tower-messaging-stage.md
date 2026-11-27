@@ -17,6 +17,24 @@ it.*
   - **The ruling.** Neither spec states this. The ruling is the architect's, not the owner's;
     the owner has been told and may overrule. The wire contract does not change, so nothing goes
     to the cloud side.
+- **Discovery lists running workspaces only (phase 10; architect ruling, 2026-11-27T10:27Z).**
+  - **What is listed.** `afx peer show` lists what a message could reach now: the agents of
+    workspaces that are running on the peer. An agent of a running workspace with no live
+    terminal is listed `not live`, because mail for it is accepted and held.
+  - **What is not.** A stopped workspace is not listed. Spec 1940's address book resolves a
+    name only to a running workspace, so step 13 refuses mail to a stopped one as
+    `no-such-agent`. Listing it would offer an address a message cannot reach.
+  - **The ruling.** Neither spec states this; Spec 1940 has a full grant show "every active
+    workspace". The ruling is the architect's, not the owner's; the owner has been told and may
+    overrule.
+- **The receiving Tower's query limit counts answered queries only (phase 10; architect ruling,
+  2026-11-27T10:27Z).**
+  - **The rule.** R counts a query against its 10-a-minute limit only once it has passed the
+    grant check, as a message's limit is checked after its grant. So a peer with no grant is
+    refused `no-grant` every time and never reaches R's limit.
+  - **What bounds such a peer.** Codev Cloud's per-pair query limit, which stands in front of R.
+  - **The ruling.** Neither spec states the order. The ruling is the architect's, not the
+    owner's; the owner has been told and may overrule.
 
 ## Phases closed by porch's force-advance
 

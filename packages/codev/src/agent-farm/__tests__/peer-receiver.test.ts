@@ -734,6 +734,7 @@ describe('eager withdrawal through the peer routes', () => {
         reportSwitch: () => 'not-connected',
         tunnelUp: () => false,
         wakeOutbox: () => {},
+        outbox: () => ({ inFlightFor: () => null, pausedBecause: () => null }),
         show: async () => {
           throw new Error('these routes ask no peer');
         },

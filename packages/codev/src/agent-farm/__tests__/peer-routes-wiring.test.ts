@@ -243,8 +243,11 @@ describe('the peer routes through handleRequest', () => {
               protocols: [1],
               remoteMessaging: 'on',
               mayMessage: [expect.objectContaining({ recipient: 'codev:architect:review', mode: 'deliver' })],
+              // Phase 11: no mark is set, and no relayed request was refused for this Tower's clock.
+              marks: [],
             },
           ],
+          clockSkewSince: null,
         },
       });
       // The switch report goes nowhere either: the tunnel is down.

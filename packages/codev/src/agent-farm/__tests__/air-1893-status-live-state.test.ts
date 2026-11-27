@@ -33,6 +33,8 @@ vi.mock('../lib/tower-client.js', () => ({
     getHealth: (...a: any[]) => mockGetHealth(...a),
     getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
     getOverview: (...a: any[]) => mockGetOverview(...a),
+    // Spec 1967: the remote-messaging line; this suite's Tower predates it.
+    getPeerStatus: async () => ({ ok: false, status: 404, error: 'Not found', unknownRoute: true }),
   }),
 }));
 vi.mock('../lib/builder-activity.js', () => ({

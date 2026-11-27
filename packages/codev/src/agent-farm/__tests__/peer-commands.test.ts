@@ -15,19 +15,26 @@
  * Tower's limits, with a short record retention used as 30 days.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { TowerClient } from '@cluesmith/codev-sdk/tower-client';
-import type { PeerCloudRelay, PeerListingTower, PeerListProblem, PeerSwitchReport, PeerSwitchState } from '@cluesmith/codev-types';
+import type { PeerCloudRelay, PeerListingTower, PeerListProblem, PeerQueuePause, PeerSwitchReport, PeerSwitchState } from '@cluesmith/codev-types';
 import { GLOBAL_SCHEMA } from '../db/schema.js';
 import * as store from '../peer/store.js';
 import { createPeerRouteHandler, type PeerRouteDeps } from '../servers/peer-routes.js';
-import { peerGrant, peerGrants, peerLimits, peerList, peerOff, peerOn, peerRevoke, type PeerDeps } from '../commands/peer.js';
+import { peerGrant, peerGrants, peerLimits, peerList, peerLog, peerOff, peerOn, peerRevoke, type PeerDeps } from '../commands/peer.js';
+import * as mailbox from '../db/mailbox.js';
+import { renderTowerRemoteMessaging } from '../commands/peer-status.js';
+import { logger } from '../utils/logger.js';
+import { PEER_RUN_MARK_LENGTH } from '../peer/outbox.js';
+import { encodeMessagePayload } from '../peer/contract.js';
+import type { PeerLogResponse, PeerOutboxResponse, PeerStatusResponse } from '@cluesmith/codev-types';
 import { resolvePeerSettings, type CodevConfig } from '../../lib/config.js';
 import type { RegisteredWorkspace } from '../utils/workspace-address.js';
 
@@ -56,6 +63,9 @@ interface CloudStub {
   reported: PeerSwitchState[];
   /** How many times the outbox was woken (Spec 1967, phase 9). */
   wakes: number;
+  /** Why the outbox's queues are paused, and which message's call is in flight (phase 11). */
+  paused: PeerQueuePause | null;
+  inFlight: string | null;
 }
 
 interface Harness {
@@ -109,6 +119,8 @@ beforeEach(async () => {
     report: 'reporting',
     reported: [],
     wakes: 0,
+    paused: null,
+    inFlight: null,
   };
   const logged: string[] = [];
   const deps: PeerRouteDeps = {
@@ -135,6 +147,7 @@ beforeEach(async () => {
       wakeOutbox: () => {
         cloud.wakes++;
       },
+      outbox: () => ({ inFlightFor: () => cloud.inFlight, pausedBecause: () => cloud.paused }),
       show: async () => {
         throw new Error('peer-discovery.test.ts drives afx peer show');
       },
@@ -687,5 +700,296 @@ describe('talking to a Tower that cannot answer', () => {
     } finally {
       await new Promise<void>((resolve) => old.close(() => resolve()));
     }
+  });
+});
+
+// ===========================================================================
+// Phase 11: the record, the marks, the status and mail waiting for a peer
+// ===========================================================================
+
+const ISO = (ms: number) => new Date(ms).toISOString();
+const BODY = 'a body the record never keeps: 7f1c9e';
+
+/** A message persisted for a peer, as the sender writes it: real payload bytes, with a body. */
+function forPeer(options: { peer?: string; workspace?: string; fromAgent?: string; sentAt?: number } = {}): store.PeerOutboxRow {
+  const sentAt = options.sentAt ?? harness.clock.now;
+  const encoded = encodeMessagePayload({ sentAt, to: { workspace: 'codev', kind: 'architect', name: 'local' }, from: { workspace: 'codev', kind: 'architect', name: 'main' }, body: BODY });
+  if (!encoded.ok) throw new Error('the test payload did not encode');
+  const peer = options.peer ?? DEVVM;
+  return store.insertOutbox(
+    harness.db,
+    {
+      messageId: randomUUID(),
+      peerTowerId: peer,
+      toAddress: `afx://${peer === DEVVM ? 'devvm' : 'mbp'}/codev:architect:local`,
+      fromAddress: 'codev:architect:main',
+      payload: encoded.bytes,
+      sentAt,
+      fromWorkspacePath: options.workspace ?? CODEV,
+      fromAgent: options.fromAgent ?? 'architect:main',
+    },
+    harness.clock.now,
+  );
+}
+
+/** One relay call's record, as the outbox writes it after an answer. */
+function recordCall(row: store.PeerOutboxRow, outcome: 'delivered' | 'unavailable', reason: string | null, at = harness.clock.now): void {
+  store.insertRecord(harness.db, {
+    direction: 'outbound',
+    at,
+    kind: 'message',
+    peerTowerId: row.peerTowerId,
+    peerSlug: 'devvm',
+    tunnelSession: null,
+    messageId: row.messageId,
+    fromAddress: row.fromAddress,
+    toAddress: row.toAddress,
+    payloadSize: row.payload.length,
+    outcome,
+    reason,
+  });
+}
+
+/** Mail from a peer, held for release, as the receiver stores it. */
+function heldForRelease(peer = DEVVM): string {
+  const result = mailbox.enqueueRemote(
+    harness.db,
+    {
+      workspacePath: CODEV,
+      toAgent: 'architect:local',
+      body: 'from devvm',
+      formattedMessage: '[remote] from devvm',
+      reason: null,
+      releaseHold: true,
+      remote: {
+        sender: { towerId: peer, towerSlug: peer === DEVVM ? 'devvm' : 'mbp', address: { workspace: 'codev', kind: 'architect', name: 'main' } },
+        messageId: randomUUID(),
+        ownerEmail: 'ana@example.com',
+        payloadSha256: 'c'.repeat(64),
+        sentAt: harness.clock.now,
+      },
+    },
+    harness.clock.now,
+  );
+  if (!result.accepted) throw new Error('expected a new remote row');
+  return result.row.id;
+}
+
+describe('afx peer log', () => {
+  it('shows a flood as one counted line, an ordinary attempt as its own, newest first, and never a body', async () => {
+    const row = forPeer();
+    recordCall(row, 'delivered', null, harness.clock.now - 30_000);
+    const floodStart = harness.clock.now - 20_000;
+    for (let i = 0; i < 40; i++) {
+      store.countAggregate(harness.db, { direction: 'inbound', at: floodStart + i * 100, sender: { peerTowerId: MBP }, outcome: 'refused', reason: 'rate-limited' });
+    }
+    resolveAccepted(row);
+    const shown = await run((d) => peerLog({}, d));
+    expect(shown).toEqual({
+      error: null,
+      printed: [
+        `${ISO(floodStart)}  in   request from mbp  refused (rate-limited)  ×40 until ${ISO(floodStart + 3900)}`,
+        `${ISO(harness.clock.now - 30_000)}  out  message to devvm  codev:architect:main → afx://devvm/codev:architect:local  delivered  id ${row.messageId}  ${row.payload.length} B  message now: accepted`,
+      ],
+    });
+    expect(shown.printed.join('\n')).not.toContain(BODY);
+    const raw = await harness.raw('GET', '/api/peer/log');
+    expect(JSON.stringify(raw.body)).not.toContain(BODY);
+  });
+
+  it("shows an answer this Tower did not use beside what the message did: its registration changed during the call", async () => {
+    const row = forPeer();
+    recordCall(row, 'delivered', null);
+    store.recordOutboxAttempt(harness.db, row.messageId, { outcome: 'unavailable', reason: 'registration-changed', nextAttemptAt: harness.clock.now + 5_000 }, harness.clock.now);
+    const [line] = (await run((d) => peerLog({}, d))).printed;
+    expect(line).toContain('  delivered  id ');
+    expect(line.endsWith('message now: held (registration-changed)')).toBe(true);
+  });
+
+  it("shows one peer's attempts with --peer, by its current or a former name, and refuses a Tower it does not know", async () => {
+    recordCall(forPeer(), 'unavailable', 'tower-offline');
+    store.countAggregate(harness.db, { direction: 'inbound', at: harness.clock.now, sender: { peerTowerId: MBP }, outcome: 'refused', reason: 'rate-limited' });
+    const devvm = (await run((d) => peerLog({ tower: 'devvm' }, d))).printed;
+    expect(devvm).toHaveLength(1);
+    expect(devvm[0]).toContain('message to devvm');
+    expect(devvm[0]).toContain('unavailable (tower-offline)');
+    expect((await run((d) => peerLog({ tower: 'nowhere' }, d))).error).toContain("No Tower named 'nowhere'");
+    expect((await run((d) => peerLog({ tower: 'mbp' }, d))).printed).toEqual([
+      `${ISO(harness.clock.now)}  in   request from mbp  refused (rate-limited)  ×1 until ${ISO(harness.clock.now)}`,
+    ]);
+  });
+
+  it('says when nothing is recorded, shows the newest rows up to the limit, and refuses a limit out of range', async () => {
+    expect((await run((d) => peerLog({}, d))).printed).toEqual(['No cross-Tower attempts recorded.']);
+    for (let i = 0; i < 3; i++) recordCall(forPeer(), 'unavailable', 'tower-offline', harness.clock.now + i);
+    const limited = (await run((d) => peerLog({ limit: 2 }, d))).printed;
+    expect(limited).toHaveLength(3);
+    expect(limited[0].startsWith(ISO(harness.clock.now + 2))).toBe(true);
+    expect(limited[2]).toBe('[info] Older attempts are not shown. Show more with: afx peer log --limit <count>');
+    expect((await run((d) => peerLog({ limit: 0 }, d))).error).toBe("'--limit' must be a whole number from 1: got 0.");
+    for (const limit of ['0', '1001', '-1', '2.5', 'x']) {
+      expect((await harness.raw('GET', `/api/peer/log?limit=${limit}`)).status).toBe(400);
+    }
+  });
+
+  it('shows the marks set now first, and drops them when they clear', async () => {
+    for (let i = 0; i < PEER_RUN_MARK_LENGTH; i++) store.notePeerAnswer(harness.db, DEVVM, 'not-verified', T0 + i);
+    store.notePeerAnswer(harness.db, MBP, 'clock-skew', T0 + 10);
+    const marked = (await run((d) => peerLog({}, d))).printed;
+    expect(marked).toEqual([
+      `! devvm: not verifying: its last ${PEER_RUN_MARK_LENGTH} messages from here were not verified there, since ${ISO(T0)}. The two Towers may disagree about the contract; this Tower keeps retrying at the capped interval.`,
+      `! mbp: clock out of range: it refused a message from here as clock-skew at ${ISO(T0 + 10)}. Its clock may be wrong (Codev Cloud's clock is the reference); this Tower keeps retrying.`,
+      'No cross-Tower attempts recorded.',
+    ]);
+    expect((await run((d) => peerLog({ tower: 'mbp' }, d))).printed[0]).toMatch(/^! mbp: clock out of range/);
+    store.notePeerAnswer(harness.db, DEVVM, null, T0 + 20);
+    store.notePeerAnswer(harness.db, MBP, null, T0 + 20);
+    expect((await run((d) => peerLog({}, d))).printed).toEqual(['No cross-Tower attempts recorded.']);
+  });
+});
+
+/** Resolve an outbox row as the peer's acceptance would. */
+function resolveAccepted(row: store.PeerOutboxRow): void {
+  store.resolveOutbox(harness.db, row.messageId, { state: 'accepted', outcome: 'delivered', reason: null, attempted: true }, harness.clock.now);
+}
+
+describe('afx peer list: the marks (G10, G12, G15)', () => {
+  beforeEach(() => {
+    harness.cloud.refreshProblem = 'recent';
+  });
+
+  it('shows each mark under its Tower while it is set, and drops it when it clears', async () => {
+    for (let i = 0; i < PEER_RUN_MARK_LENGTH; i++) store.notePeerAnswer(harness.db, DEVVM, 'cloud-error', T0 + i);
+    expect((await run((d) => peerList({}, d))).printed).toEqual([
+      'Remote messaging: off — a human turns it on with: afx peer on',
+      'devvm  you  online  may message this Tower: nothing',
+      `  ! cloud error: Codev Cloud failed the last ${PEER_RUN_MARK_LENGTH} messages to it, since ${ISO(T0)}, as it cannot build a valid statement for this pair. This Tower keeps retrying at the capped interval.`,
+      'mbp    you  online  may message this Tower: nothing',
+    ]);
+    store.notePeerAnswer(harness.db, DEVVM, null, T0 + 10);
+    expect((await run((d) => peerList({}, d))).printed).toHaveLength(3);
+  });
+
+  it('shows no mark for a run shorter than the mark needs', async () => {
+    for (let i = 0; i < PEER_RUN_MARK_LENGTH - 1; i++) store.notePeerAnswer(harness.db, DEVVM, 'not-verified', T0 + i);
+    expect((await run((d) => peerList({}, d))).printed.some((line) => line.includes('not verifying'))).toBe(false);
+  });
+
+  it("says this Tower's own clock may be out of range while a request was refused as clock-skew in the last 10 minutes", async () => {
+    const at = harness.clock.now - 60_000;
+    store.insertRecord(harness.db, {
+      direction: 'inbound', at, kind: 'message', peerTowerId: MBP, peerSlug: 'mbp', tunnelSession: 's1', messageId: randomUUID(),
+      fromAddress: null, toAddress: null, payloadSize: 100, outcome: 'refused', reason: 'clock-skew',
+    });
+    const note = `[info] This Tower's clock may be out of range: it refused a request from another Tower as clock-skew at ${ISO(at)}, and Codev Cloud's clock is the reference. Check this machine's clock.`;
+    expect((await run((d) => peerList({}, d))).printed.at(-1)).toBe(note);
+    expect((await run((d) => peerLog({}, d))).printed[0]).toBe(`! ${note.slice('[info] '.length)}`);
+    harness.clock.now = at + 10 * 60_000 + 1;
+    expect((await run((d) => peerList({}, d))).printed).not.toContain(note);
+  });
+});
+
+describe('released mail still waiting, on afx peer off and afx peer revoke (the architect\'s ruling, 04:51Z)', () => {
+  it('afx peer off says how many released messages from other Towers still wait, and how to stop one', async () => {
+    await run((d) => peerOn(HUMAN, d));
+    mailbox.release(harness.db, heldForRelease(DEVVM), harness.clock.now);
+    mailbox.release(harness.db, heldForRelease(MBP), harness.clock.now);
+    heldForRelease(DEVVM); // still held for release: not released, so not counted
+    expect((await run((d) => peerOff({}, d))).printed).toEqual([
+      '[ok] Remote messaging is off for ana-s-mbp. It sends nothing to other Towers and accepts nothing from them.',
+      '[info] 2 messages from other Towers were released by a human and still wait to be delivered here: a release stands. Stop one with: afx inbox dismiss <id>',
+    ]);
+  });
+
+  it("afx peer revoke counts the revoked Tower's released mail only, and says nothing when none waits", async () => {
+    await run((d) => peerGrant({ tower: 'devvm', all: true, ...HUMAN }, d));
+    await run((d) => peerGrant({ tower: 'mbp', all: true, ...HUMAN }, d));
+    mailbox.release(harness.db, heldForRelease(DEVVM), harness.clock.now);
+    expect((await run((d) => peerRevoke({ tower: 'devvm' }, d))).printed).toEqual([
+      '[ok] Removed the grant for devvm: it may no longer message this Tower.',
+      '[info] One message from devvm was released by a human and still waits to be delivered here: a release stands. Stop one with: afx inbox dismiss <id>',
+    ]);
+    expect((await run((d) => peerRevoke({ tower: 'mbp' }, d))).printed).toEqual(['[ok] Removed the grant for mbp: it may no longer message this Tower.']);
+  });
+});
+
+describe('GET /api/peer/outbox and GET /api/peer/status', () => {
+  it("lists one workspace's mail waiting for a peer, oldest first, under any spelling of its path", async () => {
+    const real = join(dir, 'real-ws');
+    const link = join(dir, 'link-ws');
+    mkdirSync(real);
+    symlinkSync(real, link);
+    const first = forPeer({ workspace: link });
+    const second = forPeer({ workspace: real, peer: MBP });
+    forPeer({ workspace: OTHER });
+    harness.cloud.inFlight = first.messageId;
+    for (const spelling of [real, link]) {
+      const answer = (await harness.raw('GET', `/api/peer/outbox?workspace=${encodeURIComponent(spelling)}`)).body as unknown as PeerOutboxResponse;
+      expect(answer.paused).toBeNull();
+      expect(answer.messages.map((m) => m.id)).toEqual([first.messageId, second.messageId]);
+      expect(answer.messages[0]).toMatchObject({ peerName: 'devvm', state: 'held', reason: 'queued', inFlight: true, fromAgent: 'architect:main' });
+      expect(answer.messages[1]).toMatchObject({ peerName: 'mbp', inFlight: false });
+      expect(JSON.stringify(answer)).not.toContain(BODY);
+    }
+    harness.cloud.paused = 'remote-off';
+    expect(((await harness.raw('GET', `/api/peer/outbox?workspace=${encodeURIComponent(real)}`)).body as unknown as PeerOutboxResponse).paused).toBe('remote-off');
+    expect((await harness.raw('GET', '/api/peer/outbox')).status).toBe(400);
+  });
+
+  it('gives the next try for the head of each queue only', async () => {
+    const head = forPeer();
+    const behind = forPeer();
+    store.recordOutboxAttempt(harness.db, head.messageId, { outcome: 'unavailable', reason: 'tower-offline', nextAttemptAt: harness.clock.now + 5_000 }, harness.clock.now);
+    const answer = (await harness.raw('GET', `/api/peer/outbox?workspace=${encodeURIComponent(CODEV)}`)).body as unknown as PeerOutboxResponse;
+    expect(answer.messages.map((m) => [m.id, m.reason, m.nextAttemptAt])).toEqual([
+      [head.messageId, 'tower-offline', harness.clock.now + 5_000],
+      [behind.messageId, 'queued', null],
+    ]);
+  });
+
+  it('answers the status from what this Tower knows: the switch, its name, the tunnel and the cached list', async () => {
+    const before = harness.cloud.refreshes;
+    const status = (await harness.raw('GET', '/api/peer/status')).body as unknown as PeerStatusResponse;
+    expect(status).toEqual({ remoteMessaging: 'off', towerName: 'ana-s-mbp', tunnel: 'up', peers: { listed: 2, online: 2, listedAt: T0 } });
+    expect(harness.cloud.refreshes).toBe(before);
+    await run((d) => peerOn(HUMAN, d));
+    harness.cloud.tunnelUp = false;
+    expect((await harness.raw('GET', '/api/peer/status')).body).toMatchObject({ remoteMessaging: 'on', tunnel: 'down' });
+  });
+
+  it('carries the marks on GET /api/peer/towers, and the log route answers in its shape', async () => {
+    store.notePeerAnswer(harness.db, MBP, 'clock-skew', T0 + 5);
+    const towers = (await harness.raw('GET', '/api/peer/towers')).body as { towers: Array<{ name: string; marks: unknown[] }>; clockSkewSince: number | null };
+    expect(towers.towers.find((t) => t.name === 'mbp')?.marks).toEqual([{ mark: 'clock-out-of-range', run: 1, since: T0 + 5, lastAt: T0 + 5 }]);
+    expect(towers.towers.find((t) => t.name === 'devvm')?.marks).toEqual([]);
+    expect(towers.clockSkewSince).toBeNull();
+    const log = (await harness.raw('GET', '/api/peer/log')).body as unknown as PeerLogResponse;
+    expect(log).toEqual({ entries: [], truncated: false, marks: [{ mark: 'clock-out-of-range', run: 1, since: T0 + 5, lastAt: T0 + 5, peerTowerId: MBP, peer: 'mbp' }], clockSkewSince: null });
+  });
+});
+
+describe('afx tower status: remote messaging', () => {
+  it("shows this Tower's name, the switch and the peers online, from what this Tower knows", async () => {
+    const lines: string[] = [];
+    vi.spyOn(logger, 'header').mockImplementation((t: string) => void lines.push(`# ${t}`));
+    vi.spyOn(logger, 'kv').mockImplementation((k: string, v: unknown) => void lines.push(`${k}: ${String(v)}`));
+    vi.spyOn(logger, 'blank').mockImplementation(() => {});
+    try {
+      await renderTowerRemoteMessaging(harness.client);
+      await run((d) => peerOn(HUMAN, d));
+      await renderTowerRemoteMessaging(harness.client);
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(lines).toEqual([
+      '# Remote Messaging',
+      'Name: ana-s-mbp',
+      'Remote messaging: off (a human turns it on with: afx peer on)',
+      'Peers: 2 of 2 peers online',
+      '# Remote Messaging',
+      'Name: ana-s-mbp',
+      'Remote messaging: on',
+      'Peers: 2 of 2 peers online',
+    ]);
   });
 });

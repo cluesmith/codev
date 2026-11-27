@@ -138,6 +138,14 @@ export function peerSender(): Sender {
 }
 
 /**
+ * This Tower's outbox, for what `afx inbox` shows and dismisses of mail waiting for a peer:
+ * which call is in flight, why the queues are paused, and a dismissal that the queue sees.
+ */
+export function peerOutbox(): Pick<Outbox, 'inFlightFor' | 'pausedBecause' | 'dismiss'> {
+  return peerSending().outbox;
+}
+
+/**
  * Tower has started: every peer's queue resumes from its durable rows. `onChanged` is told
  * whenever mail waiting for a peer is added, sent or resolved.
  */
@@ -214,5 +222,6 @@ export function peerCloudRouteDeps(): PeerCloudRouteDeps {
     tunnelUp: () => tunnelSession() !== null,
     wakeOutbox: wakePeerOutbox,
     show: (tower) => peerSender().show(tower),
+    outbox: peerOutbox,
   };
 }

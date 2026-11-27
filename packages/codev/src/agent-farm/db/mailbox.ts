@@ -473,8 +473,12 @@ export function findHeldForAgent(
  * 3: "measure escalation age from max(created_at, not_before)"). `not_before` is always ≥
  * `created_at` when set (due = created + delay), so MAX == COALESCE(not_before, created_at);
  * MAX is kept so a hand-written earlier not_before can never move the start before enqueue.
+ *
+ * Spec 1967: for a row a human released from held for release, it is the release
+ * (`released_at`). Until then the row waited for the human, not for its agent, so a message
+ * held for release for a day does not escalate the moment it is released.
  */
-const ESCALATION_START_SQL = 'MAX(created_at, COALESCE(not_before, created_at))';
+const ESCALATION_START_SQL = 'MAX(created_at, COALESCE(not_before, created_at), COALESCE(released_at, created_at))';
 
 /**
  * Held rows whose escalation age ({@link ESCALATION_START_SQL} → now) has crossed `maxAgeMs`
@@ -557,6 +561,34 @@ export function heldSummaryForWorkspace(
     return { toAgent: r.toAgent, count: r.count, escalated: rowEsc };
   });
   return { total, escalated, byAgent };
+}
+
+/**
+ * Rows held for release for recipients in this workspace (Spec 1967): mail from another Tower
+ * that waits for a human's `afx inbox release`. Counted apart from {@link heldSummaryForWorkspace},
+ * which counts mail waiting for a local agent. Counts only, never bodies.
+ */
+export function countHeldForRelease(db: Database.Database, workspacePath: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM mailbox WHERE workspace_path = ? AND status = 'held' AND release_hold = 1")
+    .get(workspacePath) as { n: number };
+  return row.n;
+}
+
+/**
+ * Remote rows a human released (`afx inbox release`) that are still held, waiting to be
+ * delivered: every peer's, or one peer's (Spec 1967). A release is the owner's decision, so
+ * neither the switch nor a grant takes one back; `afx peer off` and `afx peer revoke` say how
+ * many such messages still wait, since only a dismissal stops one.
+ */
+export function countReleasedWaiting(db: Database.Database, peerTowerId?: string): number {
+  const where = "status = 'held' AND release_hold = 0 AND released_at IS NOT NULL AND remote_tower_id IS NOT NULL";
+  const row = (
+    peerTowerId === undefined
+      ? db.prepare(`SELECT COUNT(*) AS n FROM mailbox WHERE ${where}`).get()
+      : db.prepare(`SELECT COUNT(*) AS n FROM mailbox WHERE ${where} AND remote_tower_id = ?`).get(peerTowerId)
+  ) as { n: number };
+  return row.n;
 }
 
 /**

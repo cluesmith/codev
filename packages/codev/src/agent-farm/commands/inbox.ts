@@ -12,11 +12,24 @@
 // diagnostics/telemetry, not this local operator view). Dismiss is a soft transition (the
 // row is marked `dismissed`, not deleted) and is authorized at the workspace-human trust
 // level — any local operator may dismiss (or show) any held row (Spec 1313 decision 8).
+//
+// Spec 1967 (Decision 9's inbox rows): the list is in three groups, one per kind of held
+// mail, each shown only there:
+//   - waiting for a local agent: Spec 1313's held mail, as before;
+//   - held for release: mail from another Tower that a human releases (`afx inbox release`,
+//     a human's act, with the flag `porch approve` takes) or dismisses;
+//   - waiting for a peer: mail this workspace sent to another Tower that waits here for a
+//     route to it (Tower's outbox, `GET /api/peer/outbox`), with why the queues are paused
+//     when they are. `afx inbox show` and `afx inbox dismiss` take its id, which is the id
+//     `afx send` printed.
 
+import type { InboxDismissResponse, InboxReleaseResponse, PeerOutboxMessage, PeerOutboxResponse, PeerQueuePause } from '@cluesmith/codev-types';
 import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { logger, fatal } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
 import { MAX_SENDER_ID_LENGTH } from '../utils/message-format.js';
+import { olderTowerError } from '../utils/older-tower.js';
+import { HUMAN_APPROVAL_FLAG } from '../peer/switch.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 import { lastPathSegment } from '../../lib/host-paths.js';
 
@@ -36,6 +49,9 @@ interface InboxRow {
    * cancellable here, and rendered with its countdown.
    */
   notBefore: number | null;
+  /** Spec 1967: for mail from another Tower, its sender as its header names it; absent from an older Tower. */
+  remoteSender?: string | null;
+  remoteOwnerEmail?: string | null;
 }
 
 interface InboxListOptions {
@@ -53,12 +69,19 @@ interface InboxDismissOptions {
   port?: number;
 }
 
+interface InboxReleaseOptions {
+  port?: number;
+  /** `--a-human-explicitly-approved-this`: releasing remote mail is a human's act. */
+  humanApproved?: boolean;
+}
+
 /**
  * A full mailbox row as GET /api/inbox/:id returns it — INCLUDING the body. Unlike the
  * list projection (metadata only), the single-row view carries the message content, so
  * `afx inbox show <id>` can display it.
  */
 interface InboxMessage {
+  kind?: 'mailbox';
   id: string;
   workspacePath: string;
   toAgent: string;
@@ -72,6 +95,18 @@ interface InboxMessage {
   createdAt: number; // epoch ms
   notBefore: number | null; // epoch ms; due time of a pre-due delayed row (Spec 1313 round 3)
   resolvedAt: number | null; // epoch ms; set once the row leaves `held`
+  /** Spec 1967: for mail from another Tower, its sender's full address and its owner, and when a human released it. */
+  remoteSender?: string | null;
+  remoteOwnerEmail?: string | null;
+  releasedAt?: number | null;
+}
+
+/** `GET /api/inbox/:id` for a message for another Tower (Spec 1967), in any state. */
+interface InboxOutboxMessage extends PeerOutboxMessage {
+  kind: 'outbox';
+  /** Why no mail leaves now, for a held message; `null` otherwise. */
+  paused: PeerQueuePause | null;
+  body: string;
 }
 
 interface InboxShowOptions {
@@ -136,40 +171,36 @@ function describeDetail(detail: string): string {
   }
 }
 
+/** The answer an older Tower gives to a route it does not have: its catch-all 404, which carries no code. */
+function isUnknownRoute(result: { status: number; errorCode?: string }): boolean {
+  return result.status === 404 && result.errorCode === undefined;
+}
+
+/** Who sent a held row, as the list writes it: a remote sender as its header names it, else the agent. */
+function senderOf(row: InboxRow): string {
+  if (row.remoteSender) return row.remoteOwnerEmail ? `${row.remoteSender} (${row.remoteOwnerEmail})` : row.remoteSender;
+  return row.fromAgent ?? '?';
+}
+
 /**
- * `afx inbox` — list held messages for a workspace. Workspace-scoped per spec
- * decision 8: defaults to the current workspace (`getConfig().workspaceRoot`);
- * `--workspace <path>` lists a different one. Tower normalizes the path, so rows
- * enqueued under the workspace's realpath still match. A `!` after the reason marks
- * a row that has crossed the escalation age.
+ * Fit each `FROM → TO` cell under one ceiling and size the column to its widest (issue #1478).
+ * That column exists to answer "who sent this, to whom?", and a fixed 22-char slice cut long
+ * builder ids and `architect:<name>` senders mid-name — silently rendering an identity the
+ * operator can't act on. The ceiling is defence in depth, not the old truncation returning:
+ * `POST /api/send` refuses a sender longer than MAX_SENDER_ID_LENGTH, so a pair of valid ids
+ * cannot reach it, and rows persisted before that check existed cannot make every row in the
+ * table pad to their width.
  */
-export async function inboxList(options: InboxListOptions = {}): Promise<void> {
-  const client = getTowerClient(options.port || DEFAULT_TOWER_PORT);
+function fromToColumn(cells: readonly string[]): { shown: string[]; width: number } {
+  const header = 'FROM → TO';
+  const ceiling = MAX_SENDER_ID_LENGTH * 2 + ' → '.length;
+  const shown = cells.map((c) => (c.length > ceiling ? `${c.slice(0, ceiling - 1)}…` : c));
+  return { shown, width: Math.max(header.length, ...shown.map((c) => c.length)) + 2 };
+}
 
-  // Decision 8: workspace-scoped. Default to the current workspace when no explicit
-  // --workspace was given, so `afx inbox` shows this workspace's held mail — not
-  // every workspace Tower knows about.
-  const workspace = options.workspace ?? getConfig().workspaceRoot;
-  const path = `/api/inbox?workspace=${encodeURIComponent(workspace)}`;
-
-  const result = await client.request<InboxRow[]>(path);
-  if (!result.ok) {
-    fatal(result.error || 'Failed to fetch inbox');
-  }
-
-  const rows = result.data!;
-  if (rows.length === 0) {
-    logger.info('No held messages.');
-    return;
-  }
-
-  logger.header(`Held messages (${rows.length})`);
-
-  const now = Date.now();
-  // Render the cells first so the FROM → TO column can be sized to its content
-  // (issue #1478). That column exists to answer "who sent this, to whom?", and a
-  // fixed 22-char slice cut long builder ids and `architect:<name>` senders
-  // mid-name — silently rendering an identity the operator can't act on.
+/** Group 1: mail waiting for a local agent, in Spec 1313's table. */
+function renderWaitingForLocalAgent(rows: readonly InboxRow[], now: number): void {
+  logger.header(`Waiting for a local agent (${rows.length})`);
   const cells = rows.map((row) => {
     // Spec 1313 round 3: a pre-due delayed (`--delay`) row is SCHEDULED, not stuck — render
     // its due countdown ("→15s") in the AGE column and "scheduled" as the reason, so a delayed
@@ -181,41 +212,122 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
       reason: preDue
         ? 'scheduled'
         : `${formatVerdict(row.reason, row.detail)}${row.escalated ? '!' : ''}`,
-      fromTo: `${row.fromAgent ?? '?'} → ${row.toAgent}`,
+      fromTo: `${senderOf(row)} → ${row.toAgent}`,
       workspace: lastPathSegment(row.workspacePath) || row.workspacePath,
     };
   });
-
-  const fromToHeader = 'FROM → TO';
-  // Sized to content, so a long-but-legitimate agent id is never cut mid-name (issue
-  // #1478 — the old fixed 22 silently truncated them). The ceiling is defence in depth,
-  // not the old truncation returning: `POST /api/send` now refuses a sender longer than
-  // MAX_SENDER_ID_LENGTH, so a pair of valid ids cannot reach it, and rows persisted
-  // before that check existed cannot make every row in the table pad to their width.
-  const maxFromToWidth = MAX_SENDER_ID_LENGTH * 2 + ' → '.length;
-  const shown = cells.map((c) =>
-    c.fromTo.length > maxFromToWidth ? `${c.fromTo.slice(0, maxFromToWidth - 1)}…` : c.fromTo,
-  );
-  const fromToWidth = Math.max(fromToHeader.length, ...shown.map((c) => c.length)) + 2;
+  const { shown, width: fromToWidth } = fromToColumn(cells.map((c) => c.fromTo));
   // REASON is 20 wide, not 13 (Issue #1482): it carries the gate detail as a `reason:detail`
   // sub-code, and `busy:no-region-end` (18) has to fit. Only `busy:no-composer-marker` truncates,
   // and it stays unambiguous at 20 (`busy:no-composer-ma…`).
   const widths = [38, 6, 20, fromToWidth, 14];
-  logger.row(['ID', 'AGE', 'REASON', fromToHeader, 'WORKSPACE'], widths);
+  logger.row(['ID', 'AGE', 'REASON', 'FROM → TO', 'WORKSPACE'], widths);
   logger.row(
     ['─'.repeat(36), '─'.repeat(5), '─'.repeat(19), '─'.repeat(fromToWidth - 1), '─'.repeat(13)],
     widths,
   );
-
   cells.forEach((cell, i) => {
     logger.row(
       [cell.id, cell.age, truncate(cell.reason, 20), shown[i], cell.workspace.slice(0, 14)],
       widths,
     );
   });
+}
 
-  logger.blank();
-  logger.info('Show a message body: afx inbox show <id>   ·   Dismiss: afx inbox dismiss <id>');
+/** Group 2: mail from another Tower held for a human's release, with the two commands that end the hold. */
+function renderHeldForRelease(rows: readonly InboxRow[], now: number): void {
+  logger.header(`Held for release (${rows.length})`);
+  const { shown, width: fromToWidth } = fromToColumn(rows.map((row) => `${senderOf(row)} → ${row.toAgent}`));
+  const widths = [38, 6, fromToWidth];
+  logger.row(['ID', 'AGE', 'FROM → TO'], widths);
+  logger.row(['─'.repeat(36), '─'.repeat(5), '─'.repeat(fromToWidth - 1)], widths);
+  rows.forEach((row, i) => logger.row([row.id, formatAge(row.createdAt, now), shown[i]], widths));
+  logger.info(`Release one (a human's decision): afx inbox release <id> ${HUMAN_APPROVAL_FLAG}   ·   Dismiss: afx inbox dismiss <id>`);
+}
+
+/** Why no mail for another Tower leaves now, and what changes it. */
+export function pauseWords(pause: PeerQueuePause): string {
+  switch (pause) {
+    case 'remote-off':
+      return 'Not sent now: remote messaging is off on this Tower. A human turns it on with: afx peer on';
+    case 'not-connected':
+      return 'Not sent now: this Tower is not connected to Codev Cloud. Connect it with: afx tower connect';
+    case 'not-registered':
+      return "Not sent now: this Tower's registration was removed from Codev Cloud. Register it again with: afx tower connect --reauth";
+    case 'no-relay':
+      return 'Not sent now: this Codev Cloud has no relay, so nothing can reach another Tower through it.';
+  }
+}
+
+/** When a message for a peer is tried next, as the list writes it. */
+function nextTryOf(message: PeerOutboxMessage, paused: boolean, now: number): string {
+  if (message.inFlight) return 'sending now';
+  if (paused || message.nextAttemptAt === null) return '—';
+  return message.nextAttemptAt > now ? `in ${formatDuration(message.nextAttemptAt - now)}` : 'now';
+}
+
+/** Group 3: mail this workspace sent to other Towers that waits here, and why it is paused when it is. */
+function renderWaitingForPeer(outbox: PeerOutboxResponse, now: number): void {
+  const { messages, paused } = outbox;
+  logger.header(`Waiting for a peer (${messages.length})`);
+  const { shown, width: fromToWidth } = fromToColumn(messages.map((m) => `${m.fromAgent ?? '?'} → ${m.to}`));
+  const widths = [38, 6, 20, fromToWidth, 12];
+  logger.row(['ID', 'AGE', 'REASON', 'FROM → TO', 'NEXT TRY'], widths);
+  logger.row(['─'.repeat(36), '─'.repeat(5), '─'.repeat(19), '─'.repeat(fromToWidth - 1), '─'.repeat(11)], widths);
+  messages.forEach((m, i) => {
+    logger.row([m.id, formatAge(m.sentAt, now), truncate(m.reason, 20), shown[i], nextTryOf(m, paused !== null, now)], widths);
+  });
+  if (paused !== null) logger.info(pauseWords(paused));
+}
+
+/**
+ * `afx inbox` — list held messages for a workspace, in three groups (Spec 1967): waiting for
+ * a local agent, held for release, waiting for a peer. Workspace-scoped per spec decision 8:
+ * defaults to the current workspace (`getConfig().workspaceRoot`); `--workspace <path>` lists a
+ * different one. Tower normalizes the path, so rows enqueued under the workspace's realpath
+ * still match. A `!` after the reason marks a row that has crossed the escalation age.
+ */
+export async function inboxList(options: InboxListOptions = {}): Promise<void> {
+  const client = getTowerClient(options.port || DEFAULT_TOWER_PORT);
+
+  // Decision 8: workspace-scoped. Default to the current workspace when no explicit
+  // --workspace was given, so `afx inbox` shows this workspace's held mail — not
+  // every workspace Tower knows about.
+  const workspace = options.workspace ?? getConfig().workspaceRoot;
+  const query = `workspace=${encodeURIComponent(workspace)}`;
+
+  const result = await client.request<InboxRow[]>(`/api/inbox?${query}`);
+  if (!result.ok) {
+    fatal(result.error || 'Failed to fetch inbox');
+  }
+  const rows = result.data!;
+
+  // Spec 1967: mail waiting here for a peer. A Tower older than this CLI has none to list,
+  // and says so rather than leaving the group silently out.
+  let outbox: PeerOutboxResponse | null = null;
+  const peerResult = await client.request<PeerOutboxResponse>(`/api/peer/outbox?${query}`);
+  if (peerResult.ok) {
+    outbox = peerResult.data!;
+  } else if (!isUnknownRoute(peerResult)) {
+    fatal(peerResult.error || 'Failed to fetch the mail waiting for a peer');
+  }
+
+  // The two kinds of mailbox row: held for release is its own group, and only there.
+  const forRelease = rows.filter((row) => row.reason === 'held-for-release');
+  const forAgent = rows.filter((row) => row.reason !== 'held-for-release');
+  const forPeer = outbox?.messages ?? [];
+
+  if (forAgent.length + forRelease.length + forPeer.length === 0) {
+    logger.info('No held messages.');
+  } else {
+    const now = Date.now();
+    if (forAgent.length > 0) renderWaitingForLocalAgent(forAgent, now);
+    if (forRelease.length > 0) renderHeldForRelease(forRelease, now);
+    if (outbox !== null && forPeer.length > 0) renderWaitingForPeer(outbox, now);
+    logger.blank();
+    logger.info('Show a message body: afx inbox show <id>   ·   Dismiss: afx inbox dismiss <id>');
+  }
+  if (outbox === null) logger.warn(olderTowerError('lists no mail waiting for a peer'));
 }
 
 /**
@@ -230,23 +342,36 @@ export async function inboxList(options: InboxListOptions = {}): Promise<void> {
 export async function inboxShow(id: string, options: InboxShowOptions = {}): Promise<void> {
   const client = getTowerClient(options.port || DEFAULT_TOWER_PORT);
 
-  const result = await client.request<InboxMessage>(`/api/inbox/${encodeURIComponent(id)}`);
+  const result = await client.request<InboxMessage | InboxOutboxMessage>(`/api/inbox/${encodeURIComponent(id)}`);
   if (!result.ok) {
     fatal(result.error || `Failed to fetch '${id}'`);
   }
 
-  const row = result.data!;
-  const from = row.fromWorkspace ? `${row.fromAgent ?? '?'} (${row.fromWorkspace})` : row.fromAgent ?? '?';
+  const shown = result.data!;
+  if (shown.kind === 'outbox') {
+    showOutboxMessage(shown);
+    return;
+  }
+  const row = shown;
+  // Spec 1967: mail from another Tower names its sender's full address, and its owner.
+  const from = row.remoteSender
+    ? row.remoteSender
+    : row.fromWorkspace ? `${row.fromAgent ?? '?'} (${row.fromWorkspace})` : row.fromAgent ?? '?';
 
   logger.header(`Message ${row.id}`);
   logger.kv('Status', `${row.status}${row.escalated ? ' (escalated)' : ''}`);
   logger.kv('Reason', row.reason ?? '—');
+  if (row.reason === 'held-for-release' && row.status === 'held') {
+    logger.kv('Release', `a human's decision: afx inbox release ${row.id} ${HUMAN_APPROVAL_FLAG}`);
+  }
   // Issue #1482: spelled out rather than shown as the list's `reason:detail` sub-code, because
   // this is the view an operator opens when the sub-code is the thing they do not understand.
   if (row.detail) logger.kv('Detail', `${row.detail} — ${describeDetail(row.detail)}`);
   logger.kv('From → To', `${from} → ${row.toAgent}`);
+  if (row.remoteOwnerEmail) logger.kv('Owner', row.remoteOwnerEmail);
   logger.kv('Workspace', row.workspacePath);
   logger.kv('Created', new Date(row.createdAt).toISOString());
+  if (row.releasedAt) logger.kv('Released', new Date(row.releasedAt).toISOString());
   // Spec 1313 round 3: a still-scheduled delayed (`--delay`) row shows its due time and
   // countdown; a delayed row already past its due time is deliverable and needs no annotation.
   if (row.notBefore != null && row.status === 'held') {
@@ -265,15 +390,84 @@ export async function inboxShow(id: string, options: InboxShowOptions = {}): Pro
   console.log(row.body);
 }
 
+/** A time and how far it is from now: `2026-11-27T10:00:00.000Z (in 40s)`, `(3m ago)`. */
+function when(at: number, now: number): string {
+  const iso = new Date(at).toISOString();
+  return at > now ? `${iso} (in ${formatDuration(at - now)})` : `${iso} (${formatDuration(now - at)} ago)`;
+}
+
+/** What a message for another Tower came to, or why it waits. */
+function outboxStatus(message: InboxOutboxMessage): string {
+  switch (message.state) {
+    case 'held':
+      return message.inFlight ? `waiting for ${message.peerName ?? 'its peer'} (${message.reason}); being sent now` : `waiting for ${message.peerName ?? 'its peer'} (${message.reason})`;
+    case 'accepted':
+      return `accepted by ${message.peerName ?? 'its peer'} (${message.lastOutcome ?? 'accepted'})`;
+    case 'refused':
+      return `refused (${message.reason})`;
+    case 'dismissed':
+      return 'dismissed on this Tower; it was not sent';
+    case 'expired':
+      return 'expired: not accepted within its 30-day lifetime';
+  }
+}
+
+/** `afx inbox show <id>` for a message for another Tower (Spec 1967). Its body is ours, so it shows as a mailbox row's does. */
+function showOutboxMessage(message: InboxOutboxMessage): void {
+  const now = Date.now();
+  logger.header(`Message ${message.id}`);
+  logger.kv('Status', outboxStatus(message));
+  logger.kv('From → To', `${message.fromAgent ?? '?'} → ${message.to}`);
+  logger.kv('Workspace', message.workspacePath);
+  logger.kv('Sent', new Date(message.sentAt).toISOString());
+  logger.kv('Attempts', message.attempts);
+  if (message.state === 'held') {
+    logger.kv('Expires', when(message.expiresAt, now));
+    if (message.paused !== null) logger.kv('Paused', pauseWords(message.paused));
+    else if (message.nextAttemptAt !== null && !message.inFlight) logger.kv('Next try', when(message.nextAttemptAt, now));
+  }
+  if (message.resolvedAt !== null) logger.kv('Resolved', new Date(message.resolvedAt).toISOString());
+  logger.header('Body');
+  console.log(message.body);
+}
+
+/**
+ * `afx inbox release <id>` (Spec 1967): a human releases one message from another Tower held
+ * for release. It becomes ordinary held mail and is delivered through the gate, as soon as
+ * its agent's prompt is clear. A trust-widening act, so it takes the flag `porch approve`
+ * takes, and refuses before asking Tower without it; Tower refuses again if asked.
+ */
+export async function inboxRelease(id: string, options: InboxReleaseOptions = {}): Promise<void> {
+  if (options.humanApproved !== true) {
+    fatal(`Releasing a message is a human's decision. A human runs: afx inbox release ${id} ${HUMAN_APPROVAL_FLAG}`);
+  }
+  const client = getTowerClient(options.port || DEFAULT_TOWER_PORT);
+
+  const result = await client.request<InboxReleaseResponse>(`/api/inbox/${encodeURIComponent(id)}/release`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ humanApproved: true }),
+  });
+  if (!result.ok) {
+    if (isUnknownRoute(result)) fatal(olderTowerError('cannot release a message'));
+    fatal(result.error || `Failed to release '${id}'`);
+  }
+
+  const released = result.data!;
+  logger.success(`Released message ${released.id}: it is delivered to ${released.toAgent} through the gate, once that agent's prompt is clear.`);
+}
+
 /**
  * `afx inbox dismiss <id>` — mark a held row dismissed. Soft transition (auditable,
  * pruned later); never delivers the message. Returns a friendly error if the id does
- * not name a currently-held row.
+ * not name a currently-held row. Spec 1967: also mail held for release, and a message
+ * waiting for a peer, which is then never sent; one whose relay call is in flight is
+ * refused, since its answer decides it.
  */
 export async function inboxDismiss(id: string, options: InboxDismissOptions = {}): Promise<void> {
   const client = getTowerClient(options.port || DEFAULT_TOWER_PORT);
 
-  const result = await client.request<{ ok: boolean }>(
+  const result = await client.request<InboxDismissResponse>(
     `/api/inbox/${encodeURIComponent(id)}/dismiss`,
     { method: 'POST' },
   );
@@ -281,5 +475,10 @@ export async function inboxDismiss(id: string, options: InboxDismissOptions = {}
     fatal(result.error || `Failed to dismiss '${id}'`);
   }
 
+  const dismissed = result.data;
+  if (dismissed?.kind === 'outbox') {
+    logger.success(`Dismissed message ${id} waiting for ${dismissed.peer ?? 'its peer'}: it will not be sent.`);
+    return;
+  }
   logger.success(`Dismissed held message ${id}`);
 }

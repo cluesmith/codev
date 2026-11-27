@@ -477,6 +477,11 @@ describe('the persisted message and the answer the sender is told', () => {
       },
     ],
     ['expired before its first attempt', () => ({ kind: 'ended', state: 'expired' }), { outcome: 'refused', by: 'this-tower', reason: 'expired' }],
+    [
+      'dismissed here before its first attempt (phase 11)',
+      () => ({ kind: 'ended', state: 'dismissed' }),
+      { outcome: 'refused', by: 'this-tower', reason: 'dismissed', message: 'The message was dismissed on this Tower (afx inbox dismiss) before it was sent.' },
+    ],
   ];
   for (const [name, first, expected] of told) {
     it(`${name}`, async () => {

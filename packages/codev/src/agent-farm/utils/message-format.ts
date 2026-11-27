@@ -508,8 +508,9 @@ function checkedOrigin(origin: RemoteOrigin): void {
  * Who the header says the message is from: the sender's `afx://` address, or, when it has
  * none, the sending Tower with what is known of the sender, marked so that it cannot be
  * mistaken for an address (stage 1 marks a sender with no workspace name the same way).
+ * `afx inbox` names a remote message's sender with this too, so the two always agree.
  */
-function remoteSenderText(origin: RemoteOrigin): string {
+export function remoteSenderText(origin: RemoteOrigin): string {
   const tower = `afx://${origin.towerSlug}`;
   if (origin.sender === null) return `${tower} (no agent identity)`;
   const address = remoteAddressOf(origin);

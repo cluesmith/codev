@@ -553,7 +553,10 @@ export class Sender {
           outcome: 'refused',
           by: 'this-tower',
           reason: first.state,
-          message: 'The message expired on this Tower before it could be sent.',
+          message:
+            first.state === 'expired'
+              ? 'The message expired on this Tower before it could be sent.'
+              : 'The message was dismissed on this Tower (afx inbox dismiss) before it was sent.',
           detail: null,
           retryAfterSec: null,
           messageId,

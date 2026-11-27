@@ -39,6 +39,8 @@ vi.mock('../lib/tower-client.js', () => ({
     // Spec 1313 round 3: status now reads the overview for held-mail awareness. These suites
     // don't exercise held mail, so a null overview degrades to "no held info" (unchanged output).
     getOverview: async () => null,
+    // Spec 1967: the remote-messaging line; this suite's Tower predates it.
+    getPeerStatus: async () => ({ ok: false, status: 404, error: 'Not found', unknownRoute: true }),
   }),
 }));
 

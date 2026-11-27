@@ -55,7 +55,9 @@ vi.mock('../servers/tower-messages.js', () => ({
   broadcastMessage: vi.fn(),
   isResolveError: vi.fn((r: unknown) => typeof r === 'object' && r !== null && 'code' in r),
 }));
-vi.mock('../utils/message-format.js', () => ({
+vi.mock('../utils/message-format.js', async (importActual) => ({
+  // Spec 1967: the inbox list names a remote row's sender with the real `remoteSenderText`.
+  ...(await importActual<typeof import('../utils/message-format.js')>()),
   formatArchitectMessage: vi.fn((_to: string, msg: string) => msg),
   formatArchitectToBuilderMessage: vi.fn((_to: string, msg: string) => msg),
   formatBuilderMessage: vi.fn((id: string, to: string, msg: string) => `[${id} → ${to}] ${msg}`),
@@ -255,7 +257,7 @@ describe('POST /api/inbox/:id/dismiss', () => {
     const res = makeRes();
     await handleRequest(makeReq('POST', `/api/inbox/${row.id}/dismiss`), res, ctx);
     expect(res._statusCode).toBe(200);
-    expect(JSON.parse(res._body)).toEqual({ ok: true });
+    expect(JSON.parse(res._body)).toEqual({ ok: true, kind: 'mailbox' });
 
     // Gone from the list; the row is dismissed (NOT delivered).
     const after = makeRes();

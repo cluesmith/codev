@@ -51,6 +51,7 @@ import type { ClassifiedAnswer } from './contract.js';
 import { listingScope, type OwnRegistration, type PeerList } from './peer-list.js';
 import { recordOutbound } from './records.js';
 import {
+  getOutbox,
   listHeldOutbox,
   listPeerAnswerRuns,
   notePeerAnswer,
@@ -91,8 +92,22 @@ export type FirstAnswer =
    * that counted; `ahead` is how many of the peer's held rows are before it.
    */
   | { kind: 'held'; reason: string; answer: ClassifiedAnswer | null; ahead: number }
-  /** Ended without an answer before its first attempt. */
-  | { kind: 'ended'; state: 'expired' };
+  /** Ended without an answer before its first attempt: its lifetime ran out, or a human dismissed it. */
+  | { kind: 'ended'; state: 'expired' | 'dismissed' };
+
+/**
+ * Why no held mail leaves for any peer now (checks 1 to 4 of the sender's): what a fresh send
+ * would be refused for. `null` while the queues run.
+ */
+export type OutboxPause = 'remote-off' | 'not-connected' | 'not-registered' | 'no-relay';
+
+/** What {@link Outbox.dismiss} did. */
+export type OutboxDismissal =
+  | { result: 'dismissed'; row: PeerOutboxRow }
+  /** Its relay call is in flight: the answer decides it, so it cannot be dismissed now. */
+  | { result: 'in-flight'; row: PeerOutboxRow }
+  /** No message waiting for a peer has this id (unknown, or already ended). */
+  | { result: 'not-held' };
 
 /** A mark on a peer, shown in `afx peer list`, the Peers panel and the record (phases 11, 12). */
 export type PeerMarkKind = 'not-verifying' | 'cloud-error' | 'clock-out-of-range';
@@ -170,8 +185,8 @@ export function decide(answer: ClassifiedAnswer, fresh: boolean): Decision {
   }
 }
 
-/** Why a held row waits, as a send queued behind it is told. */
-function holdReasonOf(row: PeerOutboxRow): string {
+/** Why a held row waits, as a send queued behind it is told and `afx inbox` shows it. */
+export function outboxHoldReason(row: PeerOutboxRow): string {
   return row.lastReason ?? (row.lastOutcome === 'not-verified' ? 'not-verified' : 'queued');
 }
 
@@ -294,7 +309,7 @@ export class Outbox {
     const ahead = listHeldOutbox(this.deps.db(), row.peerTowerId).filter((r) => r.seq < row.seq);
     // A row ahead with no sender waiting on it is held mail; a send behind it queues.
     if (ahead.some((r) => !queue.waiters.has(r.messageId))) {
-      this.settle(queue, row.messageId, { kind: 'held', reason: holdReasonOf(ahead[0]), answer: null, ahead: ahead.length });
+      this.settle(queue, row.messageId, { kind: 'held', reason: outboxHoldReason(ahead[0]), answer: null, ahead: ahead.length });
     }
     this.deps.onChanged?.();
     this.pump(row.peerTowerId);
@@ -315,6 +330,33 @@ export class Outbox {
   /** The message whose relay call is in flight for this peer, if any. */
   inFlightFor(peerTowerId: string): string | null {
     return this.queues.get(peerTowerId)?.inFlight?.messageId ?? null;
+  }
+
+  /** Why no held mail leaves now, for `afx inbox`; `null` while the queues run. */
+  pausedBecause(): OutboxPause | null {
+    return this.blocked();
+  }
+
+  /**
+   * A human dismisses a message waiting for a peer (`afx inbox dismiss`): it is never sent,
+   * and a sender still waiting for its first answer is told so. Refused while its relay call is
+   * in flight, since the peer may be accepting it at that moment: the answer decides it. The
+   * peer's queue then moves on to the next message.
+   */
+  dismiss(messageId: string): OutboxDismissal {
+    const db = this.deps.db();
+    const row = getOutbox(db, messageId);
+    if (row === null || row.state !== 'held') return { result: 'not-held' };
+    if (this.inFlightFor(row.peerTowerId) === messageId) return { result: 'in-flight', row };
+    if (!resolveOutbox(db, messageId, { state: 'dismissed', outcome: null, reason: null, attempted: false }, this.deps.now())) {
+      return { result: 'not-held' };
+    }
+    this.deps.log('INFO', `Peer: message ${messageId} to ${row.peerTowerId} was dismissed here; it is not sent`);
+    const queue = this.queues.get(row.peerTowerId);
+    if (queue !== undefined) this.settle(queue, messageId, { kind: 'ended', state: 'dismissed' });
+    this.deps.onChanged?.();
+    this.pump(row.peerTowerId);
+    return { result: 'dismissed', row };
   }
 
   // -------------------------------------------------------------------------
@@ -366,7 +408,7 @@ export class Outbox {
   }
 
   /** Why held mail cannot leave now, or `null` when it may (checks 1 to 4 of the sender's). */
-  private blocked(): string | null {
+  private blocked(): OutboxPause | null {
     if (!isRemoteMessagingOn(this.deps.db())) return 'remote-off';
     const registration = this.deps.registration();
     if (registration === null) return 'not-connected';

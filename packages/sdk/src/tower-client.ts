@@ -13,7 +13,7 @@
  * the read-only reader for standalone Node controllers).
  */
 
-import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, PeerShowResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR, MAX_REQUEST_BODY_BYTES } from '@cluesmith/codev-types';
+import type { DashboardState, OverviewData, IssueView, PRView, IssueSearchResponse, ResolvedWorktreeConfig, ResolvedActivityHooks, TowerVersionInfo, CommandRequest, CanvasCommand, CanvasCommandRequest, CanvasCommandResult, CanvasCommandClientResult, CanvasCommandErrorCode, DecisionsDocument, DecisionsReadResponse, DecisionsRefusalCode, DecisionsRuleRequest, DecisionsRuleResponse, SetWorkspaceAddressNameRequest, SetWorkspaceAddressNameResponse, AddressBookResponse, PeerSwitchRequest, PeerSwitchResponse, PeerGrantsResponse, PeerGrantRequest, PeerGrantResponse, PeerRevokeRequest, PeerRevokeResponse, PeerLimitsResponse, PeerTowersResponse, PeerShowResponse, PeerStatusResponse, PeerLogResponse, RemoteSendAnswer, RemoteSendRefusal, REMOTE_HELD_ON_FAULT_ERROR, REMOTE_REFUSED_ERROR, MAX_REQUEST_BODY_BYTES } from '@cluesmith/codev-types';
 import { DEFAULT_TOWER_PORT } from './constants.js';
 import { isRemoteAddress, parseAddress } from './address.js';
 import { parseSseText, type SseEnvelope } from './sse.js';
@@ -896,6 +896,20 @@ export class TowerClient {
   /** My other Towers: Tower asks Codev Cloud, within its call budget, and answers from its cache otherwise. */
   getPeerTowers(): Promise<PeerRouteResult<PeerTowersResponse>> {
     return this.peerCall<PeerTowersResponse>('/api/peer/towers');
+  }
+
+  /** Remote messaging at a glance, from what Tower already knows: it makes no call to Codev Cloud. */
+  getPeerStatus(): Promise<PeerRouteResult<PeerStatusResponse>> {
+    return this.peerCall<PeerStatusResponse>('/api/peer/status');
+  }
+
+  /** The record of cross-Tower attempts, newest first: every peer's, or one peer's (a tower-ref). */
+  getPeerLog(options: { tower?: string; limit?: number } = {}): Promise<PeerRouteResult<PeerLogResponse>> {
+    const params = new URLSearchParams();
+    if (options.tower !== undefined) params.set('tower', options.tower);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return this.peerCall<PeerLogResponse>(`/api/peer/log${query === '' ? '' : `?${query}`}`);
   }
 
   /**

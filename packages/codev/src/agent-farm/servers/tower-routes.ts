@@ -28,7 +28,7 @@ import { sanitizeAgentEnv, withTowerPort } from '../../lib/agent-env.js';
 const execAsync = promisify(exec);
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse } from '@cluesmith/codev-types';
+import type { AddressBookResponse, AgentAddress, BuilderSpawnedPayload, DashboardState, ArchitectState, TowerVersionInfo, HeldMessage, SetWorkspaceAddressNameResponse, InboxDismissResponse, InboxReleaseResponse } from '@cluesmith/codev-types';
 import {
   getArchitectByName,
   getArchitects,
@@ -96,7 +96,10 @@ import { addressBook } from './tower-address-book.js';
 import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { createPeerRouteHandler, PEER_ROUTE_PREFIX, type PeerRouteDeps } from './peer-routes.js';
-import { peerCloudRouteDeps, peerSender } from '../peer/cloud-wiring.js';
+import { peerCloudRouteDeps, peerOutbox, peerSender } from '../peer/cloud-wiring.js';
+import { outboxMessageBody, outboxMessageView, peerNamer } from '../peer/surfaces.js';
+import { getOutbox } from '../peer/store.js';
+import { HUMAN_APPROVAL_FLAG } from '../peer/switch.js';
 import { PeerSendHeldOnFaultError, type PeerSendResult } from '../peer/sender.js';
 import { isRemoteAddress, localAddressOnlyMessage, namesATower } from '../utils/agent-names.js';
 import { formatAddress } from '@cluesmith/codev-sdk/address';
@@ -112,6 +115,7 @@ import {
   messageLimitError,
   messageTooLargeError,
   MAX_MESSAGE_BYTES,
+  remoteSenderText,
 } from '../utils/message-format.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import { writeMessageToSession, writeEscapeToSession, writeStrategyForApp } from './message-write.js';
@@ -124,11 +128,13 @@ import {
   markDelivered as markMailboxDelivered,
   listHeld as listHeldMailbox,
   dismiss as dismissMailbox,
+  release as releaseMailbox,
+  readRemoteSender,
   reportedReason as reportedMailboxReason,
   reportedDetail as reportedMailboxDetail,
   type EnqueueInput,
 } from '../db/mailbox.js';
-import type { MailboxReason } from '../db/types.js';
+import type { DbMailbox, MailboxReason } from '../db/types.js';
 import { formatVerdict } from '@cluesmith/codev-sdk/hold-verdict';
 // Spec 1273 per-terminal submission lock. Originally the anti-fusion lock for the two
 // explicit human-bypass paths (escape + interrupt); since Issue #1365 the gated mailbox
@@ -568,6 +574,12 @@ export async function handleRequest(
     const inboxDismissMatch = url.pathname.match(/^\/api\/inbox\/([^/]+)\/dismiss$/);
     if (inboxDismissMatch) {
       return handleInboxDismiss(req, res, ctx, inboxDismissMatch);
+    }
+
+    // Inbox release: POST /api/inbox/:id/release (Spec 1967) — a human releases remote mail held for release.
+    const inboxReleaseMatch = url.pathname.match(/^\/api\/inbox\/([^/]+)\/release$/);
+    if (inboxReleaseMatch) {
+      return await handleInboxRelease(req, res, ctx, inboxReleaseMatch);
     }
 
     // Inbox show: GET /api/inbox/:id — a single row INCLUDING its body (Spec 1313 §178).
@@ -1625,7 +1637,7 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
     // every collection field is required ('never undefined' for `architects`,
     // Issue 1104), so emit them all empty rather than a partial payload.
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, queuedFeedback: {}, feedbackMode: 'forward' }));
+    res.end(JSON.stringify({ builders: [], pendingPRs: [], backlog: [], recentlyClosed: [], architects: [], heldCount: 0, mailboxEscalated: false, heldForReleaseCount: 0, waitingForPeerCount: 0, queuedFeedback: {}, feedbackMode: 'forward' }));
     return;
   }
 
@@ -3162,9 +3174,24 @@ export function handleInboxList(res: http.ServerResponse, url: URL, workspaceOve
     // Spec 1313 round 3: due time of a pre-due delayed (`--delay`) row; null = deliver-ASAP.
     // The CLI renders "in Ns" for a row whose notBefore is still in the future.
     notBefore: r.not_before,
+    // Spec 1967: mail from another Tower names its sender as its header does.
+    ...remoteSenderOf(r),
   }));
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(projected));
+}
+
+/**
+ * Spec 1967: who sent a remote mailbox row, as the message's header names it, and the sending
+ * Tower's owner; both `null` for local mail. A stored sender that does not fit its rules
+ * throws (`readRemoteSender`), rather than be shown unchecked.
+ */
+function remoteSenderOf(row: DbMailbox): { remoteSender: string | null; remoteOwnerEmail: string | null } {
+  const remote = readRemoteSender(row);
+  return {
+    remoteSender: remote === null ? null : remoteSenderText({ towerSlug: remote.towerSlug, sender: remote.address }),
+    remoteOwnerEmail: remote === null ? null : row.remote_owner_email,
+  };
 }
 
 /**
@@ -3191,13 +3218,87 @@ function handleInboxDismiss(
     return;
   }
   const id = decodeURIComponent(match[1]);
-  if (!dismissMailbox(getGlobalDb(), id)) {
-    sendJson(res, 404, { error: 'NOT_FOUND', message: `No held message with id '${id}'` });
+  const db = getGlobalDb();
+  if (dismissMailbox(db, id)) {
+    ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'dismissed' });
+    ctx.log('INFO', `Inbox: dismissed held message ${id.slice(0, 8)}...`);
+    sendJson(res, 200, { ok: true, kind: 'mailbox' } satisfies InboxDismissResponse);
     return;
   }
-  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'dismissed' });
-  ctx.log('INFO', `Inbox: dismissed held message ${id.slice(0, 8)}...`);
-  sendJson(res, 200, { ok: true });
+  // Spec 1967: an id that names no mailbox row may be a message waiting here for a peer. Its
+  // outbox dismisses it, so the peer's queue sees it at once and a waiting sender is told.
+  if (getMailboxById(db, id) === null) {
+    const outcome = peerOutbox().dismiss(id);
+    if (outcome.result !== 'not-held') {
+      const peer = peerNamer(db)(outcome.row.peerTowerId);
+      if (outcome.result === 'in-flight') {
+        sendJson(res, 409, {
+          error: 'IN_FLIGHT',
+          message: `Message '${id}' is being sent to ${peer ?? 'its peer'} now, and the answer decides it. Look again with: afx inbox`,
+        });
+        return;
+      }
+      ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'dismissed' });
+      ctx.log('INFO', `Inbox: dismissed message ${id.slice(0, 8)}... waiting for a peer; it is not sent`);
+      sendJson(res, 200, { ok: true, kind: 'outbox', peer } satisfies InboxDismissResponse);
+      return;
+    }
+  }
+  sendJson(res, 404, { error: 'NOT_FOUND', message: `No held message with id '${id}'` });
+}
+
+/** The longest body `POST /api/inbox/:id/release` reads: it carries one flag. */
+const INBOX_RELEASE_MAX_BODY_BYTES = 4 * 1024;
+
+/**
+ * POST /api/inbox/:id/release — a human releases remote mail held for release (Spec 1967,
+ * `afx inbox release`). The row becomes ordinary held mail and is delivered through the gate:
+ * a drain is scheduled for its agent at once. A release is the owner's decision about that
+ * message, so neither the switch nor a grant takes it back afterwards (`released_at`).
+ *
+ * It widens who may put text into an agent's prompt, so it takes `humanApproved: true`, which
+ * the CLI sends only for `--a-human-explicitly-approved-this` (Decision 9), and it is refused
+ * through Codev Cloud's tunnel: it is an act of the owner at this machine, as a grant is.
+ */
+async function handleInboxRelease(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  match: RegExpMatchArray,
+): Promise<void> {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
+  const id = decodeURIComponent(match[1]);
+  if (req.headers[TUNNEL_PROXY_HEADER] !== undefined) {
+    sendJson(res, 403, { error: 'NOT_OVER_TUNNEL', message: "Releasing a message is done on this Tower's own machine, not through Codev Cloud." });
+    return;
+  }
+  let body: unknown;
+  try {
+    body = await parseJsonBody(req, INBOX_RELEASE_MAX_BODY_BYTES);
+  } catch (err) {
+    sendJson(res, 400, { error: 'INVALID_PARAMS', message: `Request body refused (${(err as Error).message}).` });
+    return;
+  }
+  if (typeof body !== 'object' || body === null || (body as Record<string, unknown>).humanApproved !== true) {
+    sendJson(res, 403, {
+      error: 'HUMAN_APPROVAL_REQUIRED',
+      message: `Releasing a message is a human's decision. A human runs: afx inbox release ${id} ${HUMAN_APPROVAL_FLAG}`,
+    });
+    return;
+  }
+  const db = getGlobalDb();
+  if (!releaseMailbox(db, id)) {
+    sendJson(res, 404, { error: 'NOT_FOUND', message: `No message held for release with id '${id}'` });
+    return;
+  }
+  const row = getMailboxById(db, id)!;
+  ctx.broadcastNotification({ type: 'overview-changed', title: 'Held mail changed', body: 'released' });
+  ctx.log('INFO', `Inbox: released message ${id.slice(0, 8)}... for ${row.to_agent}; it is delivered through the gate`);
+  void getMailboxDrainer().scheduleDrain(row.workspace_path, row.to_agent);
+  sendJson(res, 200, { id, workspacePath: row.workspace_path, toAgent: row.to_agent } satisfies InboxReleaseResponse);
 }
 
 /**
@@ -3220,12 +3321,26 @@ function handleInboxShow(
     return;
   }
   const id = decodeURIComponent(match[1]);
-  const row = getMailboxById(getGlobalDb(), id);
+  const db = getGlobalDb();
+  const row = getMailboxById(db, id);
   if (!row) {
+    // Spec 1967: a message for another Tower, in any state, as `afx send` named it.
+    const forPeer = getOutbox(db, id);
+    if (forPeer !== null) {
+      const outbox = peerOutbox();
+      sendJson(res, 200, {
+        kind: 'outbox',
+        ...outboxMessageView(db, forPeer, outbox),
+        paused: forPeer.state === 'held' ? outbox.pausedBecause() : null,
+        body: outboxMessageBody(forPeer),
+      });
+      return;
+    }
     sendJson(res, 404, { error: 'NOT_FOUND', message: `No message with id '${id}'` });
     return;
   }
   sendJson(res, 200, {
+    kind: 'mailbox',
     id: row.id,
     workspacePath: row.workspace_path,
     toAgent: row.to_agent,
@@ -3239,6 +3354,9 @@ function handleInboxShow(
     createdAt: row.created_at,
     notBefore: row.not_before,
     resolvedAt: row.resolved_at,
+    // Spec 1967: for mail from another Tower, its sender's full address and its owner, and when a human released it.
+    ...remoteSenderOf(row),
+    releasedAt: row.released_at,
   });
 }
 

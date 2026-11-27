@@ -86,6 +86,10 @@ vi.mock('../db/index.js', async (importOriginal) => {
 
 import { normalizeWorkspacePath } from '../servers/tower-utils.js';
 import { buildAgentName } from '../utils/agent-names.js';
+import crypto from 'node:crypto';
+import { GLOBAL_SCHEMA } from '../db/schema.js';
+import * as mailbox from '../db/mailbox.js';
+import * as peerStore from '../peer/store.js';
 
 // ============================================================================
 // Temp directory helper
@@ -2805,5 +2809,98 @@ describe('readFeedbackMode (#1410)', () => {
   it('tolerates JSONC comments / trailing commas around the setting', () => {
     writeSettings('{\n  // my settings\n  "codev.diffCodelensMode": "comment",\n}');
     expect(readFeedbackMode(dir)).toBe('queue');
+  });
+});
+
+// ============================================================================
+// Spec 1967: the three kinds of held mail, each counted in the workspace
+// ============================================================================
+
+describe('the held-mail counts (Spec 1967)', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dir = makeTmpDir();
+    dbState.globalDbPath = path.join(dir, '.agent-farm', 'global.db');
+    mockFetchPRList.mockResolvedValue([]);
+    mockFetchIssueList.mockResolvedValue([]);
+    mockFetchRecentlyClosed.mockResolvedValue([]);
+    mockFetchMergedPRs.mockResolvedValue([]);
+    mockFetchCurrentUser.mockResolvedValue('octocat');
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A message from another Tower for this workspace, held for release; released when asked. */
+  function fromPeer(db: Database.Database, workspacePath: string, released: boolean): void {
+    const result = mailbox.enqueueRemote(db, {
+      workspacePath,
+      toAgent: 'architect:main',
+      body: 'from devvm',
+      formattedMessage: '[remote] from devvm',
+      reason: null,
+      releaseHold: true,
+      remote: {
+        sender: { towerId: '01JDEVVM0000000000000000AA', towerSlug: 'devvm', address: null },
+        messageId: crypto.randomUUID(),
+        ownerEmail: null,
+        payloadSha256: 'd'.repeat(64),
+        sentAt: 1000,
+      },
+    }, 1000);
+    if (!result.accepted) throw new Error('expected a new remote row');
+    if (released) mailbox.release(db, result.row.id, 2000);
+  }
+
+  /** A message this workspace sent to another Tower, waiting here; its path as the send gave it. */
+  function forPeer(db: Database.Database, fromWorkspacePath: string): void {
+    peerStore.insertOutbox(db, {
+      messageId: crypto.randomUUID(),
+      peerTowerId: '01JDEVVM0000000000000000AA',
+      toAddress: 'afx://devvm/codev:architect:local',
+      fromAddress: 'codev:architect:main',
+      payload: new TextEncoder().encode('{"sentAt":1000}'),
+      sentAt: 1000,
+      fromWorkspacePath,
+      fromAgent: 'architect:main',
+    }, 1000);
+  }
+
+  it('counts each kind in its own field, scoped to the workspace; heldCount keeps its meaning', async () => {
+    fs.mkdirSync(path.dirname(dbState.globalDbPath), { recursive: true });
+    const db = new Database(dbState.globalDbPath);
+    db.exec(GLOBAL_SCHEMA);
+    const ws = normalizeWorkspacePath(dir);
+    const elsewhere = path.join(dir, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    mailbox.enqueue(db, { workspacePath: ws, toAgent: 'architect:main', body: 'b', formattedMessage: 'b', reason: 'busy' });
+    fromPeer(db, ws, false); // held for release
+    fromPeer(db, ws, true); // released: ordinary held mail now, waiting for its local agent
+    fromPeer(db, normalizeWorkspacePath(elsewhere), false);
+    // The outbox keeps the sending workspace as the send gave it: here the unresolved temp
+    // path, which on macOS is a symlink spelling of the workspace's canonical path.
+    forPeer(db, dir);
+    forPeer(db, elsewhere);
+    db.close();
+
+    const data = await new OverviewCache().getOverview(dir);
+    expect(data.heldCount).toBe(2);
+    expect(data.heldForReleaseCount).toBe(1);
+    expect(data.waitingForPeerCount).toBe(1);
+    expect(data.mailboxEscalated).toBe(false);
+  });
+
+  it('reports zero for each when nothing is held, and when there is no database', async () => {
+    const none = await new OverviewCache().getOverview(dir);
+    expect([none.heldCount, none.heldForReleaseCount, none.waitingForPeerCount]).toEqual([0, 0, 0]);
+    fs.mkdirSync(path.dirname(dbState.globalDbPath), { recursive: true });
+    const db = new Database(dbState.globalDbPath);
+    db.exec(GLOBAL_SCHEMA);
+    db.close();
+    const empty = await new OverviewCache().getOverview(dir);
+    expect([empty.heldCount, empty.heldForReleaseCount, empty.waitingForPeerCount]).toEqual([0, 0, 0]);
   });
 });

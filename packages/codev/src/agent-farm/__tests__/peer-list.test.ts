@@ -445,6 +445,7 @@ describe("walkthrough step 1: 'afx peer list' on mbp, with the switch off", () =
         },
         tunnelUp: () => true,
         wakeOutbox: () => {},
+        outbox: () => ({ inFlightFor: () => null, pausedBecause: () => null }),
         show: async () => {
           throw new Error('these routes ask no peer');
         },

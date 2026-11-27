@@ -1,9 +1,10 @@
 /**
- * `afx peer on|off|list|grants|grant|revoke|limits|show` (Spec 1967; approved spec Decisions 6
- * and 9).
+ * `afx peer on|off|list|grants|grant|revoke|limits|show|log` (Spec 1967; approved spec
+ * Decisions 6 and 9).
  *
  * The receiving Tower's own decisions about who may message whom, the list of my other
- * Towers, and what one of them lets this Tower message (`show`, which asks that Tower).
+ * Towers, what one of them lets this Tower message (`show`, which asks that Tower), and the
+ * record of cross-Tower attempts (`log`, which never shows a body).
  * Tower holds the switch, the grants and the peer list and makes every check; these
  * commands only ask it, and print what it answered.
  *
@@ -22,6 +23,9 @@ import type {
   PeerGrantModeName,
   PeerGrantView,
   PeerListedTowerView,
+  PeerLogEntry,
+  PeerLogResponse,
+  PeerMarkView,
   PeerShownAddress,
   PeerSwitchReport,
   PeerSwitchResponse,
@@ -44,6 +48,7 @@ export type PeerClient = Pick<
   | 'getPeerLimits'
   | 'getPeerTowers'
   | 'getPeerShow'
+  | 'getPeerLog'
 >;
 
 /** Where the commands print. */
@@ -104,6 +109,18 @@ function at(epochMs: number): string {
 // ===========================================================================
 
 /**
+ * Released mail is the owner's decision about each message, so neither the switch nor a
+ * grant takes it back (the architect's ruling, 2026-11-27T04:51Z). `off` and `revoke` say how
+ * much of it still waits to be delivered, and how one is stopped. `null` when none waits.
+ */
+export function releasedWaitingNote(count: number, from: string): string | null {
+  if (count === 0) return null;
+  const what = count === 1 ? 'One message' : `${count} messages`;
+  const verb = count === 1 ? 'was' : 'were';
+  return `${what} ${from} ${verb} released by a human and still ${count === 1 ? 'waits' : 'wait'} to be delivered here: a release stands. Stop one with: afx inbox dismiss <id>`;
+}
+
+/**
  * What the commands add when a switch change could not be told to Codev Cloud now. The
  * usual case, a report under way, and the cases with nothing to tell, print nothing.
  */
@@ -155,6 +172,8 @@ export async function peerOff(options: PeerPortOption, deps: PeerDeps = defaultD
   deps.out.success(`Remote messaging is off for ${name}. It sends nothing to other Towers and accepts nothing from them.`);
   const note = reportNote(answer.cloudReport);
   if (note !== null) deps.out.info(note);
+  const released = releasedWaitingNote(answer.releasedWaiting ?? 0, 'from other Towers');
+  if (released !== null) deps.out.info(released);
 }
 
 // ===========================================================================
@@ -167,10 +186,28 @@ function mayMessageText(tower: PeerListedTowerView): string {
   return tower.mayMessage.map((g) => `${g.recipient} (${modeText(g.mode)})`).join(', ');
 }
 
+/** What a mark on a peer says, as `afx peer list` and `afx peer log` print it (G10, G12, G15). */
+export function markText(mark: PeerMarkView): string {
+  switch (mark.mark) {
+    case 'not-verifying':
+      return `not verifying: its last ${mark.run} messages from here were not verified there, since ${at(mark.since)}. The two Towers may disagree about the contract; this Tower keeps retrying at the capped interval.`;
+    case 'cloud-error':
+      return `cloud error: Codev Cloud failed the last ${mark.run} messages to it, since ${at(mark.since)}, as it cannot build a valid statement for this pair. This Tower keeps retrying at the capped interval.`;
+    case 'clock-out-of-range':
+      return `clock out of range: it refused a message from here as clock-skew at ${at(mark.lastAt)}. Its clock may be wrong (Codev Cloud's clock is the reference); this Tower keeps retrying.`;
+  }
+}
+
+/** What R's clock surface says (G12): this Tower's own clock may be out of range. `null` when it is not. */
+export function clockNote(clockSkewSince: number | null | undefined): string | null {
+  if (clockSkewSince === null || clockSkewSince === undefined) return null;
+  return `This Tower's clock may be out of range: it refused a request from another Tower as clock-skew at ${at(clockSkewSince)}, and Codev Cloud's clock is the reference. Check this machine's clock.`;
+}
+
 /** One line per Tower, in aligned columns: name, owner, the online hint, what it may message here. */
 export function towerLines(towers: readonly PeerListedTowerView[]): string[] {
   const rows = towers.map((t) => [t.name, 'you', t.online ? 'online' : 'offline', `may message this Tower: ${mayMessageText(t)}`]);
-  const widths = [0, 1, 2].map((i) => Math.max(...rows.map((r) => r[i].length)));
+  const widths = [0, 1, 2].map((i) => Math.max(0, ...rows.map((r) => r[i].length)));
   return rows.map((r) => r.map((c, i) => (i < 3 ? c.padEnd(widths[i]) : c)).join('  '));
 }
 
@@ -225,13 +262,19 @@ function listingNote(answer: PeerTowersResponse): string | null {
 export async function peerList(options: PeerPortOption, deps: PeerDeps = defaultDeps(options)): Promise<void> {
   const answer = answerOf(await deps.client.getPeerTowers(), 'has no peer list');
   deps.out.line(answer.remoteMessaging === 'on' ? 'Remote messaging: on' : 'Remote messaging: off — a human turns it on with: afx peer on');
-  for (const line of towerLines(answer.towers)) deps.out.line(line);
+  const lines = towerLines(answer.towers);
+  answer.towers.forEach((tower, i) => {
+    deps.out.line(lines[i]);
+    // A mark shows while it is set: a Tower older than this CLI sends none.
+    for (const mark of tower.marks ?? []) deps.out.line(`  ! ${markText(mark)}`);
+  });
   if (answer.towers.length === 0 && answer.listing.refreshedAt !== null) deps.out.line('No other Towers are on your Codev Cloud account.');
 
   const notes = [listingNote(answer), relayNote(answer.relay)];
   if (answer.tunnel === 'down' && answer.listing.problem !== 'not-connected' && answer.listing.problem !== 'not-registered') {
     notes.push("This Tower's own tunnel is down: it can send, but cannot receive; mail for it waits at its senders.");
   }
+  notes.push(clockNote(answer.clockSkewSince));
   for (const note of notes) if (note !== null) deps.out.info(note);
 }
 
@@ -369,9 +412,11 @@ export async function peerRevoke(options: PeerRevokeOptions, deps: PeerDeps = de
   if (Object.keys(recipients).length === 0) {
     const count = answer.removed.length;
     deps.out.success(`Removed ${count === 1 ? 'the grant' : `all ${count} grants`} for ${tower}: it may no longer message this Tower.`);
-    return;
+  } else {
+    deps.out.success(`${tower} may no longer message ${recipientsText(answer.removed)} on this Tower.`);
   }
-  deps.out.success(`${tower} may no longer message ${recipientsText(answer.removed)} on this Tower.`);
+  const released = releasedWaitingNote(answer.releasedWaiting ?? 0, `from ${tower}`);
+  if (released !== null) deps.out.info(released);
 }
 
 // ===========================================================================
@@ -426,4 +471,66 @@ export async function peerShow(options: PeerShowOptions, deps: PeerDeps = defaul
   if (answer.truncated) {
     deps.out.info(`${tower} trimmed its answer to fit the 65 536-byte limit: some addresses there are not shown.`);
   }
+}
+
+// ===========================================================================
+// afx peer log
+// ===========================================================================
+
+export interface PeerLogOptions extends PeerPortOption {
+  /** Only the attempts to and from this Tower (a tower-ref). */
+  tower?: string;
+  limit?: number;
+}
+
+/** Who and what an entry is about, as the log prints it. */
+function entrySubject(entry: PeerLogEntry): string {
+  const arrow = entry.direction === 'outbound' ? `to ${entry.peer ?? '?'}` : `from ${entry.peer ?? (entry.tunnelSession === null ? '?' : 'an unverified sender')}`;
+  const kind = entry.kind ?? 'request';
+  const route = entry.from !== null || entry.to !== null ? `  ${entry.from ?? '?'} → ${entry.to ?? '?'}` : '';
+  return `${kind} ${arrow}${route}`;
+}
+
+/** The outcome an entry records, with its reason. */
+function entryOutcome(entry: PeerLogEntry): string {
+  return entry.reason === null ? entry.outcome : `${entry.outcome} (${entry.reason})`;
+}
+
+/**
+ * One line for one row of the record. A flood (an aggregate row) is one counted line, never one
+ * line per attempt. An outbound message also says what the message itself came to, so an
+ * answer this Tower did not use (its registration changed during the call) is seen beside
+ * what the message did. No line carries a body: the record keeps none.
+ */
+export function logLine(entry: PeerLogEntry): string {
+  const when = at(entry.at);
+  const parts = [when, entry.direction === 'outbound' ? 'out' : 'in ', entrySubject(entry), entryOutcome(entry)];
+  if (entry.aggregate) parts.push(`×${entry.count} until ${at(entry.lastAt)}`);
+  if (entry.messageId !== null) parts.push(`id ${entry.messageId}`);
+  if (entry.payloadSize !== null) parts.push(`${entry.payloadSize} B`);
+  if (entry.message !== null) parts.push(`message now: ${entry.message.state}${entry.message.state === 'held' ? ` (${entry.message.reason})` : ''}`);
+  return parts.join('  ');
+}
+
+/**
+ * `afx peer log [--peer <tower>]`: the record of cross-Tower attempts, newest first, with the
+ * marks set now (G10, G12, G15). Bodies are never in the record, so never here.
+ */
+export async function peerLog(options: PeerLogOptions, deps: PeerDeps = defaultDeps(options)): Promise<void> {
+  if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) {
+    throw new Error(`'--limit' must be a whole number from 1: got ${String(options.limit)}.`);
+  }
+  const answer: PeerLogResponse = answerOf(
+    await deps.client.getPeerLog({ tower: options.tower, limit: options.limit }),
+    'keeps no record of cross-Tower attempts it can show',
+  );
+  for (const mark of answer.marks) deps.out.line(`! ${mark.peer}: ${markText(mark)}`);
+  const clock = clockNote(answer.clockSkewSince);
+  if (clock !== null) deps.out.line(`! ${clock}`);
+  if (answer.entries.length === 0) {
+    deps.out.line(options.tower === undefined ? 'No cross-Tower attempts recorded.' : `No cross-Tower attempts recorded with ${options.tower}.`);
+    return;
+  }
+  for (const entry of answer.entries) deps.out.line(logLine(entry));
+  if (answer.truncated) deps.out.info(`Older attempts are not shown. Show more with: afx peer log --limit <count>`);
 }

@@ -1106,3 +1106,123 @@ Readings, for the architect (neither spec spells these out):
     - `/api/peer/show` through the `/t/` proxy is intended (claude 5).
   - **Verified.** Layer A 10 937 passed, 116 skipped, 241.9 s. Layer B discovery 10 of 10
     in 27.2 s at load 1.2.
+
+## Phase 11: inbox, status and record surfaces (2026-11-27)
+
+Built:
+- **`afx inbox` in three groups.** Waiting for a local agent, held for release, waiting for
+  a peer. Each kind is listed in its own group and only there. The third group comes from a
+  new route, `GET /api/peer/outbox?workspace=`. It gives each message's reason, its next try
+  (the head of each queue only), whether its call is in flight, and why the queues are
+  paused when they are (remote-off, not-connected, not-registered, no-relay). The pause comes
+  from the outbox's own check, `Outbox.pausedBecause()`.
+- **`afx inbox show <id>`.** Remote mail names its sender in full, as its header does: the
+  same `remoteSenderText`, now exported. It also shows the owner's email, when a human
+  released it, and the release command while it is held for release. A message for a peer
+  shows in any state, with its body, read from its stored payload as at its send time.
+- **`afx inbox release <id> --a-human-explicitly-approved-this`.**
+  - New, and human only: the CLI refuses without the flag, and Tower refuses without
+    `humanApproved: true`.
+  - Refused through the tunnel (`NOT_OVER_TUNNEL`), as a grant is.
+  - It calls `mailbox.release()` and nothing else, by the ruling of 04:51Z. Then it schedules
+    a drain for the agent, so the message goes through the gate.
+- **`afx inbox dismiss <id>`.**
+  - Also takes a message waiting for a peer: `Outbox.dismiss` ends the row, tells a sender
+    still waiting for its first answer that it was dismissed, and moves the queue on.
+  - Refused (409 `IN_FLIGHT`) while that message's call is out, because the answer decides
+    it.
+  - Mail held for release was already dismissable. A later duplicate of a dismissed remote
+    message is answered `refused`, `dismissed`.
+- **`afx peer log [--peer <tower>] [--limit <n>]`.**
+  - Reads the record, newest first, with the marks set now and R's clock note at the top.
+  - A flood (an aggregate row) is one counted line (`×N until <time>`).
+  - An outbound message's line also says what the message came to now. So an answer the
+    outbox did not use (its registration changed during the call) shows beside the row's
+    `held (registration-changed)`.
+  - Nothing in the record holds a body, so no line can.
+- **`afx peer list`.** The not-verifying, cloud-error and clock-out-of-range marks (G10, G15,
+  G12) are shown under their Tower while set. R's own clock note is shown while a request was
+  refused as clock-skew in the last 10 minutes.
+- **`afx peer off` and `afx peer revoke`** say how many released messages from the affected
+  peers still wait, and that `afx inbox dismiss` stops one (the ruling of 04:51Z).
+- **`afx status`.** One line: `Remote messaging  on · 2 of 3 peers online · 1 held for release
+  · 0 waiting for a peer`. It comes from a new `GET /api/peer/status`, which answers from the
+  cached list and never calls the cloud, plus the overview's counts.
+- **`afx tower status`.** A Remote Messaging section: this Tower's name (the slug while
+  connected, which Tower adopts), the switch and peers online.
+- **`OverviewData`.** Gains `heldForReleaseCount` and `waitingForPeerCount`, both optional,
+  so an older Tower reads as 0. Both are scoped to the workspace as `heldCount` is.
+  `heldCount` does not change, so its consumers see no change in meaning. The empty fallback
+  overview carries both as 0.
+
+Readings, for the architect:
+- **A released message's escalation clock starts at its release** (the phase 3 note). It
+  sat held for release on purpose, so the time before the release is not starvation.
+  `ESCALATION_START_SQL` takes the latest of created, due and released.
+- **Release is refused through Codev Cloud's tunnel.** It widens who may type into an
+  agent's prompt, as a grant does.
+- **An ended message for a peer stays visible through `afx inbox show <id>`** and leaves the
+  list, as a resolved mailbox row does.
+- **Dismissing the held head of a queue sends the next message at once.** The head's back-off
+  was its own, and the next one has never been tried.
+- **Workspace matching for mail waiting for a peer.** The outbox stores the sending workspace
+  as the send gave it (`workspaceKey`). The routes and the count compare both sides in
+  canonical form, as the mailbox's paths are, so a symlink spelling matches.
+
+Fix-in-place, from phase 10's claude iter-2 notes:
+- the vacuous `expect(shownLines([])).toEqual([])` is gone;
+- `towerLines` seeds its `Math.max` with 0.
+The review document's "Readings neither spec states" list gains phase 10's two readings,
+with the architect's ruling of 10:27Z.
+
+Earlier tests changed by this phase's own changes:
+- `peer-routes-wiring.test.ts` pins the exact `/api/peer/towers` shape, now with `marks` and
+  `clockSkewSince`;
+- `inbox-routes.test.ts`'s dismiss body now carries `kind`, and its `message-format` mock
+  spreads the real module, so a remote row's sender can be named;
+- `inbox-cli.test.ts` answers the second request and reads the new group header;
+- four `afx status` test mocks gained `getPeerStatus`;
+- four peer route fixtures gained the `outbox` dependency.
+The type-check of the touched tests shows older errors only: `overview.test.ts` 521–1135
+(the `parseStatusYaml` fixtures) and `inbox-routes.test.ts` 122–130 (`makeRes`). None is in
+a line this phase wrote.
+- **Tests.**
+  - Layer A: `peer-inbox.test.ts` (new, 15 tests). It runs the CLI against Tower's real
+    `handleRequest` with the production outbox wiring. It covers:
+    - the three groups, each kind only in its own;
+    - remote senders and owners;
+    - show for each kind;
+    - release: flag, tunnel, method and local-mail refusals, and the scheduled drain;
+    - dismiss of mail waiting for a peer, including the in-flight refusal;
+    - a dismissed remote message's duplicate answer;
+    - the escalation clock starting at release.
+  - Layer A, extended:
+    - `peer-commands.test.ts`: `afx peer log` (a flood as one counted line, no body, `--peer`,
+      the limit, the discarded answer), the marks in `afx peer list`, R's clock note, the
+      released-and-waiting lines on off and revoke, the outbox and status routes, and the
+      tower status lines;
+    - `peer-outbox.test.ts`: `Outbox.dismiss` and `pausedBecause`;
+    - `overview.test.ts`: the three counts and their scope;
+    - `spec-1313-status-held.test.ts`: the `afx status` line;
+    - `inbox-cli.test.ts`: an older Tower;
+    - `peer-sender.test.ts`: the dismissed first answer.
+  - Layer B: `peer-surfaces.e2e.test.ts` (new, 7 tests), on two Towers after sends that leave
+    one message of each kind. It covers the groups on each Tower, show, the status line and
+    tower status, release through the gate to a delivered message, dismissal that never
+    reaches the peer once it is back, the not-verifying mark set and cleared, and a flood as
+    counted lines at both ends with no body in either log.
+- **Verified.**
+  - Build: 17 s.
+  - Layer A: 10 980 passed, 116 skipped, 243.1 s.
+  - Layer B surfaces: 7 of 7 in 14.9 s at load 2.3.
+  - Its first two runs had reds, both in the test this phase wrote; diagnosed, fixed and rerun.
+    The first sent `hold: true` where the grant route takes `mode: 'hold'`. The second ran the
+    whole `afx status` command, which the harness cannot do; see the observation below.
+  - Regression check: phase 9's `peer-send.e2e.test.ts`, 20 of 20 in 59.9 s at load 3.2.
+- **Observation, for the architect (not this phase's).** `GET /api/workspaces/:path/status`
+  finds a workspace by exact path (`tower-routes.ts`, the status action). `afx status`, run
+  from a symlinked spelling of a workspace, therefore says "not active in tower". The harness
+  workspaces sit under macOS's `/var` → `/private/var` link, so layer B checks the status line
+  through `renderRemoteMessagingLine` over each Tower's real overview instead. The inbox,
+  overview and send routes all normalize. This is older behaviour in workspace routing, not
+  changed here.

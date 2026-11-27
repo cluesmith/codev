@@ -41,6 +41,12 @@ async function towerStatus(port?: number): Promise<void> {
 
   // Show cloud connection status
   await towerCloudStatus(towerPort);
+
+  // Spec 1967: this Tower's name and its remote-messaging switch
+  if (status) {
+    const { renderTowerRemoteMessaging } = await import('./commands/peer-status.js');
+    await renderTowerRemoteMessaging(client);
+  }
 }
 
 /**
@@ -1001,10 +1007,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('-p, --port <port>', 'Tower port (default: 4100)')
     .action((tower, options) => runPeer((peer) => peer.peerShow({ tower, port: portOf(options) })));
 
+  peerCmd
+    .command('log')
+    .description('Show the record of cross-Tower attempts, in and out, with outcomes (never a body)')
+    .option('--peer <tower>', 'Only the attempts to and from this Tower')
+    .option('-n, --limit <count>', 'How many rows to show, newest first (default: 50)')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action((options) =>
+      runPeer((peer) =>
+        peer.peerLog({ tower: options.peer, limit: options.limit === undefined ? undefined : Number(options.limit), port: portOf(options) }),
+      ),
+    );
+
   // Inbox commands (Spec 1313) — list/dismiss held (undelivered) mailbox messages
   const inboxCmd = program
     .command('inbox')
-    .description('List held (undelivered) messages; dismiss by id')
+    .description('List held messages: waiting for a local agent, held for release, waiting for a peer')
     .option('-w, --workspace <path>', 'Workspace to list held messages for (default: current workspace)')
     .option('-p, --port <port>', 'Tower port (default: 4100)')
     .action(async (options) => {
@@ -1037,8 +1055,26 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   inboxCmd
+    .command('release <id>')
+    .description('Release a message from another Tower held for release (human only): it is then delivered through the gate')
+    .option('--a-human-explicitly-approved-this', 'A human is releasing this message')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (id, options) => {
+      const { inboxRelease } = await import('./commands/inbox.js');
+      try {
+        await inboxRelease(id, {
+          humanApproved: options.aHumanExplicitlyApprovedThis === true,
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  inboxCmd
     .command('dismiss <id>')
-    .description('Dismiss a held message by id — marks it dismissed, never delivers it')
+    .description('Dismiss a held message by id (one waiting for a peer included): it is never delivered or sent')
     .option('-p, --port <port>', 'Tower port (default: 4100)')
     .action(async (id, options) => {
       const { inboxDismiss } = await import('./commands/inbox.js');

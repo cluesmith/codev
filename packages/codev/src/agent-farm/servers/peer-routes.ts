@@ -12,6 +12,9 @@
  *   POST /api/peer/grants/revoke  remove grants
  *   GET  /api/peer/limits         the limits this Tower enforces itself, and Codev Cloud's
  *   GET  /api/peer/show           what a peer lets this Tower message ?tower=<tower-ref>, asked of it
+ *   GET  /api/peer/status         remote messaging at a glance, from what this Tower knows (no cloud call)
+ *   GET  /api/peer/outbox         mail from a workspace waiting here for a peer ?workspace=<path>
+ *   GET  /api/peer/log            the record of cross-Tower attempts [?tower=<tower-ref>][&limit=<n>]
  *
  * Turning the switch on and adding a grant widen who may put text into an agent's prompt,
  * so each requires `humanApproved: true`, which the CLI sends only for
@@ -35,8 +38,11 @@ import {
   type PeerGrantsResponse,
   type PeerGrantView,
   type PeerLimitsResponse,
+  type PeerLogResponse,
+  type PeerOutboxResponse,
   type PeerRevokeResponse,
   type PeerShowResponse,
+  type PeerStatusResponse,
   type PeerSwitchReport,
   type PeerSwitchResponse,
   type PeerSwitchState,
@@ -59,6 +65,10 @@ import { HUMAN_APPROVAL_FLAG, readSwitch, setSwitch } from '../peer/switch.js';
 import { withdrawRemoteMail } from '../peer/receiver.js';
 import type { PeerListRefresh } from '../peer/peer-list.js';
 import type { PeerShowResult } from '../peer/sender.js';
+import type { Outbox } from '../peer/outbox.js';
+import { clockSkewSince } from '../peer/records.js';
+import { heldOutboxForWorkspace, marksByPeer, outboxMessageView, peerNamer, readLog } from '../peer/surfaces.js';
+import { countReleasedWaiting } from '../db/mailbox.js';
 import {
   listGrants,
   listTowerNames,
@@ -74,6 +84,10 @@ export const PEER_ROUTE_PREFIX = '/api/peer/';
 
 /** A grant request is a handful of short strings; anything near this is not one. */
 const MAX_BODY_BYTES = 64 * 1024;
+
+/** How many rows `afx peer log` shows unless it asks for more, and the most it may ask for. */
+export const PEER_LOG_DEFAULT_LIMIT = 50;
+export const PEER_LOG_MAX_LIMIT = 1000;
 
 /** What the routes ask of Codev Cloud and the peer list (`peer/cloud-wiring.ts` in production). */
 export interface PeerCloudRouteDeps {
@@ -91,6 +105,8 @@ export interface PeerCloudRouteDeps {
   wakeOutbox(): void;
   /** Ask a peer what it lets this Tower message (`afx peer show`): one discovery query, never held. */
   show(tower: string): Promise<PeerShowResult>;
+  /** The outbox, for what `afx inbox` shows of mail waiting for a peer. */
+  outbox(): Pick<Outbox, 'inFlightFor' | 'pausedBecause'>;
 }
 
 /** What the handlers read. Each is called per request, so a test can change the world between calls. */
@@ -257,6 +273,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
       towerName: deps.ownTower().name,
       grantCount: listGrants(db).length,
       cloudReport,
+      releasedWaiting: countReleasedWaiting(db),
     };
   };
 
@@ -368,7 +385,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     })();
     for (const view of removed) deps.log('INFO', `Peer: grant removed for ${peer.name}: ${view.recipient}`);
     logWithdrawn(withdrawn);
-    return { tower: { towerId: peer.towerId, name: peer.name }, removed };
+    return { tower: { towerId: peer.towerId, name: peer.name }, removed, releasedWaiting: countReleasedWaiting(db, peer.towerId) };
   }
 
   async function getGrants(url: URL): Promise<PeerGrantsResponse> {
@@ -384,6 +401,7 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
     const refresh = await cloud.refreshListing();
     const db = deps.db();
     const views = viewsOf(listGrants(db));
+    const marks = marksByPeer(db);
     return {
       remoteMessaging: readSwitch(db).state,
       towerName: deps.ownTower().name,
@@ -402,8 +420,60 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
         protocols: t.protocols,
         remoteMessaging: t.remoteMessaging,
         mayMessage: views.filter((v) => v.peerTowerId === t.towerId),
+        marks: marks.get(t.towerId) ?? [],
       })),
+      clockSkewSince: clockSkewSince(db, deps.now()),
     };
+  }
+
+  /** Remote messaging at a glance (`afx status`, `afx tower status`): the cached list only, never a call to the cloud. */
+  function getStatus(): PeerStatusResponse {
+    const db = deps.db();
+    const listing = readListing(db);
+    return {
+      remoteMessaging: readSwitch(db).state,
+      towerName: deps.ownTower().name,
+      tunnel: deps.cloud().tunnelUp() ? 'up' : 'down',
+      peers: {
+        listed: listing.towers.length,
+        online: listing.towers.filter((t) => t.online).length,
+        listedAt: listing.refreshedAt,
+      },
+    };
+  }
+
+  /** Mail from one workspace waiting here for a peer, oldest first, and why none leaves when the queues are paused. */
+  function getOutbox(url: URL): PeerOutboxResponse {
+    const workspace = url.searchParams.get('workspace');
+    if (workspace === null || workspace === '') throw new RequestError(400, 'INVALID_PARAMS', "'workspace' is required.");
+    const db = deps.db();
+    const queue = deps.cloud().outbox();
+    const nameOf = peerNamer(db);
+    return {
+      paused: queue.pausedBecause(),
+      messages: heldOutboxForWorkspace(db, workspace).map((row) => outboxMessageView(db, row, queue, nameOf)),
+    };
+  }
+
+  /** The record, newest first, with the marks set now: every peer's, or one peer's. */
+  async function getLog(url: URL): Promise<PeerLogResponse> {
+    const tower = url.searchParams.get('tower');
+    const limitText = url.searchParams.get('limit');
+    let limit = PEER_LOG_DEFAULT_LIMIT;
+    if (limitText !== null) {
+      if (!/^[1-9][0-9]{0,5}$/.test(limitText) || Number(limitText) > PEER_LOG_MAX_LIMIT) {
+        throw new RequestError(400, 'INVALID_PARAMS', `'limit' must be a whole number from 1 to ${PEER_LOG_MAX_LIMIT}.`);
+      }
+      limit = Number(limitText);
+    }
+    const peerTowerId = tower === null ? undefined : (await peerOf(tower, 'existing')).towerId;
+    const db = deps.db();
+    const { entries, truncated } = readLog(db, { peerTowerId, limit });
+    const nameOf = peerNamer(db);
+    const marks = [...marksByPeer(db)]
+      .filter(([id]) => peerTowerId === undefined || id === peerTowerId)
+      .flatMap(([id, list]) => list.map((mark) => ({ ...mark, peerTowerId: id, peer: nameOf(id) ?? id })));
+    return { entries, truncated, marks, clockSkewSince: clockSkewSince(db, deps.now()) };
   }
 
   /**
@@ -470,6 +540,15 @@ export function createPeerRouteHandler(deps: PeerRouteDeps): (
           break;
         case 'show':
           if (method === 'GET') return await getShow(url, res);
+          break;
+        case 'status':
+          if (method === 'GET') return sendJson(res, 200, getStatus());
+          break;
+        case 'outbox':
+          if (method === 'GET') return sendJson(res, 200, getOutbox(url));
+          break;
+        case 'log':
+          if (method === 'GET') return sendJson(res, 200, await getLog(url));
           break;
         default:
           return sendJson(res, 404, { error: 'NOT_FOUND', message: `No peer route ${url.pathname}` });

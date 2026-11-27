@@ -854,6 +854,7 @@ describe('Spec 1967 phase 10: GET /api/peer/show and afx peer show', () => {
         reportSwitch: () => 'reporting',
         tunnelUp: () => true,
         wakeOutbox: () => {},
+        outbox: () => ({ inFlightFor: () => null, pausedBecause: () => null }),
         show: async (tower) => {
           asked.push(tower);
           return next;
@@ -930,7 +931,6 @@ describe('Spec 1967 phase 10: GET /api/peer/show and afx peer show', () => {
     await peerShow({ tower: 'devvm' }, deps);
     expect(printed).toEqual(['afx://devvm/codev:architect:local    live', 'afx://devvm/codev:builder-spir-1940  not live']);
     expect(shownLines([{ address: 'afx://devvm/codev:architect:local', live: true }])).toEqual(['afx://devvm/codev:architect:local  live']);
-    expect(shownLines([])).toEqual([]);
   });
 
   it('afx peer show: nothing to message, and a trimmed answer, say so', async () => {

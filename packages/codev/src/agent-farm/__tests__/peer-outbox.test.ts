@@ -845,6 +845,81 @@ describe('held mail leaves only while this Tower would accept the send now', () 
 // The record
 // ===========================================================================
 
+// ===========================================================================
+// Dismissing mail waiting for a peer (phase 11, `afx inbox dismiss`)
+// ===========================================================================
+
+describe('dismissing a message waiting for a peer', () => {
+  it('a send waiting behind the call in flight is told it was dismissed, and is never sent', async () => {
+    const a = f.send();
+    const b = f.send();
+    const c = f.send();
+    await f.settle();
+    expect(f.calls).toHaveLength(1);
+    expect(f.outbox.dismiss(b.row.messageId)).toMatchObject({ result: 'dismissed', row: { messageId: b.row.messageId } });
+    expect(await b.first).toEqual({ kind: 'ended', state: 'dismissed' });
+    expect(f.row(b.row.messageId)).toMatchObject({ state: 'dismissed', attempts: 0 });
+    f.answers(DEVVM, A.delivered());
+    f.calls[0].answer(A.delivered());
+    await f.settle();
+    // The queue moved on past it: a, then c; b never.
+    expect(f.calls.map((call) => call.request.requestId)).toEqual([a.row.messageId, c.row.messageId]);
+    expect(await c.first).toMatchObject({ kind: 'resolved', state: 'accepted' });
+    expect(f.logs).toContain(`INFO Peer: message ${b.row.messageId} to ${DEVVM} was dismissed here; it is not sent`);
+  });
+
+  it('the message whose call is in flight is refused: its answer decides it', async () => {
+    const a = f.send();
+    await f.settle();
+    expect(f.outbox.inFlightFor(DEVVM)).toBe(a.row.messageId);
+    expect(f.outbox.dismiss(a.row.messageId)).toMatchObject({ result: 'in-flight', row: { messageId: a.row.messageId } });
+    expect(f.row(a.row.messageId).state).toBe('held');
+    f.calls[0].answer(A.delivered());
+    expect(await a.first).toMatchObject({ kind: 'resolved', state: 'accepted' });
+  });
+
+  it('a held head is dismissed between attempts, and the message behind it goes in its place', async () => {
+    f.answers(DEVVM, A.offline());
+    const head = f.send();
+    await f.settle();
+    expect(await head.first).toMatchObject({ kind: 'held', reason: 'tower-offline' });
+    const behind = f.send();
+    expect(await behind.first).toMatchObject({ kind: 'held', ahead: 1 });
+    f.answers(DEVVM, A.delivered());
+    expect(f.outbox.dismiss(head.row.messageId).result).toBe('dismissed');
+    // The head's back-off was its own: the message behind, never tried, goes at once.
+    await f.settle();
+    expect(f.calls.map((call) => call.request.requestId)).toEqual([head.row.messageId, behind.row.messageId]);
+    expect(f.row(head.row.messageId)).toMatchObject({ state: 'dismissed', attempts: 1 });
+    expect(f.row(behind.row.messageId).state).toBe('accepted');
+  });
+
+  it('an id that names no message waiting for a peer is not dismissed: unknown, or already ended', async () => {
+    expect(f.outbox.dismiss(randomUUID())).toEqual({ result: 'not-held' });
+    const a = f.send();
+    await f.settle();
+    f.calls[0].answer(A.delivered());
+    await a.first;
+    expect(f.outbox.dismiss(a.row.messageId)).toEqual({ result: 'not-held' });
+    expect(f.row(a.row.messageId).state).toBe('accepted');
+  });
+
+  it('says why the queues are paused, and nothing while they run', () => {
+    expect(f.outbox.pausedBecause()).toBeNull();
+    setSwitch(f.db, 'off', f.clock.now);
+    expect(f.outbox.pausedBecause()).toBe('remote-off');
+    setSwitch(f.db, 'on', f.clock.now);
+    const saved = f.registration as OwnRegistration;
+    f.registration = { ...saved, deregistered: true };
+    expect(f.outbox.pausedBecause()).toBe('not-registered');
+    f.registration = null;
+    expect(f.outbox.pausedBecause()).toBe('not-connected');
+    f.registration = saved;
+    f.relayState = { state: 'none', why: 'stated-none' };
+    expect(f.outbox.pausedBecause()).toBe('no-relay');
+  });
+});
+
 describe('the record of every relay call', () => {
   it('one row per call, retries included, with the addresses, id and size, and no body; rate-limited calls counted', async () => {
     f.answers(DEVVM, A.offline(), A.cloudRateLimited(10), A.delivered());
