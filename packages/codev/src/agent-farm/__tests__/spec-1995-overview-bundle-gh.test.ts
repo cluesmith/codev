@@ -179,6 +179,13 @@ const smallRepo = (): Repo => ({
 let tmpDir: string;
 let bin: string;
 const originalPath = process.env.PATH;
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 function writeRepo(repo: Repo): void {
   for (const file of fs.readdirSync(bin)) if (file.endsWith('.json')) fs.rmSync(path.join(bin, file));
@@ -213,9 +220,19 @@ describe.skipIf(process.platform === 'win32' || !hasJq())('Spec 1995 — overvie
     fs.writeFileSync(path.join(bin, 'gh'), GH_STUB);
     fs.chmodSync(path.join(bin, 'gh'), 0o755);
     process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ''}`;
+    // The overview path is read from config on disk, and loadConfig layers
+    // ~/.codev/config.json under the project. An empty fake home keeps a
+    // developer's global forge section from choosing the path. os.homedir()
+    // reads HOME on POSIX and USERPROFILE on Windows.
+    const home = path.join(tmpDir, 'home');
+    fs.mkdirSync(home);
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
   });
   afterAll(() => {
     process.env.PATH = originalPath;
+    restoreEnv('HOME', originalHome);
+    restoreEnv('USERPROFILE', originalUserProfile);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
   beforeEach(clearCalls);

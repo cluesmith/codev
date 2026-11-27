@@ -253,6 +253,10 @@ const DEFAULT_CONFIG: CodevConfig = {
  *  - Objects: recursively merged.
  *  - Arrays: replaced, not concatenated.
  *  - null value: deletes the key from the result.
+ *
+ * So a section that gives `null` a meaning of its own cannot be layered with
+ * this alone: see `mergeConfigLayer`, which keeps a forge concept's `null`
+ * ("disabled") across config layers.
  */
 export function deepMerge<T extends Record<string, unknown>>(base: T, override: Record<string, unknown>): T {
   const result = { ...base };

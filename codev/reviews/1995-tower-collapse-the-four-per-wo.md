@@ -241,6 +241,29 @@ file, so no reviewed file changed (N/A).
 - **Concern**: The info row reuses the concept column. → **Rebutted**: it is aligned with the
   table it summarises on purpose, `○` marks it informational, and nothing parses doctor output.
 
+### Review Phase, PR #2005 (Round 1)
+
+#### Codex — COMMENT
+- **Concern**: The linked Windows workflow was still running; confirm it passes before merge.
+  → **Addressed**: its result is recorded in the PR before the `pr` gate.
+
+#### Claude — APPROVE (non-blocking notes)
+- **Concern**: The `gh`-stub harness and the #1645 quota harness read their path through the
+  real `loadConfig`, so a developer's global `~/.codev/config.json` forge section could flip
+  them. → **Addressed**: both now point `HOME`/`USERPROFILE` at an empty fake home. Under a
+  `HOME` whose global config disables `overview-bundle`, the old quota harness fails
+  (`four-call` where `bundle` was expected) and the pinned one passes.
+- **Concern**: A cold-start whole-call failure blanks all four sections together. → **N/A**:
+  this coupling was accepted in the spec. Window-only salvage covers search outages, and fresh
+  entries keep serving. Worth keeping in mind for the verify-phase render.
+- **Concern**: An adopter bundle whose `windowsError` matches the rate-limit pattern suspends
+  the whole `gh` budget. → **N/A**: documented defence in depth, unreachable from the GitHub
+  script (a rate limit is a top-level error), and tested at contract level.
+- **Concern**: The script did not say that a window follow-up page salvages a GraphQL error
+  while a parse failure fails the whole call. → **Addressed**: one line in the script header.
+- **Concern**: The next section that gives `null` a meaning will hit the same `deepMerge`
+  trap. → **Addressed**: `deepMerge`'s docstring now points to `mergeConfigLayer`.
+
 ## Lessons Learned
 
 ### What Went Well

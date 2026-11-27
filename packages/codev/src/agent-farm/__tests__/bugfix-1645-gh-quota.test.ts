@@ -28,6 +28,13 @@ import { overviewPath } from '../../lib/github.js';
 let tmpDir: string;
 let callLog: string;
 const originalPath = process.env.PATH;
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bugfix-1645-'));
@@ -46,10 +53,20 @@ beforeAll(() => {
   ].join('\n'));
   fs.chmodSync(path.join(bin, 'gh'), 0o755);
   process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ''}`;
+  // Each workspace's overview path comes from config on disk, and loadConfig
+  // layers ~/.codev/config.json under the project. An empty fake home keeps a
+  // developer's global forge section from choosing the path. os.homedir()
+  // reads HOME on POSIX and USERPROFILE on Windows.
+  const home = path.join(tmpDir, 'home');
+  fs.mkdirSync(home);
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
 });
 
 afterAll(() => {
   process.env.PATH = originalPath;
+  restoreEnv('HOME', originalHome);
+  restoreEnv('USERPROFILE', originalUserProfile);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

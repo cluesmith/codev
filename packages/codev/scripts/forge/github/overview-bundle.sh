@@ -12,6 +12,8 @@
 #         carries either {recentlyClosed, recentlyMerged} (up to 1000 each) or
 #         {windowsError}: a GraphQL error confined to the window searches (a
 #         search timeout or outage) fails only the windows, never the open lists.
+#         That holds on a window follow-up page too. Output that cannot be
+#         parsed, on any page, fails the whole call: it is not a GraphQL error.
 #
 # One request carries every section. A connection with more results than one
 # page is paged with a follow-up request that asks for that connection only;
