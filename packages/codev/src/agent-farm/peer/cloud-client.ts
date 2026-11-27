@@ -104,7 +104,7 @@ interface PendingReport {
 }
 
 /** Real timers, unreferenced: a pending retry or call timeout never keeps Tower's process alive. */
-const DEFAULT_TIMERS: CloudTimers = {
+export const UNREF_TIMERS: CloudTimers = {
   setTimeout: (callback, ms) => setTimeout(callback, ms).unref(),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
@@ -157,7 +157,7 @@ export class CloudClient {
   private reportInFlight: Promise<void> | null = null;
 
   constructor(private readonly options: CloudClientOptions) {
-    this.timers = options.timers ?? DEFAULT_TIMERS;
+    this.timers = options.timers ?? UNREF_TIMERS;
     this.fetch = options.fetch ?? ((url, init) => fetch(url, init));
   }
 
@@ -215,13 +215,20 @@ export class CloudClient {
   // Section 4: the relay call
   // -------------------------------------------------------------------------
 
-  /** One relay call: one forward attempt at most. Ordering per peer is the caller's (the outbox). */
+  /**
+   * One relay call: one forward attempt at most. Ordering per peer is the caller's (the
+   * outbox), and so is holding the answer to the registration the call was made under.
+   * Whether the cloud has stated a relay, which decides what an answer without the body
+   * means, is read as it stood when the call was made: evidence that arrives while the call
+   * is out says nothing of the cloud that answered it.
+   */
   async relay(request: RelayRequest): Promise<RelayCall> {
     const target = this.target(PEER_CLOUD_PATHS.relay);
     if (typeof target === 'string') return { called: false, reason: target };
     const headers = buildRelayRequestHeaders(request);
+    const relayStated = this.options.relayStated();
     const result = await this.call('POST', target, headers, request.payload, PEER_MAX_ANSWER_BYTES);
-    return { called: true, answer: classifyRelayAnswer(result, { kind: request.kind, relayStated: this.options.relayStated() }) };
+    return { called: true, answer: classifyRelayAnswer(result, { kind: request.kind, relayStated }) };
   }
 
   // -------------------------------------------------------------------------

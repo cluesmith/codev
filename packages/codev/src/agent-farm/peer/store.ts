@@ -3,7 +3,7 @@
  * `db/schema.ts` PEER_SCHEMA, migration v21).
  *
  * This is the only file that writes `peer_settings`, `peer_grants`, `peer_towers`,
- * `peer_tower_names`, `peer_outbox`, `peer_accepted` and `peer_records`. Like
+ * `peer_tower_names`, `peer_outbox`, `peer_answer_runs`, `peer_accepted` and `peer_records`. Like
  * `db/mailbox.ts`, every function takes an explicit `db` handle and a caller-supplied
  * epoch-ms `now`, and none opens a connection, logs, or holds state.
  *
@@ -443,6 +443,8 @@ export interface PeerOutboxRow {
   messageId: string;
   peerTowerId: string;
   toAddress: string;
+  /** The sender as this Tower writes it (the record's `from`); `null` when it has no address. */
+  fromAddress: string | null;
   /** The exact payload bytes; every retry sends these unchanged. */
   payload: Buffer;
   sentAt: number;
@@ -463,6 +465,7 @@ interface DbPeerOutbox {
   message_id: string;
   peer_tower_id: string;
   to_address: string;
+  from_address: string | null;
   payload: Buffer;
   sent_at: number;
   from_workspace_path: string;
@@ -483,6 +486,7 @@ function toOutbox(row: DbPeerOutbox): PeerOutboxRow {
     messageId: row.message_id,
     peerTowerId: row.peer_tower_id,
     toAddress: row.to_address,
+    fromAddress: row.from_address,
     payload: row.payload,
     sentAt: row.sent_at,
     fromWorkspacePath: row.from_workspace_path,
@@ -502,6 +506,7 @@ export interface OutboxInsert {
   messageId: string;
   peerTowerId: string;
   toAddress: string;
+  fromAddress: string | null;
   payload: Uint8Array;
   sentAt: number;
   fromWorkspacePath: string;
@@ -516,14 +521,15 @@ export function insertOutbox(db: Database.Database, input: OutboxInsert, now: nu
   }
   const info = db
     .prepare(
-      `INSERT INTO peer_outbox (message_id, peer_tower_id, to_address, payload, sent_at, from_workspace_path, from_agent,
-                                state, attempts, next_attempt_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'held', 0, ?, ?, ?)`,
+      `INSERT INTO peer_outbox (message_id, peer_tower_id, to_address, from_address, payload, sent_at, from_workspace_path,
+                                from_agent, state, attempts, next_attempt_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'held', 0, ?, ?, ?)`,
     )
     .run(
       nonEmpty(input.messageId, 'message id'),
       nonEmpty(input.peerTowerId, 'peer Tower id'),
       nonEmpty(input.toAddress, 'recipient address'),
+      input.fromAddress === null ? null : nonEmpty(input.fromAddress, 'sender address'),
       Buffer.from(input.payload),
       epochMs(input.sentAt, 'sentAt'),
       nonEmpty(input.fromWorkspacePath, 'sending workspace'),
@@ -624,6 +630,61 @@ export function resolveOutbox(
       messageId,
     );
   return info.changes > 0;
+}
+
+// ===========================================================================
+// peer_answer_runs: a run of like answers to the messages for one peer
+// ===========================================================================
+
+export const PEER_RUN_ANSWERS = ['not-verified', 'cloud-error', 'clock-skew'] as const;
+/** The answers whose run the sending Tower keeps (gaps G10, G15 and G12). */
+export type PeerRunAnswer = (typeof PEER_RUN_ANSWERS)[number];
+
+export interface PeerAnswerRun {
+  peerTowerId: string;
+  answer: PeerRunAnswer;
+  /** How many answers in a row, for messages to this peer, were this one. */
+  run: number;
+  firstAt: number;
+  lastAt: number;
+}
+
+/**
+ * Note the answer a message for `peerTowerId` got: one of the run answers extends that
+ * peer's run of it, or starts a new one; `null` (any other answer) ends the run. One
+ * statement, so two answers noted at once cannot both start a run.
+ */
+export function notePeerAnswer(db: Database.Database, peerTowerId: string, answer: PeerRunAnswer | null, now: number): void {
+  const peer = nonEmpty(peerTowerId, 'peer Tower id');
+  const at = epochMs(now, 'now');
+  if (answer === null) {
+    db.prepare('DELETE FROM peer_answer_runs WHERE peer_tower_id = ?').run(peer);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO peer_answer_runs (peer_tower_id, answer, run, first_at, last_at) VALUES (?, ?, 1, ?, ?)
+     ON CONFLICT(peer_tower_id) DO UPDATE SET
+       run = CASE WHEN answer = excluded.answer THEN run + 1 ELSE 1 END,
+       first_at = CASE WHEN answer = excluded.answer THEN first_at ELSE excluded.first_at END,
+       answer = excluded.answer,
+       last_at = excluded.last_at`,
+  ).run(peer, oneOf(answer, PEER_RUN_ANSWERS, 'run answer'), at, at);
+}
+
+/** Every peer's current run, or one peer's. */
+export function listPeerAnswerRuns(db: Database.Database, peerTowerId?: string): PeerAnswerRun[] {
+  const rows = (
+    peerTowerId === undefined
+      ? db.prepare('SELECT * FROM peer_answer_runs ORDER BY peer_tower_id').all()
+      : db.prepare('SELECT * FROM peer_answer_runs WHERE peer_tower_id = ?').all(peerTowerId)
+  ) as Array<{ peer_tower_id: string; answer: string; run: number; first_at: number; last_at: number }>;
+  return rows.map((r) => ({
+    peerTowerId: r.peer_tower_id,
+    answer: oneOf(r.answer, PEER_RUN_ANSWERS, 'run answer'),
+    run: nonNegativeInt(r.run, 'run length'),
+    firstAt: r.first_at,
+    lastAt: r.last_at,
+  }));
 }
 
 // ===========================================================================

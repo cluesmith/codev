@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS peer_outbox (
   message_id TEXT NOT NULL UNIQUE,
   peer_tower_id TEXT NOT NULL,
   to_address TEXT NOT NULL,                      -- the recipient as the sender wrote it (afx://…)
+  from_address TEXT,                             -- the sender as this Tower writes it; NULL when it has no address
   payload BLOB NOT NULL,
   sent_at INTEGER NOT NULL,                      -- the payload's sentAt; the lifetime runs from it
   from_workspace_path TEXT NOT NULL,
@@ -184,6 +185,18 @@ CREATE TABLE IF NOT EXISTS peer_outbox (
   resolved_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_peer_outbox_peer_state ON peer_outbox(peer_tower_id, state, seq);
+
+-- The sending Tower's run of like answers to its messages, per peer (contract section 6;
+-- gaps G10, G12, G15): which answer the latest were ('not-verified', 'cloud-error' or
+-- 'clock-skew'), how many in a row, and when the run began and was last extended. A row
+-- exists only while such a run lasts: any other answer to a message for that peer ends it.
+CREATE TABLE IF NOT EXISTS peer_answer_runs (
+  peer_tower_id TEXT PRIMARY KEY,
+  answer TEXT NOT NULL,
+  run INTEGER NOT NULL,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL
+);
 
 -- Accepted once, at the receiving Tower: one row per message accepted from a peer,
 -- carrying the message's current state itself (delivered, held with its reason, or

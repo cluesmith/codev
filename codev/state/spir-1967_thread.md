@@ -834,3 +834,63 @@ Surprises:
   - This is the architect's ruling, not the owner's; the owner has been told and may overrule.
   - It is recorded in the review document as a reading neither spec states. The wire contract
     does not change, so nothing goes to the cloud side.
+
+## Phase 8 — the outbox, the sender's checks and the per-peer queue
+
+- **Built.**
+  - `peer/outbox.ts` is the per-peer queue over `peer_outbox`.
+  - `peer/sender.ts` holds S's checks, in the contract's order, then the persist and the queue.
+  - Three layer A tests, 132 tests in about 2.2 s: `peer-outbox.test.ts` (a scripted relay,
+    answers read from wire bytes by `classifyRelayAnswer`), `peer-sender.test.ts` and
+    `peer-pipeline.test.ts`. The pipeline runs S, the stand-in cloud C and R's real tunnel
+    client and receiver, over two temp databases, with one clock.
+- **Storage (v21 is unshipped, so these go into it, as in phase 7).**
+  - `peer_outbox.from_address` holds the sender as this Tower writes it, for the record of
+    every retry.
+  - The new table `peer_answer_runs` holds a peer's current run of like answers. A row exists
+    only while a run lasts.
+- **Readings I chose. Neither spec states these; each goes in the review document.**
+  - **Runs.**
+    - Five `not-verified` in a row mark a peer "not verifying"; five `cloud-error`, "cloud
+      error". One `clock-skew` marks it "clock out of range".
+    - Any other answer ends a run.
+    - An answer S could not read as the contract's (no answer at all, or no body) neither
+      extends nor ends a run: it says nothing about the peer.
+    - `readPeerMarks(db)` is for phase 11.
+  - **Held mail leaves only while S would accept the send now.** That means the switch on, a
+    registration not marked deregistered, and a relay not known to be missing. Otherwise
+    nothing is sent and no attempt is counted, and the queue looks again at the cap (2 min) or
+    on `wake()`. So turning the switch off pauses held mail. It does not refuse it.
+  - **A fresh head goes at once**, whatever wait is left from a blocked period: its sender has
+    just passed those checks.
+  - **`retryAfterSec: 0` is waited as 1 s**, so a cloud cannot spin the queue.
+  - **The back-off counts from the row's durable `attempts`**: 5, 10, 20, 40 and 80 s, then
+    the 2 min cap. `backoffBaseMs` scales it (for `AF_TEST_PEER_BACKOFF_MS` in phase 9).
+  - **A listing brings a retry forward only after `tower-offline` or `cloud-unreachable`.** It
+    must be fetched after the head's last answer and show the peer online. While such a head
+    waits, the outbox asks `refresh('holding')` every 30 s. `no-answer` is not brought
+    forward: C had a session for the peer.
+  - **The registration (phase 7's carry-forward).**
+    - An answer whose call began under another scope (server URL and Tower id) is recorded
+      but not used. The row stays held (`registration-changed`), is retried on the back-off,
+      and adds nothing to a run.
+    - A new key alone is the same scope.
+    - `CloudClient.relay` now reads `relayStated()` before the call.
+  - **A cloud `401` ends the row refused (`unauthenticated`).** The sender is told
+    `not-registered`, with `afx tower connect --reauth`, as check 3 tells it (C12).
+  - **Check 0 refuses an owner address as `address`**, with no record (stage 1's refusal). A
+    body with a lone surrogate is refused as `malformed` at check 6's place.
+  - **Checks 1 to 4 are read again after the name resolves**, and check 9 is counted in the
+    same synchronous step as the insert, so two sends cannot both take the last place.
+  - **A send behind held mail is told at once that it is held here**, with how many are ahead
+    (Decision 5). When an attempt leaves the head held, every send waiting behind it is told
+    the same.
+- **Moved.** The two builder-rule messages moved from `servers/tower-messages.ts` to
+  `utils/agent-names.ts`, so the sender can use them without importing the Tower's server.
+  `tower-messages.ts` re-exports them.
+- **Carried forward.**
+  - Phase 9 wires `outbox.start()` at Tower start and `wake()` on a switch or registration
+    change, and passes `AF_TEST_PEER_BACKOFF_MS` as `backoffBaseMs`. It also gives the send
+    route the sender's identity: workspace, agent, address and whether it is a builder.
+  - Phase 11 adds dismissing an outbox row: refused while its call is in flight, and any
+    waiting sender settled.

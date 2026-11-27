@@ -16,6 +16,8 @@ import {
   isRemoteAddress,
   stripLeadingZeros,
   CROSS_TOWER_UNAVAILABLE_MESSAGE,
+  addressSpoofingErrorMessage,
+  crossWorkspaceBuilderErrorMessage,
 } from '../utils/agent-names.js';
 import { getTerminalManager, getWorkspaceTerminals } from './tower-terminals.js';
 import type { WorkspaceTerminals } from './tower-types.js';
@@ -60,9 +62,9 @@ export function architectGoneErrorMessage(
   return `builder ${builderId} was spawned by architect ${missingArchitect}, which is no longer registered, and no 'main' architect is registered (registered: ${names})`;
 }
 
-export function addressSpoofingErrorMessage(builderId: string): string {
-  return `builder ${builderId} may only address its own spawning architect`;
-}
+// The builder rule's two refusals live beside the address helpers, so the cross-Tower
+// sender (`peer/sender.ts`) words its refusal the same way without importing this module.
+export { addressSpoofingErrorMessage, crossWorkspaceBuilderErrorMessage };
 
 /**
  * Heuristic: does `sender` look like a builder identity (canonical
@@ -275,10 +277,6 @@ function workspaceLabel(target: TargetWorkspace): string {
 /** How the sender writes the front door of the workspace an address pointed into. */
 function frontDoorAddress(target: TargetWorkspace): string {
   return target.writtenName === undefined ? 'architect' : `${target.writtenName}:architect`;
-}
-
-export function crossWorkspaceBuilderErrorMessage(builderId: string, frontDoor: string): string {
-  return `${addressSpoofingErrorMessage(builderId)}; reach that workspace through its front door: afx send ${frontDoor} "…"`;
 }
 
 /**

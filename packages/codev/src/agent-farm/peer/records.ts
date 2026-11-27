@@ -1,8 +1,8 @@
 /**
- * The receiving Tower's record of what reached its entry point (Spec 1967, contract
- * section 8), and the clock surface read from it (gap G12).
+ * Each Tower's record of its cross-Tower attempts (Spec 1967, contract section 8), and the
+ * clock surface read from it (gap G12).
  *
- * Two writers feed it:
+ * At the receiving Tower, two writers feed it:
  *
  * - the entry point's audit hook ({@link recordEntryEvent}), once for every request that
  *   stopped at steps 1 to 8. Before step 2 nothing about the sender is known, so the request
@@ -10,14 +10,18 @@
  *   counted against the verified sending Tower;
  * - the receiver ({@link recordInbound}), once for every request it was handed.
  *
- * One row per attempt, except floods: requests that are not verified and requests refused as
- * rate limited are counted, one row per sender, outcome, reason and minute.
+ * At the sending Tower, one ({@link recordOutbound}): every relay call it makes, each retry
+ * included, and every send it refuses before calling.
+ *
+ * One row per attempt, except floods: requests that are not verified (at the receiver) and
+ * attempts refused as rate limited (at either end) are counted, one row per sender, outcome,
+ * reason and minute. At the sending Tower the row is counted against the peer.
  *
  * Never a body, a statement, a MAC or a secret: no input here carries one.
  */
 
 import type Database from 'better-sqlite3';
-import type { PeerRequestKind } from '@cluesmith/codev-types';
+import type { PeerOutcome, PeerRequestKind } from '@cluesmith/codev-types';
 import type { PeerEntryEvent } from '../lib/tunnel-client.js';
 import type { ReceiverAnswer } from './contract.js';
 import { countAggregate, insertRecord } from './store.js';
@@ -129,6 +133,53 @@ export function recordEntryEvent(db: Database.Database, event: PeerEntryEvent): 
       });
       return;
   }
+}
+
+// ===========================================================================
+// The sending Tower's record
+// ===========================================================================
+
+/** What the sending Tower knows of one outbound attempt. */
+export interface OutboundFacts {
+  at: number;
+  /** The recipient Tower, once its name has resolved; `null` for a send refused before that. */
+  peerTowerId: string | null;
+  /** The recipient Tower as the address names it. */
+  peerSlug: string;
+  /** Set once the message has been persisted. */
+  messageId: string | null;
+  /** The sender as this Tower writes it; `null` when it has no address. */
+  fromAddress: string | null;
+  toAddress: string;
+  /** The payload's size in bytes, once it has been built. */
+  payloadSize: number | null;
+}
+
+/**
+ * Record one outbound attempt: a relay call and its answer, or a send this Tower refused
+ * before calling. An attempt refused as rate limited, by the cloud, by the receiving Tower
+ * or by this Tower's own cap on mail waiting for the peer, is a flood and is counted against
+ * the peer; every other attempt is its own row.
+ */
+export function recordOutbound(db: Database.Database, facts: OutboundFacts, outcome: PeerOutcome, reason: string | null): void {
+  if (reason === 'rate-limited' && facts.peerTowerId !== null) {
+    countAggregate(db, { direction: 'outbound', at: facts.at, sender: { peerTowerId: facts.peerTowerId }, outcome, reason });
+    return;
+  }
+  insertRecord(db, {
+    direction: 'outbound',
+    at: facts.at,
+    kind: 'message',
+    peerTowerId: facts.peerTowerId,
+    peerSlug: facts.peerSlug,
+    tunnelSession: null,
+    messageId: facts.messageId,
+    fromAddress: facts.fromAddress,
+    toAddress: facts.toAddress,
+    payloadSize: facts.payloadSize,
+    outcome,
+    reason,
+  });
 }
 
 // ===========================================================================

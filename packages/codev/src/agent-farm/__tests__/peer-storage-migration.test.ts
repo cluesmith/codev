@@ -838,7 +838,7 @@ describe('retention', () => {
     const outbox = (state: 'held' | store.PeerOutboxResolvedState, resolvedAgo: number | null, createdAgo: number) => {
       const row = store.insertOutbox(
         db,
-        { messageId: randomUUID(), peerTowerId: PEER, toAddress: 'afx://devvm/codev:architect', payload: Buffer.from('{}'),
+        { messageId: randomUUID(), peerTowerId: PEER, toAddress: 'afx://devvm/codev:architect', fromAddress: 'codev:architect:main', payload: Buffer.from('{}'),
           sentAt: now - createdAgo, fromWorkspacePath: WS, fromAgent: 'main' },
         now - createdAgo,
       );
@@ -977,7 +977,7 @@ describe('peer store: the outbox', () => {
     const insert = (peer: string, at: number) =>
       store.insertOutbox(
         db,
-        { messageId: randomUUID(), peerTowerId: peer, toAddress: 'afx://devvm/codev:architect', payload: Buffer.from(`{"n":${at}}`),
+        { messageId: randomUUID(), peerTowerId: peer, toAddress: 'afx://devvm/codev:architect', fromAddress: null, payload: Buffer.from(`{"n":${at}}`),
           sentAt: at, fromWorkspacePath: WS, fromAgent: null },
         at,
       );

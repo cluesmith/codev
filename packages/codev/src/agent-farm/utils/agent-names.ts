@@ -80,6 +80,19 @@ export function parseAgentName(name: string): { protocol: string; id: string } |
   return { protocol: match[1], id: match[2] };
 }
 
+/** The builder rule (Spec 755): a builder naming an architect that is not its own. */
+export function addressSpoofingErrorMessage(builderId: string): string {
+  return `builder ${builderId} may only address its own spawning architect`;
+}
+
+/**
+ * The builder rule for an architect in another workspace, or on another Tower (Spec 1940,
+ * Spec 1967): refused, with the way in, that workspace's front door.
+ */
+export function crossWorkspaceBuilderErrorMessage(builderId: string, frontDoor: string): string {
+  return `${addressSpoofingErrorMessage(builderId)}; reach that workspace through its front door: afx send ${frontDoor} "…"`;
+}
+
 /**
  * Why an `afx://` address is refused (Spec 1940, stage 1). Said the same way by Tower, by
  * the cron loader and by the commands that refuse before calling Tower. It holds whether
