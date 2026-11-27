@@ -430,16 +430,36 @@ function lacksLivenessRoute(result: { status: number }): boolean {
   return result.status === 404 || result.status === 401;
 }
 
+/**
+ * What is wrong with a liveness body, or null when it is a whole {@link TowerLiveness}. Every
+ * field is checked, so a `{ status: 'healthy' }` from something that is not this Tower's route
+ * is never handed on as a version.
+ */
+function livenessProblem(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return `body is ${JSON.stringify(data)}`;
+  const body = data as Record<string, unknown>;
+  if (body.status !== 'healthy') return `status is ${JSON.stringify(body.status)}`;
+  if (typeof body.version !== 'string' || body.version === '') return `version is ${JSON.stringify(body.version)}`;
+  if (typeof body.startedAt !== 'string' || Number.isNaN(Date.parse(body.startedAt))) {
+    return `startedAt is ${JSON.stringify(body.startedAt)}`;
+  }
+  if (!Number.isInteger(body.schemaVersion) || (body.schemaVersion as number) < 1) {
+    return `schemaVersion is ${JSON.stringify(body.schemaVersion)}`;
+  }
+  return null;
+}
+
 /** One answer to a liveness or `/health` request, classified as a {@link TowerHealthProbe}. */
 function classifyProbe(
-  result: { ok: boolean; status: number; data?: { status?: unknown }; error?: string; connectionRefused?: boolean },
+  result: { ok: boolean; status: number; data?: unknown; error?: string; connectionRefused?: boolean },
   route: string,
 ): TowerHealthProbe {
-  if (result.ok && result.data?.status === 'healthy') return { state: 'running' };
+  const status = typeof result.data === 'object' && result.data !== null ? (result.data as { status?: unknown }).status : undefined;
+  if (result.ok && status === 'healthy') return { state: 'running' };
   if (result.connectionRefused) return { state: 'not-running' };
   if (result.status === 0) return { state: 'unresponsive', route, error: result.error ?? 'no response' };
   if (!result.ok) return { state: 'unresponsive', route, error: `HTTP ${result.status}: ${result.error}` };
-  return { state: 'unresponsive', route, error: `reported status ${JSON.stringify(result.data?.status)}` };
+  return { state: 'unresponsive', route, error: `reported status ${JSON.stringify(status)}` };
 }
 
 export class TowerClient {
@@ -528,22 +548,29 @@ export class TowerClient {
    * from before that route answers that it has none.
    */
   async probeHealth(): Promise<TowerHealthProbe> {
-    const live = await this.request<TowerLiveness>(TOWER_LIVENESS_ROUTE);
+    const live = await this.request<unknown>(TOWER_LIVENESS_ROUTE);
     if (lacksLivenessRoute(live)) return classifyProbe(await this.request<TowerHealth>('/health'), '/health');
-    const probe = classifyProbe(live, TOWER_LIVENESS_ROUTE);
-    return probe.state === 'running' ? { state: 'running', liveness: live.data } : probe;
+    if (!live.ok) return classifyProbe(live, TOWER_LIVENESS_ROUTE);
+    const problem = livenessProblem(live.data);
+    if (problem !== null) return { state: 'unresponsive', route: TOWER_LIVENESS_ROUTE, error: `malformed liveness body: ${problem}` };
+    return { state: 'running', liveness: live.data as TowerLiveness };
   }
 
   /**
    * Tower's version from the liveness route (#1977), at no cost to Tower. `unknownRoute` is set
    * when the Tower is older than the route, with or without the key; `unanswered` when nothing
-   * answered at all (timeout, reset, refused), which says nothing about which Tower it is.
+   * answered at all (timeout, reset, refused), which says nothing about which Tower it is. A
+   * malformed body is a failure with neither flag.
    */
   async getLiveness(): Promise<
     { ok: true; liveness: TowerLiveness } | { ok: false; error: string; unknownRoute?: true; unanswered?: true }
   > {
-    const result = await this.request<TowerLiveness>(TOWER_LIVENESS_ROUTE);
-    if (result.ok && result.data?.status === 'healthy') return { ok: true, liveness: result.data };
+    const result = await this.request<unknown>(TOWER_LIVENESS_ROUTE);
+    if (result.ok) {
+      const problem = livenessProblem(result.data);
+      if (problem === null) return { ok: true, liveness: result.data as TowerLiveness };
+      return { ok: false, error: `malformed liveness body: ${problem}` };
+    }
     const failure = { ok: false as const, error: result.error ?? `Tower answered ${result.status}` };
     if (isUnknownRoute(result)) return { ...failure, unknownRoute: true };
     // An older Tower answers a keyless client 401, the route not being on its public list. Its

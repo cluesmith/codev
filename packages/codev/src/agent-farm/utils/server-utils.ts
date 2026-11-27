@@ -138,10 +138,18 @@ export function keysMatch(presented: string, expected: string): boolean {
  * own API/WebSocket calls with the key), the annotator shell + vendor files,
  * and the cloud OAuth callback. Everything else requires the key.
  *
- * The entries here are the paths a *browser navigation* reaches — a top-level
- * redirect, an iframe load, a `<script>`/`<link>` tag — none of which can
- * attach the `codev-tower-key` header. Each one therefore carries either no
- * secret or its own credential; adding a route here means proving that.
+ * Each entry is one of two kinds, and adding a route here means proving which:
+ *
+ * - A path a *browser navigation* reaches — a top-level redirect, an iframe
+ *   load, a `<script>`/`<link>` tag — none of which can attach the
+ *   `codev-tower-key` header: the launcher shell, the dashboard's static
+ *   assets, the annotator files, the OAuth callback. Each carries either no
+ *   secret or its own credential.
+ * - A keyless probe: `/health`, `/health/live` and `/api/version`, which SDK and
+ *   CLI clients ask to learn whether a Tower is up and which version it runs,
+ *   including clients that hold no key (VS Code before a local key exists, the
+ *   startup ownership guard, `codev doctor`). They report liveness, version and
+ *   counts, never a secret.
  *
  * The privileged workspace `file` reader and every `api/` or `ws/` subpath are
  * explicitly excluded so a static-asset carve-out never exposes a data route.

@@ -48,3 +48,20 @@ back onto `handleVersion`.
   - `schemaVersion` documented as a constant of the running code, not read from the DB.
 - Left: VS Code `connection-manager.connect()` keeps `getHealth()`. It runs once per connect
   attempt with backoff and logs the payload's uptime.
+
+## 2026-11-27 — fix round (owner ruling: PR #2001 goes ahead after one round)
+
+Relayed by porchless; explicitly NOT gate approval. Items, all from the integration reviews:
+
+1. **SDK validates the whole liveness body** (`livenessProblem()`): status, non-empty version,
+   parseable startedAt, positive-integer schemaVersion. A 200 with a malformed body is
+   `unresponsive` from `probeHealth`, with no fallback, and a failure with neither flag from
+   `getLiveness()`, so `afx send` leaves the not-found alone. 16 malformed-body tests.
+   `bugfix-1901-tower-check`'s fake Tower answered a bare `{ status: 'healthy' }` and now sends
+   a whole body.
+2. **arch.md** `afx send` section: `getLiveness()` and `/health/live` replace the address-book
+   route and the long-gone `failedForAnOlderTower` name.
+3. **Public-route rationale** (server-utils.ts and arch.md): two kinds now, browser-navigation
+   paths and keyless probes (`/health`, `/health/live`, `/api/version`).
+4. **VS Code terminal-adapter** comments and test names: "liveness probe", not `/health`.
+5. Windows workflow dispatched on the branch; run linked in the PR.

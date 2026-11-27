@@ -142,7 +142,7 @@ describe('TowerClient.probeHealth (#1901)', () => {
     });
 
   it('reports running on a healthy answer', async () => {
-    const { impl } = jsonFetch(200, { status: 'healthy', uptime: 5 });
+    const { impl } = jsonFetch(200, { status: 'healthy', version: '3.4.0', startedAt: '2026-11-26T00:00:00.000Z', schemaVersion: 20 });
     expect(await new TowerClient(opts(impl)).probeHealth()).toMatchObject({ state: 'running' });
   });
 
@@ -229,6 +229,38 @@ describe('TowerClient liveness route (#1977)', () => {
     it('reports a Tower still starting (503) as unresponsive, without falling back', async () => {
       const { client, asked } = tower({ '/health/live': json(503, { error: 'STARTING_UP', message: 'Tower is starting up.' }) });
       expect(await client.probeHealth()).toMatchObject({ state: 'unresponsive', route: '/health/live' });
+      expect(asked).toEqual(['/health/live']);
+    });
+  });
+
+  /** A 200 from the liveness route whose body is not a whole TowerLiveness, and the field named. */
+  const MALFORMED: Array<[string, unknown, string]> = [
+    ['only a status', { status: 'healthy' }, 'version is undefined'],
+    ['a non-healthy status', { ...LIVENESS, status: 'degraded' }, 'status is "degraded"'],
+    ['an empty version', { ...LIVENESS, version: '' }, 'version is ""'],
+    ['an unparseable startedAt', { ...LIVENESS, startedAt: 'yesterday' }, 'startedAt is "yesterday"'],
+    ['a string schemaVersion', { ...LIVENESS, schemaVersion: '20' }, 'schemaVersion is "20"'],
+    ['a fractional schemaVersion', { ...LIVENESS, schemaVersion: 1.5 }, 'schemaVersion is 1.5'],
+    ['an array', [LIVENESS], 'body is ['],
+    ['null', null, 'body is null'],
+  ];
+
+  describe('a malformed liveness body', () => {
+    it.each(MALFORMED)('probeHealth reports %s as unresponsive, naming the field, without falling back', async (_what, body, field) => {
+      const { client, asked } = tower({ '/health/live': json(200, body), '/health': json(200, { status: 'healthy' }) });
+      const probe = await client.probeHealth();
+      expect(probe).toMatchObject({ state: 'unresponsive', route: '/health/live' });
+      expect(probe.state === 'unresponsive' && probe.error).toContain(`malformed liveness body: ${field}`);
+      expect(asked).toEqual(['/health/live']);
+    });
+
+    it.each(MALFORMED)('getLiveness reports %s as a failure that is neither an older Tower nor unanswered', async (_what, body, field) => {
+      const { client, asked } = tower({ '/health/live': json(200, body) });
+      const live = await client.getLiveness();
+      expect(live.ok).toBe(false);
+      expect(!live.ok && live.error).toContain(`malformed liveness body: ${field}`);
+      expect(live).not.toHaveProperty('unknownRoute');
+      expect(live).not.toHaveProperty('unanswered');
       expect(asked).toEqual(['/health/live']);
     });
   });
