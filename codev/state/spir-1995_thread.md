@@ -303,3 +303,13 @@ Claude's non-blocking notes:
 - Taken: the no-import guard also rejects a dynamic `import(...)`.
 - Kept as is: the `overview path` row reuses the concept column on purpose (aligned with the table it
   summarises, `○` marks it informational); nothing parses doctor output.
+
+## 2026-11-27 — review
+- Merged origin/main (35 commits, incl. the #1844 / #1992 builder-role-id fixes in `overview.ts`)
+  into the branch: no conflicts. Build, tsc and the full suite were re-run on the merged tree.
+- Review doc written. Lessons routed to cold `lessons-learned.md` (hot file at cap): the
+  null-as-delete merge, the read-and-escalate gate, projection pinned to behaviour, and gh vs raw
+  GraphQL rendering/cost. Architecture facts were already routed to cold `arch.md` in Phase 4; no
+  hot-tier change.
+- Spec test 21's dashboard render stays in verify (needs the merged build in Tower, so a
+  human-approved restart).
