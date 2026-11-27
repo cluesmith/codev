@@ -30,7 +30,7 @@ gates:
   verify-approval:
     status: pending
 iteration: 2
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     build_output: ''
@@ -44,7 +44,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1647/codev/projects/1647-tower-collapse-the-four-per-wo/1647-review-iter1-claude.txt
 started_at: '2026-11-26T01:28:11.587Z'
-updated_at: '2026-11-27T06:51:42.633Z'
+updated_at: '2026-11-27T06:52:15.280Z'
 force_advanced:
   phase: specify
   iteration: 3
