@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { TOWER_KEY_HEADER } from '@cluesmith/codev-types';
-import { ownedPeersDirs, removePeersDirs } from './peers-isolation.js';
+import { ownedPeersDirs, recordedPeersRun, removePeersDirs } from './peers-isolation.js';
 
 const EXIT_WAIT_MS = 20_000;
 
@@ -50,9 +50,17 @@ async function stopTower(port: string, agentFarmDir: string): Promise<void> {
 }
 
 export default async function peersTeardown(): Promise<void> {
-  // Only the run this process made: one recorded by another process is refused, not stopped or removed.
+  // Only the run this process made, by its own record: whatever else the environment names is
+  // neither stopped nor removed.
   const dirs = ownedPeersDirs();
-  if (dirs === null) return;
+  if (dirs === null) {
+    // The config records its run for the workers whenever it makes one, so a recorded run with no
+    // record here means the teardown is not where the run was made: say so rather than leak quietly.
+    if (recordedPeersRun() !== null) {
+      throw new Error('The environment records a Peers run this process did not make: it is left in place, and no Tower is stopped from here.');
+    }
+    return;
+  }
   const port = process.env.TOWER_TEST_PORT;
   if (port) await stopTower(port, dirs.agentFarm);
   removePeersDirs();

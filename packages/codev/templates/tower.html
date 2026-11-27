@@ -1895,7 +1895,7 @@
     // What one Tower may message here: its grants, or nothing.
     function peerMayMessage(tower) {
       if (!tower.mayMessage || tower.mayMessage.length === 0) return 'nothing';
-      return tower.mayMessage.map((g) => `${escapeHtml(g.recipient)} (${peerModeText(g.mode)})`).join(', ');
+      return tower.mayMessage.map((g) => `${escapeHtml(String(g.recipient))} (${peerModeText(g.mode)})`).join(', ');
     }
 
     // What a mark on a peer says, as `afx peer list` words it (gaps G10, G12, G15).
@@ -1923,10 +1923,10 @@
       const marks = tower.marks || [];
       const online = !!tower.online;
       return `
-        <div class="peer-row${marks.length > 0 ? ' peer-row--marked' : ''}" data-testid="peer-row" data-peer="${escapeHtml(tower.name)}">
+        <div class="peer-row${marks.length > 0 ? ' peer-row--marked' : ''}" data-testid="peer-row" data-peer="${escapeHtml(String(tower.name))}">
           <div class="peer-head">
             <span class="status-dot ${online ? 'running' : 'stopped'}"></span>
-            <span class="peer-name">${escapeHtml(tower.name)}</span>
+            <span class="peer-name">${escapeHtml(String(tower.name))}</span>
             <span class="peer-online" data-testid="peer-online">${online ? 'online' : 'offline'}</span>
             <span class="peer-its-switch">· ${peerItsSwitch(tower.remoteMessaging)}</span>
           </div>

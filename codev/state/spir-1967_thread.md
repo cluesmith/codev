@@ -1398,3 +1398,28 @@ a line this phase wrote.
   - Build: 17 s.
   - Layer C, load 1.2, port 14102: 17 of 17 in 5.5 s, nothing left, port free.
   - Layer A: 11 011 passed, 116 skipped, 246 s.
+- **Porch checks (iter 3).** Build 16.6 s, tests 243.7 s.
+- **Phase 12 review (iter 3): codex REQUEST_CHANGES (HIGH); claude APPROVE (HIGH).** The
+  rebuttal is `1967-phase_12-iter3-rebuttals.md`.
+  - **Codex: a caller could mark a folder with its own pid and `exec` Playwright, keeping the
+    pid; the main process then adopted the folder and the teardown deleted it.**
+    - The main process now owns its run by an in-memory record: `globalThis` under a registered
+      symbol, which survives the config being evaluated again. It reuses and removes only that
+      run.
+    - The environment is only how workers learn the paths. The main process ignores inherited
+      values, even ones marked with its own pid.
+    - The teardown throws if the environment records a run this process holds no record of.
+    - Proven by unit cases (still 19). In the real run, a `sh -c` wrote a marker with its own
+      pid (28859) and `exec`'d the Playwright shim, which `exec`s node: 17 of 17 passed, and the
+      caller's folder and file remained.
+  - **Claude nit, fixed:** the panel's `escapeHtml` calls on the tower name and recipient
+    coerce with `String(...)`.
+  - **Three rounds on one helper.** Each of codex's rounds found a narrower way past the last
+    ownership rule: inherited environment values, then the parent's pid, then the process's own
+    pid kept through `exec`. Only process-local provenance closes the class. I should have
+    started there.
+- **Re-verified.**
+  - Build: 17 s.
+  - Layer C, load 1.5, port 14102: 17 of 17 in 5.5 s, nothing left. With the `exec` caller:
+    17 of 17 in 5.2 s.
+  - Layer A: 11 011 passed, 116 skipped, 242 s.
