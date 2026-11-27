@@ -43,7 +43,14 @@ import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient, WorkspaceTerminals } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import { parseJsonBody, isRequestAllowed, isAllowedOrigin, isAllowedHost, getExpectedKey, escapeHtml, decideForwardAuthorization, ideForwardSetCookie } from '../utils/server-utils.js';
-import { TOWER_KEY_HEADER, LEGACY_WEB_KEY_HEADER, VSCODE_USER_SENDER, DECISIONS_TAB_SENDER, REMOTE_REFUSED_ERROR } from '@cluesmith/codev-types';
+import {
+  TOWER_KEY_HEADER,
+  LEGACY_WEB_KEY_HEADER,
+  VSCODE_USER_SENDER,
+  DECISIONS_TAB_SENDER,
+  REMOTE_HELD_ON_FAULT_ERROR,
+  REMOTE_REFUSED_ERROR,
+} from '@cluesmith/codev-types';
 import type { RemoteSendAnswer, RemoteSendRefusal } from '@cluesmith/codev-types';
 import { isWindows } from '../../lib/platform.js';
 import { workspaceKey } from '../utils/workspace-path.js';
@@ -90,7 +97,7 @@ import { handleCommandRoute, COMMAND_ROUTE } from './command-relay.js';
 import { handleCanvasRoute, CANVAS_ROUTE_PREFIX } from './canvas-relay.js';
 import { createPeerRouteHandler, PEER_ROUTE_PREFIX, type PeerRouteDeps } from './peer-routes.js';
 import { peerCloudRouteDeps, peerSender } from '../peer/cloud-wiring.js';
-import type { PeerSendResult } from '../peer/sender.js';
+import { PeerSendHeldOnFaultError, type PeerSendResult } from '../peer/sender.js';
 import { isRemoteAddress, localAddressOnlyMessage, namesATower } from '../utils/agent-names.js';
 import { formatAddress } from '@cluesmith/codev-sdk/address';
 import { loadConfig, resolvePeerSettings } from '../../lib/config.js';
@@ -2693,13 +2700,21 @@ async function handleSend(
       sendJson(res, 400, { error: 'LOCAL_ADDRESS_ONLY', message: localAddressOnlyMessage('An interrupt') });
       return;
     }
-    const outcome = await peerSender().send({
-      to: address,
-      body: message,
-      options: { raw, interrupt, noEnter, delay: deliverAfter !== undefined },
-      // A sender that is not an agent states no sender, as its frames name none (G7).
-      from: peerSenderOf(from !== undefined && !NON_AGENT_SENDERS.has(from) ? from : undefined, sender, senderWorkspace),
-    });
+    let outcome: PeerSendResult;
+    try {
+      outcome = await peerSender().send({
+        to: address,
+        body: message,
+        options: { raw, interrupt, noEnter, delay: deliverAfter !== undefined },
+        // A sender that is not an agent states no sender, as its frames name none (G7).
+        from: peerSenderOf(from !== undefined && !NON_AGENT_SENDERS.has(from) ? from : undefined, sender, senderWorkspace),
+      });
+    } catch (err) {
+      if (!(err instanceof PeerSendHeldOnFaultError)) throw err;
+      // Stored and held, but not sent now: an error, whose words say not to send it again.
+      sendJson(res, 503, { error: REMOTE_HELD_ON_FAULT_ERROR, message: err.message, mailboxId: err.messageId, peer: err.peer.name });
+      return;
+    }
     if (outcome.outcome !== 'local') {
       respondToRemoteSend(res, ctx, outcome, address, bodyLength);
       return;

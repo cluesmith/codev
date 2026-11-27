@@ -30,6 +30,7 @@ export {
   type TowerRef,
   type TowerRefParseResult,
   REMOTE_REFUSED_ERROR,
+  REMOTE_HELD_ON_FAULT_ERROR,
   type RemoteRefuser,
   type RemoteSendRefusal,
   type RemoteHeldWhere,

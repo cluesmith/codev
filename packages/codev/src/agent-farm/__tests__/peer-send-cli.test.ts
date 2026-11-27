@@ -185,6 +185,21 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
     expect(errors).toEqual([`[error] ${message}`]);
   });
 
+  it('prints a message stored and held but not sent now in words that say not to send it again, exiting non-zero', async () => {
+    const words =
+      `Message stored and held on this Tower — mailbox id ${MESSAGE_ID} — but not sent to devvm now: this Tower is stopping. ` +
+      'It is sent when that clears. Do not send it again. See or dismiss it with: afx inbox';
+    const paths = towerAnswering({
+      send: () => json(503, { error: 'REMOTE_HELD_ON_FAULT', message: words, mailboxId: MESSAGE_ID, peer: 'devvm' }),
+    });
+
+    await expect(send({ builder: TO, message: 'hi', retry: 3 })).rejects.toMatchObject({ code: 1 });
+
+    expect(errors).toEqual([`[error] ${words} (REMOTE_HELD_ON_FAULT)`]);
+    // Not sent a second time, whatever --retry allows: only a refused connection is retried.
+    expect(paths.filter((path) => path === '/api/send')).toHaveLength(1);
+  });
+
   it('prints what the receiving Tower said, after the words this Tower wrote', async () => {
     towerAnswering({
       send: () =>

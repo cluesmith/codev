@@ -44,7 +44,7 @@ import {
 import { formatAddress, tryFormatAddress } from '@cluesmith/codev-sdk/address';
 import { crossWorkspaceBuilderErrorMessage } from '../utils/agent-names.js';
 import { encodeMessagePayload, prepareRemoteBody, printableDetail, type ClassifiedAnswer, type SenderCheck } from './contract.js';
-import type { FirstAnswer, Outbox } from './outbox.js';
+import { OutboxStoppedError, type FirstAnswer, type Outbox } from './outbox.js';
 import type { OwnRegistration, PeerList } from './peer-list.js';
 import { recordOutbound, type OutboundFacts } from './records.js';
 import { countHeldOutbox, insertOutbox } from './store.js';
@@ -163,6 +163,31 @@ interface Refusal {
 const NOT_REGISTERED_MESSAGE =
   "This Tower's registration was removed from Codev Cloud, so it cannot send to another Tower. " +
   'A human registers it again with: afx tower connect --reauth';
+
+/**
+ * What the sender is told when its message is stored and held here but the outbox could not
+ * take it: the outbox has stopped (Tower is shutting down), or its attempt failed in this
+ * Tower. The message is sent once the outbox runs again, so it must not be sent twice.
+ */
+export function heldOnFaultMessage(messageId: string, peer: string, stopping: boolean): string {
+  const fault = stopping ? 'this Tower is stopping' : "a fault in this Tower, named in Tower's log";
+  return (
+    `Message stored and held on this Tower — mailbox id ${messageId} — but not sent to ${peer} now: ${fault}. ` +
+    'It is sent when that clears. Do not send it again. See or dismiss it with: afx inbox'
+  );
+}
+
+/** A send whose message is stored and held, but which the outbox could not take on. */
+export class PeerSendHeldOnFaultError extends Error {
+  constructor(
+    readonly messageId: string,
+    readonly peer: PeerNamed,
+    readonly stopping: boolean,
+  ) {
+    super(heldOnFaultMessage(messageId, peer.name, stopping));
+    this.name = 'PeerSendHeldOnFaultError';
+  }
+}
 
 function noRelayMessage(relay: PeerCloudRelay): string {
   return relay.why === 'insecure'
@@ -293,7 +318,17 @@ export class Sender {
       },
       now,
     );
-    const first = await this.deps.outbox.enqueue(row);
+    let first: FirstAnswer;
+    try {
+      first = await this.deps.outbox.enqueue(row);
+    } catch (err) {
+      // The row is stored and stays held: the outbox sends it once it runs again. Said so, in
+      // the one place the message id is known, so the sender does not send it a second time.
+      const stopping = err instanceof OutboxStoppedError;
+      const kind = stopping ? 'stopped' : err instanceof Error ? err.constructor.name : typeof err;
+      this.deps.log('ERROR', `Peer: message ${row.messageId} for ${peer.name} is stored and held; the outbox could not take it (${kind})`);
+      throw new PeerSendHeldOnFaultError(row.messageId, peer, stopping);
+    }
     const words: RefusalWords = { own: this.deps.registration()?.towerName ?? 'this Tower', peer, recipient: local };
     return this.answered(first, row.messageId, words);
   }

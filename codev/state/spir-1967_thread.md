@@ -972,3 +972,24 @@ Surprises:
     document there.
   - **Verified.** Layer A 10 879 passed, 116 skipped, 242.3 s. Layer B 20 of 20 in 58.9 s.
   - **My slip.** I wrote my untracked state file while the lanes ran; both flagged it.
+- **The architect's ruling on the review (2026-11-27, theirs, not the owner's).**
+  - **codex 1 (the trim): agreed, it stays.** `main` has the same `body.message.trim()`.
+  - **claude 2 (an outbox rejection): taken, my answer overruled.** It may stay an error, but
+    `Sender.send` let the outbox's rejection through raw (`outbox: a message was queued after
+    the outbox stopped`). Nothing said the message was stored, so an agent would send again
+    and the recipient would get it twice.
+  - **Now.** The sender catches the rejection where the message id is known, logs an ERROR,
+    and throws `PeerSendHeldOnFaultError`. Its one message (`heldOnFaultMessage`) says:
+    stored and held on this Tower under the mailbox id; not sent now, and why (this Tower is
+    stopping, or a fault in this Tower named in Tower's log); sent when that clears; do not
+    send it again; see or dismiss it with `afx inbox`. The route answers `503
+    REMOTE_HELD_ON_FAULT` with `mailboxId` and `peer`, and `afx send` prints it and exits 1.
+    `--retry` resends only a refused connection, so this is never sent twice.
+  - **Tests.** One per rejection path on the real outbox and sender
+    (`peer-pipeline.test.ts`): stopped, and an attempt that failed in this Tower; each is then
+    sent once. Plus the route's 503 and the CLI's line and exit.
+  - **A correction.** I wrote above, and in the response, that `afx inbox` already lists the
+    held row. It does not yet: plan phase 11 adds "waiting for a peer" to `afx inbox`, in this
+    PR.
+  - **Verified.** Layer A 10 883 passed, 116 skipped, 245.3 s. Layer B 20 of 20 in 59.0 s at
+    load 8.1.

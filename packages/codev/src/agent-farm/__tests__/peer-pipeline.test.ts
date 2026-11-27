@@ -16,10 +16,13 @@
  * - twenty sends at once go in acceptance order, never two in flight;
  * - an answer lost after R accepted, then the retry's `duplicate: true`;
  * - a restart resumes the queue in order;
+ * - a message the outbox could not take (it had stopped, or its attempt failed in S) is
+ *   stored and held: the sender is told so in words that say not to send it again, and it
+ *   is sent once, when the fault clears;
  * - not registered: deregistered refuses with no call; a key C rejects refuses the same way.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -34,7 +37,7 @@ import { CloudClient } from '../peer/cloud-client.js';
 import { Outbox } from '../peer/outbox.js';
 import { PeerList, type OwnRegistration } from '../peer/peer-list.js';
 import { createReceiver, type RecipientLookup } from '../peer/receiver.js';
-import { Sender, type PeerSendRequest, type PeerSendResult } from '../peer/sender.js';
+import { heldOnFaultMessage, PeerSendHeldOnFaultError, Sender, type PeerSendRequest, type PeerSendResult } from '../peer/sender.js';
 import * as store from '../peer/store.js';
 import { setSwitch } from '../peer/switch.js';
 import type { GrantWorld } from '../peer/grants.js';
@@ -430,6 +433,63 @@ describe('a restart', () => {
     expect(t.outboxRows().map((r) => r.state)).toEqual(['accepted', 'accepted', 'accepted', 'accepted']);
     expect(t.forwardedOrder()).toEqual(ids);
     expect(t.relay.inFlight(t.s.towerId, t.r.towerId).max).toBe(1);
+  });
+});
+
+// ===========================================================================
+// Stored and held, but not taken by the outbox
+// ===========================================================================
+
+describe('a message the outbox could not take', () => {
+  /** The send's error, which must be the held-on-fault one. */
+  async function heldOnFault(t: Pipeline): Promise<PeerSendHeldOnFaultError> {
+    const err = await t.send().then(
+      (result) => {
+        throw new Error(`the send answered ${JSON.stringify(result)}`);
+      },
+      (error: unknown) => error,
+    );
+    expect(err).toBeInstanceOf(PeerSendHeldOnFaultError);
+    return err as PeerSendHeldOnFaultError;
+  }
+
+  it('the outbox has stopped: the sender is told it is stored and held, not to send it again; it goes once the outbox runs', async () => {
+    const t = await pipeline();
+    t.outbox.stop();
+    const err = await heldOnFault(t);
+    const [row] = t.outboxRows();
+    expect(err.messageId).toBe(row.messageId);
+    expect(err.message).toBe(
+      `Message stored and held on this Tower — mailbox id ${row.messageId} — but not sent to devvm now: this Tower is stopping. ` +
+        'It is sent when that clears. Do not send it again. See or dismiss it with: afx inbox',
+    );
+    expect(err.message).toBe(heldOnFaultMessage(row.messageId, 'devvm', true));
+    expect(row.state).toBe('held');
+    expect(t.logs).toContain(`S ERROR Peer: message ${row.messageId} for devvm is stored and held; the outbox could not take it (stopped)`);
+
+    t.restartOutbox();
+    t.outbox.start();
+    await t.advance(0);
+    expect(t.outboxRows().map((r) => r.state)).toEqual(['accepted']);
+    expect(t.rMail()).toHaveLength(1);
+  });
+
+  it("its attempt failed in this Tower: the same words, the fault left to Tower's log; it goes once, on the next look", async () => {
+    const t = await pipeline();
+    vi.spyOn(t.client, 'relay').mockRejectedValueOnce(new TypeError('the cloud client could not be built'));
+    const err = await heldOnFault(t);
+    const [row] = t.outboxRows();
+    expect(err.message).toBe(heldOnFaultMessage(row.messageId, 'devvm', false));
+    expect(err.message).toContain("but not sent to devvm now: a fault in this Tower, named in Tower's log.");
+    expect(row.state).toBe('held');
+    expect(t.logs).toContain(`S ERROR Peer: message ${row.messageId} for devvm is stored and held; the outbox could not take it (TypeError)`);
+    expect(t.relayCalls()).toEqual([]);
+
+    // The queue looks again at the cap (2 minutes).
+    await t.advance(2 * 60 * SECOND);
+    expect(t.outboxRows().map((r) => r.state)).toEqual(['accepted']);
+    expect(t.relayCalls()).toEqual([row.messageId]);
+    expect(t.rMail()).toHaveLength(1);
   });
 });
 

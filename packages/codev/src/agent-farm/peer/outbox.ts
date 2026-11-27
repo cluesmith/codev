@@ -184,6 +184,14 @@ function towerOf(row: PeerOutboxRow): string {
   return parsed.address.tower;
 }
 
+/** `enqueue` on an outbox that has stopped (Tower is shutting down). The row stays held. */
+export class OutboxStoppedError extends Error {
+  constructor() {
+    super('outbox: a message was queued after the outbox stopped');
+    this.name = 'OutboxStoppedError';
+  }
+}
+
 function errorKind(err: unknown): string {
   return err instanceof Error ? err.message : typeof err;
 }
@@ -280,7 +288,7 @@ export class Outbox {
    * the outbox has stopped; either way the row stays held, and is sent once the outbox runs.
    */
   enqueue(row: PeerOutboxRow): Promise<FirstAnswer> {
-    if (this.stopped) return Promise.reject(new Error('outbox: a message was queued after the outbox stopped'));
+    if (this.stopped) return Promise.reject(new OutboxStoppedError());
     const queue = this.queueFor(row.peerTowerId);
     const first = new Promise<FirstAnswer>((resolve, reject) => queue.waiters.set(row.messageId, { resolve, reject }));
     const ahead = listHeldOutbox(this.deps.db(), row.peerTowerId).filter((r) => r.seq < row.seq);

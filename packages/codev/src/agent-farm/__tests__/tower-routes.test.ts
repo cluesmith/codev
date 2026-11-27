@@ -41,7 +41,7 @@ import type { IShellperClient } from '../../terminal/shellper-client.js';
 import { shutdownDelayedSends } from '../servers/delayed-send.js';
 import { submitToSession, trySubmitToSession, resetSubmissionChains } from '../servers/session-submit.js';
 import { forceHostPlatform } from '../../__tests__/helpers/host-platform.js';
-import type { PeerSendRequest, PeerSendResult, Sender } from '../peer/sender.js';
+import { PeerSendHeldOnFaultError, type PeerSendRequest, type PeerSendResult, type Sender } from '../peer/sender.js';
 import { setSwitch } from '../peer/switch.js';
 
 // ============================================================================
@@ -2918,6 +2918,27 @@ describe('tower-routes', () => {
             peer: 'devvm',
             detail: null,
           });
+        });
+
+        it('answers a message stored and held but not taken by the outbox as a 503 whose words say not to send it again', async () => {
+          const failing = (err: Error) => {
+            peerSenderHolder.sender = { send: async () => { throw err; } } as unknown as Sender;
+          };
+          failing(new PeerSendHeldOnFaultError('m-9', PEER, true));
+          const { status, body } = await send('afx://devvm/codev:architect:local', 'architect:review');
+          expect(status).toBe(503);
+          expect(body).toEqual({
+            error: 'REMOTE_HELD_ON_FAULT',
+            message:
+              'Message stored and held on this Tower — mailbox id m-9 — but not sent to devvm now: this Tower is stopping. ' +
+              'It is sent when that clears. Do not send it again. See or dismiss it with: afx inbox',
+            mailboxId: 'm-9',
+            peer: 'devvm',
+          });
+
+          // Any other error is still the route's 500.
+          failing(new Error('sender: a builder sends with its id'));
+          expect((await send('afx://devvm/codev:architect:local', 'architect:review')).status).toBe(500);
         });
 
         it("passes on what the receiving Tower said, apart from the local gate's detail", async () => {

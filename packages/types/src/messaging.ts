@@ -121,6 +121,14 @@ export type TowerRefParseResult =
  */
 export const REMOTE_REFUSED_ERROR = 'REMOTE_REFUSED';
 
+/**
+ * `POST /api/send`'s `error` for a send to another Tower whose message is stored and held on
+ * the sending Tower, but which could not be sent now (Spec 1967): its outbox has stopped, or
+ * failed in that Tower. A 503 whose `message` says so, beside `mailboxId` and `peer`. The
+ * message is sent once the fault clears; sending it again would deliver it twice.
+ */
+export const REMOTE_HELD_ON_FAULT_ERROR = 'REMOTE_HELD_ON_FAULT';
+
 /** Who refused a send to another Tower. */
 export type RemoteRefuser = 'this-tower' | 'cloud' | 'peer';
 

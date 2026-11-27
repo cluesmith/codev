@@ -9,6 +9,8 @@ run, and I have not done it since.
 
 ## Disputed: the route trims the message before the sender sees it (codex 1)
 
+*The architect checked this against `main` (the same trim, `tower-routes.ts` line 2499) and agreed it stays.*
+
 `handleSend` has trimmed every message, local or remote, since before this spec
 (`body.message.trim()`). That trim decides what "the message" is for every `afx send`,
 `bodyLength` included. Phase 9 hands the sender the same message a local send would get.
@@ -75,13 +77,35 @@ receiving Tower sends no `detail`, but a later one may, and it was being dropped
   (devvm says: …)` for a refusal, and `[info] devvm says: …` after a delivery or a hold.
 - Tests in `tower-routes.test.ts`, `tower-client-send.test.ts` and `peer-send-cli.test.ts`.
 
-## Disputed: an outbox rejection reaches the caller as a 500 (claude 2)
+## Changed, by the architect's ruling: an outbox rejection reached the caller as a bare error (claude 2)
 
-`Outbox.enqueue` rejects only when the outbox has stopped (Tower is shutting down) or when
-its own look at the queue threw. Either way the row is stored and held, and `afx inbox`
-lists it. But this Tower cannot promise it will be sent: a look that threw may throw again.
-Answering `held` would hide a fault behind a success-shaped answer. The project's rule is to
-fail loudly, so the caller gets the error, and the held row is there to see and dismiss.
+I first answered that this stays an error. The architect ruled that it may stay one, but not
+in these words. `Sender.send` let the outbox's rejection through as it was, so the sending
+agent saw `outbox: a message was queued after the outbox stopped`, and nothing said the
+message was stored. An agent that sees a bare error sends again, and the recipient gets the
+message twice.
+
+`Outbox.enqueue` rejects in two cases. The outbox has stopped (Tower is shutting down), or
+its attempt failed in this Tower. In both the row stays held, and it is sent once the outbox
+runs. Now:
+
+- The sender catches the rejection in the one place the message id is known, logs an ERROR,
+  and throws `PeerSendHeldOnFaultError`.
+- That error's one message (`heldOnFaultMessage`): `Message stored and held on this Tower —
+  mailbox id <id> — but not sent to <peer> now: <this Tower is stopping | a fault in this
+  Tower, named in Tower's log>. It is sent when that clears. Do not send it again. See or
+  dismiss it with: afx inbox`.
+- The route answers it as a `503` with `error: REMOTE_HELD_ON_FAULT`, the words, the
+  `mailboxId` and the `peer`. `afx send` prints the words and exits 1. Its `--retry` resends
+  only a refused connection, so this is never sent a second time.
+- Tests, one per path, on the real outbox and sender (`peer-pipeline.test.ts`):
+  - **stopped:** the words, the row held, the ERROR, then sent once by a restarted outbox;
+  - **an attempt that failed in this Tower:** the same, then sent once at the next look.
+
+  Plus the route's `503` (`tower-routes.test.ts`) and the CLI's line and exit
+  (`peer-send-cli.test.ts`).
+- `afx inbox` lists and dismisses mail waiting for a peer from plan phase 11, in this PR, as
+  phase 8's waiting-cap refusal (`See them with: afx inbox`) already assumes.
 
 ## For the review phase: phases 8 and 9's readings are not yet in the review document (claude 3)
 
