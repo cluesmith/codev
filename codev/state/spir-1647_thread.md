@@ -207,3 +207,13 @@ SPIR, soft mode. Spawned by architect `porchless`.
 - Both forge `SKILL.md` files: a concept row, an eligibility subsection, a preset note and a code
   pointer. Still byte-identical (`cmp`). `codev-skeleton/` carries no forge docs, so there is
   nothing to mirror.
+
+## 2026-11-27: Review
+- `main` had moved 35 commits; its #1844 change added an import on the line next to mine in
+  `overview.ts`. Merged `origin/main` (eeb4b6393), keeping both imports, then rebuilt and re-ran
+  the full suite on the merge commit.
+- Review doc: `codev/reviews/1647-tower-collapse-the-four-per-wo.md`. Three cold lessons added to
+  `lessons-learned.md` (forge scripts under a time limit; `gh api graphql` `-F`/`-f`; measuring
+  points with `rateLimit(dryRun: true)`). No hot-tier change; both hot files are at their caps.
+- Still open for verify: the Windows workflow run on this branch, and the Work view browser check
+  on the architect's install.
