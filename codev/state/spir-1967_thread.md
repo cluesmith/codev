@@ -1500,3 +1500,32 @@ a line this phase wrote.
   I did, so keep-and-remove stands, and the test databases' pragmas stay as they are. No third
   Windows run is needed for `b95f451a8` and `09ea39d00`, a test-only removal and a document.
   The PR body says the Windows run is on `914765b38` and lists what came after it.
+
+## Review phase (2026-11-27)
+
+- **Gap 2 closed in layer A, by the architect's ruling of 14:10Z (`de2263971`).** One
+  table-driven test in `peer-sender.test.ts`, beside the builder-rule cases: each of Decision 7's
+  footer rows for a builder recipient is framed with `formatRemoteMessage` and
+  `remoteReplyRoute` (the calls `receiver.ts` makes at step 16), its command is taken from the
+  footer as printed, parsed with the shared parser, and handed to the real `Sender` as the
+  builder. A builder's address and the front door (for `main`, named or not) pass every check and
+  are stored for the peer. The named-architect row prints `afx send architect`, which names no
+  Tower, so the route never hands it to the remote sender: the test asserts it is the bare
+  `architect`, the builder's own architect, and not remote. No third piece was needed. A mutation
+  that makes the builder rule refuse the front door fails the test on that row. Told the
+  architect, including how the third row is handled.
+- **The review document restructured to porch's template**, in its order: Summary, Spec
+  Compliance (every criterion, with the phase), Deviations from Plan (per phase, then the
+  readings and the force-advanced phases), Consultation Feedback (every round of spec, plan and
+  phases 1 to 13, per model, with dispositions), Lessons Learned, the two routing sections, Flaky
+  Tests and Follow-up Items. The earlier sections (the verify-approval list, the runs, the
+  scenario table and gaps, the residuals) are kept whole under Spec Compliance. Phases 8, 9 and
+  11's readings went into "Readings neither spec states", as claude's phase 9 review asked.
+- **Consultation feedback was drafted by three subagents** from the raw outputs, rebuttals,
+  commits and this thread. I checked every verdict against the raw files (all match) and read
+  every entry. Three dispositions were corrected by hand: gap 2 is now Addressed, and two
+  informational notes with no recorded response are N/A.
+- **Routed.** Cold `lessons-learned.md` gains three lessons: a printed command tested as a round
+  trip (Testing), Windows SQLite commit cost before raising a limit (Testing), and the contract,
+  vectors and stand-in for a two-repository feature (Architecture). Arch was routed in phase 13
+  (cold section 10). The hot files are at their caps and unchanged.
