@@ -813,6 +813,11 @@ export class StandInRelay {
    * since what a test checks with it is how many calls S has open to R at once. A call
    * that names no recipient, or is not of kind `message`, is not counted.
    */
+  /** Start the "at most so far" of every pair again from the calls in flight now. */
+  resetInFlight(): void {
+    for (const key of this.inFlightMax.keys()) this.inFlightMax.set(key, this.inFlightNow.get(key) ?? 0);
+  }
+
   inFlight(fromTowerId: string, toTowerId: string): { now: number; max: number } {
     const key = `${fromTowerId}>${toTowerId}`;
     return { now: this.inFlightNow.get(key) ?? 0, max: this.inFlightMax.get(key) ?? 0 };
@@ -1162,8 +1167,10 @@ export class StandInRelay {
     }
 
     const pair = `${String(issued.fields.fromTowerId)}>${to}`;
-    const replay = this.takeFault('replay-statement', forTo);
+    // A fault is taken only on a call it can change, so a one-time fault is never spent on
+    // a call it leaves as it was: a replay needs an earlier statement for the pair.
     const previous = this.lastIssued.get(pair);
+    const replay = previous ? this.takeFault('replay-statement', forTo) : null;
     if (replay && previous) {
       ({ header: statementHeader, mac, statement } = previous);
     } else if (this.takeFault('wrong-secret', forTo)) {
@@ -1183,9 +1190,11 @@ export class StandInRelay {
     this.forwards.push(forward);
     call.forward = forward;
 
+    // Of the answer faults, the first that applies is the only one taken: a late answer is
+    // never read, and a reset stream has no answer to delay.
     const late = this.takeFault('answer-late', forTo);
-    const reset = this.takeFault('reset-stream', forTo);
-    const delay = this.takeFault('answer-delay', forTo);
+    const reset = late ? null : this.takeFault('reset-stream', forTo);
+    const delay = late || reset ? null : this.takeFault('answer-delay', forTo);
     const result = await this.sendDownTunnel(session, {
       method: 'POST',
       path: ENTRY_PATH,

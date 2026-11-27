@@ -1019,11 +1019,35 @@ describe('faults the stand-in injects', () => {
     expect(statementOf(replayed).fromTowerId).toBe(spare.towerId);
   });
 
+  it('takes a fault only on a call it can change, so a one-time fault is never spent for nothing', async () => {
+    const fake = await connect(devvm);
+    // No earlier statement for the pair: the replay waits, and the wrong secret still applies.
+    relay.injectFault({ kind: 'replay-statement' }, 1);
+    relay.injectFault({ kind: 'wrong-secret' }, 1);
+    await relayCall(relay, mbp.apiKey, { to: devvm.towerId });
+    const [first] = fake.received;
+    expect(String(first.headers['x-codev-peer-mac'])).not.toBe(macUnder(secretOf(fake), String(first.headers['x-codev-peer-statement'])));
+    await relayCall(relay, mbp.apiKey, { to: devvm.towerId });
+    expect(fake.received[1].headers['x-codev-peer-statement']).toBe(first.headers['x-codev-peer-statement']);
+
+    // A reset stream has no answer to delay: the delay is still there for the next call.
+    relay.injectFault({ kind: 'reset-stream' }, 1);
+    relay.injectFault({ kind: 'answer-delay', ms: 200 }, 1);
+    expect(cloudAnswer(await relayCall(relay, mbp.apiKey, { to: devvm.towerId })).body.reason).toBe('no-answer');
+    const started = Date.now();
+    expect((await relayCall(relay, mbp.apiKey, { to: devvm.towerId })).status).toBe(200);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(180);
+  });
+
   it('holds an answer on request, so concurrent message calls to one peer are seen in flight together', async () => {
     await connect(devvm);
     relay.injectFault({ kind: 'answer-delay', ms: 150 });
     await Promise.all([1, 2, 3].map(() => relayCall(relay, mbp.apiKey, { to: devvm.towerId })));
     expect(relay.inFlight(mbp.towerId, devvm.towerId)).toEqual({ now: 0, max: 3 });
+    relay.resetInFlight();
+    expect(relay.inFlight(mbp.towerId, devvm.towerId)).toEqual({ now: 0, max: 0 });
+    await relayCall(relay, mbp.apiKey, { to: devvm.towerId });
+    expect(relay.inFlight(mbp.towerId, devvm.towerId)).toEqual({ now: 0, max: 1 });
     // Queries are not message calls; another pair is another count.
     await relayCall(relay, mbp.apiKey, { to: devvm.towerId, kind: 'query', payload: queryPayload(T0) });
     expect(relay.inFlight(devvm.towerId, mbp.towerId)).toEqual({ now: 0, max: 0 });

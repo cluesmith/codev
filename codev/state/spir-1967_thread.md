@@ -256,3 +256,13 @@
   fault is never spent on a 503. Left as is: the state route's count-before-400 order, no
   CONNECT protocol on the stand-in's H2 client, per-account slugs.
 - Layer B rerun after these changes: 4/4 in 12.8 s.
+
+## 2026-11-26 — phase 2 review, iteration 3: both APPROVE
+
+- Codex APPROVE, no issues. Claude APPROVE, two minor helper points, both taken as polish
+  before the phase advances (as phase 1 did): a fault is now taken only on a call it can change
+  (`replay-statement` needs an earlier statement for the pair, so `wrong-secret` still applies
+  when it waits; of `answer-late`/`reset-stream`/`answer-delay` only the first that applies is
+  taken), and `resetInFlight()` restarts the per-pair maximum. **For phases 8/9:** call
+  `resetInFlight()` before the part of a test whose concurrency you assert.
+- Layer A: 58 tests, about 1.8 s, three runs green.
