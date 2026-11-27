@@ -10,8 +10,9 @@ gates:
     requested_at: '2026-11-26T01:46:47.703Z'
     approved_at: '2026-11-26T22:13:24.727Z'
   plan-approval:
-    status: pending
+    status: approved
     requested_at: '2026-11-26T22:36:06.790Z'
+    approved_at: '2026-11-27T04:41:50.958Z'
   pr:
     status: pending
   verify-approval:
@@ -31,7 +32,7 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-1995/codev/projects/1995-tower-collapse-the-four-per-wo/1995-plan-iter1-claude.txt
 started_at: '2026-11-26T01:28:07.091Z'
-updated_at: '2026-11-26T22:36:06.790Z'
+updated_at: '2026-11-27T04:41:50.959Z'
 context_refreshes:
   - boundary: enter:plan
     at: '2026-11-26T22:13:27.161Z'
