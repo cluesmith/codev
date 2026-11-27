@@ -1,0 +1,57 @@
+0124-test-suite-consolidation spir ['pr-ready'] [{"headRefName":"builder/spir-124-test-suite-consolidation","mergedAt":"2026-02-16T06:27:18Z","number":312,"state":"MERGED"}]
+1001-vscode-terminal-adapter-reconn pir ['pr'] {"mergedAt":"2026-06-06T06:14:40Z","number":1002,"state":"MERGED"}
+1011-agent-farm-inline-protocol-md- pir ['pr'] {"mergedAt":"2026-06-13T03:24:58Z","number":1015,"state":"MERGED"}
+1018-builder-worktree-write-guard-p pir ['pr'] {"mergedAt":"2026-06-24T03:30:54Z","number":1098,"state":"MERGED"}
+1047-tower-terminals-architects-bui pir ['pr'] {"mergedAt":"2026-06-15T23:40:49Z","number":1050,"state":"MERGED"}
+1053-vscode-typography-tokens-for-t pir ['pr'] {"mergedAt":"2026-06-18T04:57:30Z","number":1071,"state":"MERGED"}
+1055-vscode-edit-preview-side-delet pir ['pr'] {"mergedAt":"2026-07-02T02:22:44Z","number":1132,"state":"MERGED"}
+1060-vscode-next-file-previous-file pir ['pr'] {"mergedAt":"2026-06-17T21:36:24Z","number":1067,"state":"MERGED"}
+1066-vscode-sync-builders-sidebar-s pir ['pr'] {"mergedAt":"2026-06-18T22:52:54Z","number":1075,"state":"MERGED"}
+1074-vscode-align-backlog-issue-pre air ['pr'] [{"headRefName":"builder/air-1074","mergedAt":"2026-06-18T22:55:00Z","number":1076,"state":"MERGED"}]
+1096-vscode-codev-openissuebynumber pir ['pr'] {"mergedAt":"2026-06-30T03:03:41Z","number":1123,"state":"MERGED"}
+1099-docs-add-the-seven-spheres-of- air ['pr'] [{"headRefName":"builder/air-1099","mergedAt":"2026-06-24T03:25:41Z","number":1100,"state":"MERGED"}]
+1104-vscode-merge-architects-builde pir ['pr'] {"mergedAt":"2026-06-28T02:28:33Z","number":1106,"state":"MERGED"}
+1107-vscode-replace-top-of-window-q pir ['pr'] {"mergedAt":"2026-06-30T00:59:00Z","number":1121,"state":"MERGED"}
+1108-vscode-clicking-an-architect-g air ['pr'] [{"headRefName":"builder/air-1108","mergedAt":"2026-06-28T04:01:41Z","number":1109,"state":"MERGED"}]
+1118-consolidate-state-db-tables-in pir ['pr'] {"mergedAt":"2026-07-01T22:21:24Z","number":1127,"state":"MERGED"}
+1134-afx-whoami-ship-arch-init-comm spir ['pr', 'verify-approval'] [{"headRefName":"builder/spir-1134","mergedAt":"2026-07-18T04:52:00Z","number":1136,"state":"MERGED"}]
+1338-retire-gemini-cli-as-a-builder spir ['pr', 'verify-approval'] {"mergedAt":"2026-08-06T16:37:06Z","number":1342,"state":"MERGED"}
+1470-automatic-builder-context-refr spir ['pr', 'verify-approval'] {"mergedAt":"2026-08-19T18:34:55Z","number":1528,"state":"MERGED"}
+1482-f1-tower-vs-pty-dimension-dive pir ['pr'] {"mergedAt":"2026-09-04T15:16:56Z","number":1604,"state":"MERGED"}
+1595-agent-attention-states-working spir ['pr', 'verify-approval'] [{"headRefName":"builder/spir-1595","mergedAt":"2026-10-22T21:19:49Z","number":1854,"state":"MERGED"}]
+1789-tower-managed-codev-ide-server spir ['pr', 'verify-approval'] {"mergedAt":"2026-10-22T23:33:35Z","number":1806,"state":"MERGED"}
+403-af-send-typing-awareness spir ['pr'] [{"headRefName":"builder/spir-403-af-send-typing-awareness","mergedAt":"2026-02-17T19:36:21Z","number":413,"state":"MERGED"}]
+456-dashboard-statistics-tab-in-ri spir ['pr'] [{"headRefName":"builder/spir-456-dashboard-statistics-tab-in-ri","mergedAt":"2026-02-21T18:48:50Z","number":488,"state":"MERGED"}]
+462-add-spike-protocol-for-technic spir ['pr'] [{"headRefName":"builder/spir-462-add-spike-protocol-for-technic","mergedAt":"2026-02-21T17:39:09Z","number":480,"state":"MERGED"}]
+467-add-open-files-shells-section- spir ['pr'] [{"headRefName":"builder/spir-467-add-open-files-shells-section-","mergedAt":"2026-02-22T08:50:40Z","number":510,"state":"MERGED"}]
+468-af-rename-command-to-rename-cu spir ['pr'] [{"headRefName":"builder/spir-468-af-rename-command-to-rename-cu","mergedAt":"2026-02-21T18:24:17Z","number":487,"state":"MERGED"}]
+494-new-air-protocol-autonomous-im aspir ['pr'] [{"headRefName":"builder/aspir-494-new-air-protocol-autonomous-im","mergedAt":"2026-02-21T20:29:09Z","number":499,"state":"MERGED"}]
+495-add-collapse-expand-icons-to-w air ['pr'] [{"headRefName":"builder/air-495-add-collapse-expand-icons-to-w","mergedAt":"2026-02-21T21:10:55Z","number":503,"state":"MERGED"}]
+536-add-html-preview-support-in-af air ['pr'] [{"headRefName":"builder/air-536-add-html-preview-support-in-af","mergedAt":"2026-02-23T19:40:14Z","number":537,"state":"MERGED"}]
+579-dashboard-e2e-35-remaining-sch spir ['pr'] [{"headRefName":"builder/spir-579-dashboard-e2e-35-remaining-sch","mergedAt":"2026-02-28T20:16:56Z","number":582,"state":"MERGED"}]
+694-team-page-surface-review-block aspir ['pr', 'verify-approval'] [{"headRefName":"builder/aspir-694","mergedAt":"2026-04-23T02:56:44Z","number":695,"state":"MERGED"}]
+700-dashboard-backlog-show-assigne air ['pr'] [{"headRefName":"builder/air-700","mergedAt":"2026-04-26T02:55:12Z","number":701,"state":"MERGED"}]
+755-multi-architect-support-per-ar spir ['pr', 'verify-approval'] [{"headRefName":"builder/spir-755","mergedAt":"2026-05-18T20:14:14Z","number":757,"state":"MERGED"}]
+761-surface-multiple-architects-in spir ['pr', 'verify-approval'] [{"headRefName":"builder/spir-761","mergedAt":"2026-05-19T00:17:40Z","number":762,"state":"MERGED"}]
+832-multi-architect-conversation-r pir ['pr'] {"mergedAt":"2026-06-29T09:31:17Z","number":1116,"state":"MERGED"}
+841-feat-vscode-architects-tree-ad pir ['pr'] {"mergedAt":"2026-06-20T00:13:03Z","number":1082,"state":"MERGED"}
+846-remove-codev-afx-codev-agent-f air ['pr'] [{"headRefName":"builder/air-846","mergedAt":"2026-05-24T19:44:22Z","number":847,"state":"MERGED"}]
+bugfix-1024-vscode-cli-preflight-400ms-tim bugfix ['pr'] [{"headRefName":"builder/bugfix-1024","mergedAt":"2026-06-10T10:40:15Z","number":1026,"state":"MERGED"}]
+bugfix-1094-afx-send-detectcurrentbuilderi bugfix ['pr'] [{"headRefName":"builder/bugfix-1094","mergedAt":"2026-06-24T08:34:52Z","number":1095,"state":"MERGED"}]
+bugfix-1110-bugfix-artifact-canvas-test-su bugfix ['pr'] [{"headRefName":"builder/bugfix-1110","mergedAt":"2026-06-28T06:27:42Z","number":1111,"state":"MERGED"}]
+bugfix-1113-consult-type-integration-no-wa bugfix ['pr'] [{"headRefName":"builder/bugfix-1113","mergedAt":"2026-06-29T05:02:56Z","number":1114,"state":"MERGED"}]
+bugfix-1122-vscode-align-editor-comments-a bugfix ['pr'] [{"headRefName":"builder/bugfix-1122","mergedAt":"2026-07-01T23:57:22Z","number":1130,"state":"MERGED"}]
+bugfix-1124-tower-sse-thundering-herd-caus bugfix ['pr'] [{"headRefName":"builder/bugfix-1124","mergedAt":"2026-07-01T03:25:09Z","number":1126,"state":"MERGED"}]
+bugfix-1142-tower-cron-conditions-can-t-se bugfix ['pr'] [{"headRefName":"builder/bugfix-1142","mergedAt":"2026-08-02T00:15:44Z","number":1143,"state":"MERGED"}]
+bugfix-1219-tower-sanitize-inherited-claud bugfix ['pr'] [{"headRefName":"builder/bugfix-1219","mergedAt":"2026-09-07T08:55:14Z","number":1626,"state":"MERGED"}]
+bugfix-1333-afx-send-builder-non-spawning- bugfix ['pr'] [{"headRefName":"builder/bugfix-1333","mergedAt":"2026-08-05T04:28:13Z","number":1334,"state":"MERGED"}]
+bugfix-1502-ci-artifact-canvas-browser-tes bugfix ['pr'] [{"headRefName":"builder/bugfix-1502","mergedAt":"2026-08-18T04:32:27Z","number":1507,"state":"MERGED"}]
+bugfix-1519-dashboard-e2e-red-on-main-sinc bugfix ['pr'] [{"headRefName":"builder/bugfix-1519","mergedAt":"2026-08-18T10:58:09Z","number":1520,"state":"MERGED"}]
+bugfix-1567-afx-send-delivery-side-silent- bugfix ['pr'] [{"headRefName":"builder/bugfix-1567","mergedAt":"2026-09-08T10:53:19Z","number":1644,"state":"MERGED"}]
+bugfix-1645-tower-overview-cache-burns-the bugfix ['pr'] {"mergedAt":"2026-09-08T10:53:38Z","number":1652,"state":"MERGED"}
+bugfix-1649-consult-the-claude-reviewer-la bugfix ['pr'] {"mergedAt":"2026-09-09T05:31:17Z","number":1659,"state":"MERGED"}
+bugfix-1664-mailbox-gate-a-recipient-that- bugfix ['pr'] {"mergedAt":"2026-09-09T22:07:30Z","number":1666,"state":"MERGED"}
+bugfix-887-porch-bugfix-should-have-a-pr- bugfix ['pr'] [{"headRefName":"builder/bugfix-887","mergedAt":"2026-05-27T14:33:42Z","number":888,"state":"MERGED"}]
+bugfix-895-vscode-uppercase-area-group-he bugfix ['pr'] [{"headRefName":"builder/bugfix-895","mergedAt":"2026-05-28T01:03:13Z","number":897,"state":"MERGED"}]
+671-hermes-consult-optional-backend spir ['pr'] no pr_history; merged as PR #670 (feature-hermes-consult-backend), 2026-04-16
+secfix-1-tower-auth-hardening pir ['pr'] PR #1421 MERGED 2026-08-18
