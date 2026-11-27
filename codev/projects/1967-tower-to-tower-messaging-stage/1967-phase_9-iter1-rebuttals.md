@@ -7,9 +7,7 @@ updated my own untracked state file just after starting the two lanes. Nothing a
 reads changed. It was still against the standing order not to touch the tree while lanes
 run, and I have not done it since.
 
-## codex
-
-### 1. The route trims the message before the sender sees it — not changed
+## Disputed: the route trims the message before the sender sees it (codex 1)
 
 `handleSend` has trimmed every message, local or remote, since before this spec
 (`body.message.trim()`). That trim decides what "the message" is for every `afx send`,
@@ -25,7 +23,7 @@ Keeping it only for remote sends would make the same command type different text
 depending on where the recipient is. Changing it for all sends changes every local
 `afx send` and belongs in its own issue.
 
-### 2. The 48 KiB limit is checked before the sender's ordered checks — changed
+## Changed: the 48 KiB limit was checked before the sender's ordered checks (codex 2)
 
 This was right. `/api/send` and `afx send` both refused a body over 48 KiB before the
 sender ran its checks. So an oversized send with remote messaging off was told "too large"
@@ -45,7 +43,7 @@ before normalising it, so a body that fits once CRLF becomes LF was refused.
   - an over-large body to this Tower's own name is `MESSAGE_TOO_LARGE`;
   - a local over-large body is still refused by the CLI with no call.
 
-### 3. The headline path never shows delivery through the gate — changed
+## Changed: the headline path never showed delivery through the gate (codex 3)
 
 Also right. The architects were inert terminals, so the headline case showed acceptance
 and the frame, not delivery. The case now uses a `live` workspace on each Tower whose
@@ -61,9 +59,7 @@ the launch command. The test draws a clean claude composer before each send.
 The other cases keep inert recipients: what they test is the sender and the outbox, not the
 gate.
 
-## claude (APPROVE; the comments taken or answered)
-
-### 1. The receiving Tower's `detail` is never printed — changed
+## Changed: the receiving Tower's `detail` was never printed (claude 1)
 
 Spec section on stage 3 risks: "R's `detail` text reaches the sending agent's context
 through the CLI's output. Between Towers of one owner that is intended." This version's
@@ -79,7 +75,7 @@ receiving Tower sends no `detail`, but a later one may, and it was being dropped
   (devvm says: …)` for a refusal, and `[info] devvm says: …` after a delivery or a hold.
 - Tests in `tower-routes.test.ts`, `tower-client-send.test.ts` and `peer-send-cli.test.ts`.
 
-### 2. An outbox rejection reaches the caller as a 500 — not changed
+## Disputed: an outbox rejection reaches the caller as a 500 (claude 2)
 
 `Outbox.enqueue` rejects only when the outbox has stopped (Tower is shutting down) or when
 its own look at the queue threw. Either way the row is stored and held, and `afx inbox`
@@ -87,13 +83,13 @@ lists it. But this Tower cannot promise it will be sent: a look that threw may t
 Answering `held` would hide a fault behind a success-shaped answer. The project's rule is to
 fail loudly, so the caller gets the error, and the held row is there to see and dismiss.
 
-### 3. Phases 8 and 9's readings are not yet in the review document — not changed now
+## For the review phase: phases 8 and 9's readings are not yet in the review document (claude 3)
 
 They are in the thread, phase by phase, written to be copied. The review document is
 written in the review phase, as its header says. Phase 9's readings, and the two changes
 above, go there with phase 8's.
 
-### 4. "2 held message(s)" — changed
+## Changed: "2 held message(s)" (claude 4)
 
 `1 held message for devvm goes before it.` and `2 held messages for devvm go before it.`,
 with tests for both.
