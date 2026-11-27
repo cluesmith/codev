@@ -424,8 +424,8 @@ describe('how each answer resolves the row (section 6)', () => {
   });
 
   it('the table is total for a message, and has no place for a discovery answer', () => {
-    expect(decide(A.delivered(), false)).toEqual({ act: 'accept', heldReason: null });
-    expect(decide(A.held('busy'), true)).toEqual({ act: 'accept', heldReason: 'busy' });
+    expect(decide(A.delivered(), false)).toEqual({ act: 'accept' });
+    expect(decide(A.held('busy'), true)).toEqual({ act: 'accept' });
     const answered = read(
       { answered: true, status: 200, contentType: 'application/json', outcomeHeader: 'answered', body: utf8('{"v":1,"outcome":"answered","truncated":false,"addresses":[]}') },
       true,
@@ -695,6 +695,17 @@ describe('a queue rebuilt from its durable rows', () => {
     expect(f.calls.slice(1).map((c) => c.request.requestId)).toEqual(rows.map((r) => r.messageId));
     expect(f.maxInFlight).toBe(1);
     expect(rows.map((r) => f.row(r.messageId).state)).toEqual(['accepted', 'accepted', 'accepted']);
+  });
+
+  it('a send queued after the outbox stopped is rejected; its row stays held and goes once the outbox runs', async () => {
+    f.outbox.stop();
+    const row = f.insert();
+    await expect(f.outbox.enqueue(row)).rejects.toThrow(/after the outbox stopped/);
+    expect(f.calls).toHaveLength(0);
+    f.answers(DEVVM, A.delivered());
+    f.outbox.start();
+    await f.settle();
+    expect(f.row(row.messageId).state).toBe('accepted');
   });
 
   it('a head whose retry is not yet due waits out what is left of it', async () => {

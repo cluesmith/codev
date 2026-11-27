@@ -894,3 +894,12 @@ Surprises:
     route the sender's identity: workspace, agent, address and whether it is a builder.
   - Phase 11 adds dismissing an outbox row: refused while its call is in flight, and any
     waiting sender settled.
+- **Phase 8 review (iter 1): codex APPROVE (HIGH), claude APPROVE (HIGH).** Response:
+  `1967-phase_8-iter1-rebuttals.md`.
+  - **Taken (claude 1).** The unused `heldReason` is gone from `decide()`.
+  - **Taken (claude 3).** `enqueue` on a stopped outbox now rejects instead of throwing, with
+    a test.
+  - **Carried to phase 11 (claude 2).** `afx inbox` shows why a peer's queue is paused, worked
+    out from this Tower's state. A blocked look writes nothing to the row.
+  - **Carried to phase 11 (claude 4).** `afx peer log` shows a discarded answer as what the
+    call got. The row shows the discard (`registration-changed`).

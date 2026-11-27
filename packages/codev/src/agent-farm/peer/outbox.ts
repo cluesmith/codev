@@ -44,7 +44,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { PEER_MESSAGE_LIFETIME_MS, type PeerHeldReason } from '@cluesmith/codev-types';
+import { PEER_MESSAGE_LIFETIME_MS } from '@cluesmith/codev-types';
 import { parseAddress } from '@cluesmith/codev-sdk/address';
 import { LISTING_HOLDING_INTERVAL_MS, UNREF_TIMERS, type CloudClient, type CloudTimers } from './cloud-client.js';
 import type { ClassifiedAnswer } from './contract.js';
@@ -142,7 +142,7 @@ function runAnswerOf(answer: ClassifiedAnswer): PeerRunAnswer | null | 'none' {
 
 /** What one answer does to the row it answers (section 6, "How S resolves its row"). */
 type Decision =
-  | { act: 'accept'; heldReason: PeerHeldReason | null }
+  | { act: 'accept' }
   | { act: 'refuse' }
   /** Still held; retried after `waitMs`, or the next back-off interval when `null`. */
   | { act: 'hold'; waitMs: number | null };
@@ -155,9 +155,8 @@ type Decision =
 export function decide(answer: ClassifiedAnswer, fresh: boolean): Decision {
   switch (answer.outcome) {
     case 'delivered':
-      return { act: 'accept', heldReason: null };
     case 'held':
-      return { act: 'accept', heldReason: answer.reason as PeerHeldReason };
+      return { act: 'accept' };
     case 'refused': {
       if (answer.reason !== 'rate-limited' || fresh) return { act: 'refuse' };
       const after = answer.answer !== null && 'retryAfterSec' in answer.answer ? answer.answer.retryAfterSec : undefined;
@@ -276,11 +275,12 @@ export class Outbox {
 
   /**
    * Queue a row the sender has just persisted. Resolves with its first answer, or at once
-   * as held when held mail for the same peer is ahead of it. Rejects only when the attempt
-   * itself failed in this Tower (an unreadable registration), which is the sender's error.
+   * as held when held mail for the same peer is ahead of it. Rejects when the attempt itself
+   * failed in this Tower (an unreadable registration), which is the sender's error, or when
+   * the outbox has stopped; either way the row stays held, and is sent once the outbox runs.
    */
   enqueue(row: PeerOutboxRow): Promise<FirstAnswer> {
-    if (this.stopped) throw new Error('outbox: a message was queued after the outbox stopped');
+    if (this.stopped) return Promise.reject(new Error('outbox: a message was queued after the outbox stopped'));
     const queue = this.queueFor(row.peerTowerId);
     const first = new Promise<FirstAnswer>((resolve, reject) => queue.waiters.set(row.messageId, { resolve, reject }));
     const ahead = listHeldOutbox(this.deps.db(), row.peerTowerId).filter((r) => r.seq < row.seq);
