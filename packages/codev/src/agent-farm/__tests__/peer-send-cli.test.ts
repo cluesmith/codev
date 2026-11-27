@@ -44,14 +44,19 @@ function json(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-/** A Tower, as a transport: `/health` is healthy, and the routes answer as given. */
+/**
+ * A Tower of this version, as a transport: its liveness route (#1977) answers, and the routes
+ * answer as given.
+ */
 function towerAnswering(routes: { send: (to: string, message: string) => Response; peerTowers?: () => Response }): string[] {
   const paths: string[] = [];
   transport.fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const { pathname } = new URL(String(input));
     paths.push(pathname);
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as { to?: string; message?: string }) : undefined;
-    if (pathname === '/health') return json(200, { status: 'healthy' });
+    if (pathname === '/health/live') {
+      return json(200, { status: 'healthy', version: '3.4.0', startedAt: '2026-11-27T00:00:00.000Z', schemaVersion: 21 });
+    }
     if (pathname === '/api/send') return routes.send(body?.to ?? '', body?.message ?? '');
     if (pathname === '/api/peer/towers' && routes.peerTowers) return routes.peerTowers();
     return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain' } });
@@ -334,7 +339,7 @@ describe('Spec 1967: afx send to an agent on another Tower', () => {
         '[error] Malformed address: a local address has at most a workspace before `architect`; ' +
           '`devvm` is one of your Towers, so write afx://devvm/codev:architect:local',
       ]);
-      expect(paths).toEqual(['/health', '/api/send', '/api/peer/towers']);
+      expect(paths).toEqual(['/health/live', '/api/send', '/api/peer/towers']);
     });
 
     it("counts this Tower's own name as one of my Towers", async () => {
