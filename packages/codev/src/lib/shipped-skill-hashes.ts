@@ -111,6 +111,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
   '.claude/skills/generate-image': [
     '02aaa9f15f712ded2aefabd6c7499b61aed75b875d100086d1e9bed8d187a1d8',
     '6f7a67a416e1aeac78b36dddf16c8f7cb81c491f0f5c34b2b40cbaa149bcda44',
+    '7fb6c4fe60b721ab3930684b754c93c72e76803cd288c2989bdce317b860da22',
     '8008d4039b2745f28f953d6e058c304fe613caa35a3fc152682ee4d5bfd79791',
     'ba52f9b7f493038e167b20d0b07627dc3b91f07742a402000bd20666acef7d09',
     'd4a0baf78238ea44627e49cf4f6c1a2d0f6e32ea1f53430eb3385fa3a748c4eb',
@@ -221,6 +222,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, readonly string[]> = {
   '.codex/skills/generate-image': [
     '02aaa9f15f712ded2aefabd6c7499b61aed75b875d100086d1e9bed8d187a1d8',
     '6f7a67a416e1aeac78b36dddf16c8f7cb81c491f0f5c34b2b40cbaa149bcda44',
+    '7fb6c4fe60b721ab3930684b754c93c72e76803cd288c2989bdce317b860da22',
     'ba52f9b7f493038e167b20d0b07627dc3b91f07742a402000bd20666acef7d09',
     'd4a0baf78238ea44627e49cf4f6c1a2d0f6e32ea1f53430eb3385fa3a748c4eb',
   ],
